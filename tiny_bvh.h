@@ -823,6 +823,7 @@ void BVH::BLASInstance::Update()
 void BVH::BuildTLAS( const bvhaabb* aabbs, const unsigned aabbCount )
 {
 	// the aabb array must be cacheline aligned.
+	FATAL_ERROR_IF( aabbCount == 0, "BVH::BuildTLAS( .. ), aabbCount == 0." );
 	FATAL_ERROR_IF( ((long long)(void*)aabbs & 31) != 0, "BVH::Build( bvhaabb* ), array not cacheline aligned." );
 	// take the array and process it
 	fragment = (Fragment*)aabbs;
@@ -833,6 +834,7 @@ void BVH::BuildTLAS( const bvhaabb* aabbs, const unsigned aabbCount )
 
 void BVH::BuildTLAS( const BLASInstance* bvhs, const unsigned instCount )
 {
+	FATAL_ERROR_IF( instCount == 0, "BVH::BuildTLAS( .. ), instCount == 0." );
 	if (!fragment) fragment = (Fragment*)AlignedAlloc( instCount );
 	else FATAL_ERROR_IF( instCount != triCount, "BVH::BuildTLAS( .. ), blas count changed." );
 	// copy relevant data from instance array
@@ -852,6 +854,7 @@ void BVH::BuildTLAS( const BLASInstance* bvhs, const unsigned instCount )
 // your application (e.g., when you need to trace few rays).
 void BVH::BuildQuick( const bvhvec4* vertices, const unsigned primCount )
 {
+	FATAL_ERROR_IF( primCount == 0, "BVH::BuildQuick( .. ), primCount == 0." );
 	// allocate on first build
 	const unsigned spaceNeeded = primCount * 2; // upper limit
 	if (allocatedBVHNodes < spaceNeeded)
@@ -938,6 +941,7 @@ void BVH::BuildQuick( const bvhvec4* vertices, const unsigned primCount )
 // format after construction.
 void BVH::Build( const bvhvec4* vertices, const unsigned primCount )
 {
+	FATAL_ERROR_IF( primCount == 0, "BVH::Build( .. ), primCount == 0." );
 	// allocate on first build
 	const unsigned spaceNeeded = primCount * 2; // upper limit
 	if (allocatedBVHNodes < spaceNeeded)
@@ -1083,6 +1087,7 @@ void BVH::Build( const bvhvec4* vertices, const unsigned primCount )
 // primarily useful for static geometry.
 void BVH::BuildHQ( const bvhvec4* vertices, const unsigned primCount )
 {
+	FATAL_ERROR_IF( primCount == 0, "BVH::BuildHQ( .. ), primCount == 0." );
 	// allocate on first build
 	const unsigned slack = primCount >> 2; // for split prims
 	const unsigned spaceNeeded = primCount * 3;
@@ -2932,6 +2937,7 @@ inline float halfArea( const __m256& a /* a contains aabb itself, with min.xyz n
 #endif
 void BVH::BuildAVX( const bvhvec4* vertices, const unsigned primCount )
 {
+	FATAL_ERROR_IF( primCount == 0, "BVH::BuildAVX( .. ), primCount == 0." );
 	int test = BVHBINS;
 	if (test != 8) assert( false ); // AVX builders require BVHBINS == 8.
 	assert( ((long long)vertices & 63) == 0 ); // buffer must be cacheline-aligned
@@ -4015,6 +4021,7 @@ inline float halfArea( const float32x4x2_t& a /* a contains aabb itself, with mi
 
 void BVH::BuildNEON( const bvhvec4* vertices, const unsigned primCount )
 {
+	FATAL_ERROR_IF( primCount == 0, "BVH::BuildNEON( .. ), primCount == 0." );
 	int test = BVHBINS;
 	if (test != 8) assert( false ); // AVX builders require BVHBINS == 8.
 	assert( ((long long)vertices & 63) == 0 ); // buffer must be cacheline-aligned
@@ -4275,6 +4282,7 @@ int BVH::Intersect_AltSoA( Ray& ray ) const
 void BVH::BuildEx( const bvhdbl3* vertices, const unsigned primCount )
 {
 	// allocate on first build
+	FATAL_ERROR_IF( primCount == 0, "BVH::BuildEx( .. ), primCount == 0." );
 	const unsigned spaceNeeded = primCount * 2; // upper limit
 	if (allocatedBVHExNodes < spaceNeeded)
 	{
