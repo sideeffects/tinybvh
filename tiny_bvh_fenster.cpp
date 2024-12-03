@@ -3,8 +3,6 @@
 #define SCRHEIGHT 600
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
-// #define USE_EMBREE // enable to verify correct implementation, win64 only for now.
-#define TEST_DOUBLE // enable to verify correct implementation of double-precision path.
 #define LOADSCENE
 
 #define TINYBVH_IMPLEMENTATION
@@ -13,16 +11,7 @@
 
 using namespace tinybvh;
 
-#if defined(USE_EMBREE)
-#include "embree4/rtcore.h"
-static RTCScene embreeScene;
-void embreeError( void* userPtr, enum RTCError error, const char* str )
-{
-	printf( "error %d: %s\n", error, str );
-}
-#else
 BVH bvh;
-#endif
 
 #ifdef LOADSCENE
 bvhvec4* triangles = 0;
@@ -83,35 +72,6 @@ void Init()
 	sphere_flake( 0, 0, 0, 1.5f );
 #endif
 
-#if defined USE_EMBREE
-
-	RTCDevice embreeDevice = rtcNewDevice( NULL );
-	rtcSetDeviceErrorFunction( embreeDevice, embreeError, NULL );
-	embreeScene = rtcNewScene( embreeDevice );
-	RTCGeometry embreeGeom = rtcNewGeometry( embreeDevice, RTC_GEOMETRY_TYPE_TRIANGLE );
-	float* vertices = (float*)rtcSetNewGeometryBuffer( embreeGeom, RTC_BUFFER_TYPE_VERTEX, 0, RTC_FORMAT_FLOAT3, 3 * sizeof( float ), verts );
-	unsigned* indices = (unsigned*)rtcSetNewGeometryBuffer( embreeGeom, RTC_BUFFER_TYPE_INDEX, 0, RTC_FORMAT_UINT3, 3 * sizeof( unsigned ), verts / 3 );
-	for (int i = 0; i < verts; i++)
-	{
-		vertices[i * 3 + 0] = triangles[i].x, vertices[i * 3 + 1] = triangles[i].y;
-		vertices[i * 3 + 2] = triangles[i].z, indices[i] = i; // Note: not using shared vertices.
-	}
-	rtcCommitGeometry( embreeGeom );
-	rtcAttachGeometry( embreeScene, embreeGeom );
-	rtcReleaseGeometry( embreeGeom );
-	rtcCommitScene( embreeScene );
-
-#elif defined TEST_DOUBLE
-
-	triEx = (tinybvh::bvhdbl3*)malloc64( verts * sizeof(  tinybvh::bvhdbl3 ));
-	for( int i = 0; i < verts; i++ ) 
-		triEx[i].x = (double)triangles[i].x,
-		triEx[i].y = (double)triangles[i].y,
-		triEx[i].z = (double)triangles[i].z;
-	bvh.BuildEx( triEx, verts / 3 );
-
-#else
-
 	// build a BVH over the scene
 #if defined(BVH_USEAVX)
 	bvh.BuildAVX( triangles, verts / 3 );
@@ -119,8 +79,6 @@ void Init()
 	bvh.BuildNEON( triangles, verts / 3 );
 #else
 	bvh.Build( triangles, verts / 3 );
-#endif
-
 #endif
 
 	// load camera position / direction from file
@@ -132,12 +90,10 @@ void Init()
 	t.close();
 }
 
-
 void UpdateCamera(float delta_time_s, fenster& f)
 {
 	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) );
 	bvhvec3 up = 0.8f * cross( view, right );
-	int64_t new_fenster_time = fenster_time();
 
 	// get camera controls.
 
@@ -179,27 +135,7 @@ void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 	}
 
 	// trace primary rays
-#if defined TEST_DOUBLE
-	for (int i = 0; i < N; i++)
-	{
-		RayEx r( rays[i].O, rays[i].D );
-		depths[i] = bvh.IntersectEx( r ) & 127; 
-	}
-#elif !defined USE_EMBREE
 	for (int i = 0; i < N; i++) depths[i] = bvh.Intersect( rays[i] );
-#else
-	struct RTCRayHit rayhit;
-	for (int i = 0; i < N; i++)
-	{
-		rayhit.ray.org_x = rays[i].O.x, rayhit.ray.org_y = rays[i].O.y, rayhit.ray.org_z = rays[i].O.z;
-		rayhit.ray.dir_x = rays[i].D.x, rayhit.ray.dir_y = rays[i].D.y, rayhit.ray.dir_z = rays[i].D.z;
-		rayhit.ray.tnear = 0, rayhit.ray.tfar = rays[i].hit.t, rayhit.ray.mask = -1, rayhit.ray.flags = 0;
-		rayhit.hit.geomID = RTC_INVALID_GEOMETRY_ID, rayhit.hit.instID[0] = RTC_INVALID_GEOMETRY_ID;
-		rtcIntersect1( embreeScene, &rayhit );
-		rays[i].hit.u = rayhit.hit.u, rays[i].hit.u = rayhit.hit.v;
-		rays[i].hit.prim = rayhit.hit.primID, rays[i].hit.t = rayhit.ray.tfar;
-	}
-#endif
 
 	// visualize result
 	const bvhvec3 L = normalize( bvhvec3( 1, 2, 3 ) );
@@ -213,9 +149,9 @@ void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 			bvhvec3 v2 = triangles[primIdx * 3 + 2];
 			bvhvec3 N = normalize( cross( v1 - v0, v2 - v0 ) );
 			int c = (int)(255.9f * fabs( dot( N, L ) ));
-			// buf[pixel_x + pixel_y * SCRWIDTH] = c + (c << 8) + (c << 16);
+			buf[pixel_x + pixel_y * SCRWIDTH] = c + (c << 8) + (c << 16);
 			// buf[pixel_x + pixel_y * SCRWIDTH] = (primIdx * 0xdeece66d + 0xb) & 0xFFFFFF; // color is hashed primitive index
-			buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
+			// buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
 		}
 	}
 	tinybvh::free64( rays );
