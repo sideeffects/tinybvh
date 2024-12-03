@@ -342,10 +342,10 @@ inline bvhdbl3 operator+( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3(
 inline bvhdbl3 operator-( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( a.x - b.x, a.y - b.y, a.z - b.z ); }
 inline void operator+=( bvhdbl3& a, const bvhdbl3& b ) { a.x += b.x; a.y += b.y; a.z += b.z; }
 inline bvhdbl3 operator*( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( a.x * b.x, a.y * b.y, a.z * b.z ); }
-inline bvhdbl3 operator*( const bvhdbl3& a, float b ) { return bvhdbl3( a.x * b, a.y * b, a.z * b ); }
-inline bvhdbl3 operator*( float b, const bvhdbl3& a ) { return bvhdbl3( b * a.x, b * a.y, b * a.z ); }
-inline bvhdbl3 operator/( float b, const bvhdbl3& a ) { return bvhdbl3( b / a.x, b / a.y, b / a.z ); }
-inline bvhdbl3 operator*=( bvhdbl3& a, const float b ) { return bvhdbl3( a.x * b, a.y * b, a.z * b ); }
+inline bvhdbl3 operator*( const bvhdbl3& a, double b ) { return bvhdbl3( a.x * b, a.y * b, a.z * b ); }
+inline bvhdbl3 operator*( double b, const bvhdbl3& a ) { return bvhdbl3( b * a.x, b * a.y, b * a.z ); }
+inline bvhdbl3 operator/( double b, const bvhdbl3& a ) { return bvhdbl3( b / a.x, b / a.y, b / a.z ); }
+inline bvhdbl3 operator*=( bvhdbl3& a, const double b ) { return bvhdbl3( a.x * b, a.y * b, a.z * b ); }
 
 static inline bvhdbl3 cross( const bvhdbl3& a, const bvhdbl3& b )
 {
@@ -4317,7 +4317,8 @@ void BVH::BuildEx( const bvhdbl3* vertices, const unsigned primCount )
 	}
 	// subdivide recursively
 	unsigned task[256], taskCount = 0, nodeIdx = 0;
-	bvhdbl3 minDim = (root.aabbMax - root.aabbMin) * 1e-20, bestLMin = 0, bestLMax = 0, bestRMin = 0, bestRMax = 0;
+	bvhdbl3 minDim = (root.aabbMax - root.aabbMin) * 1e-20;
+	bvhdbl3 bestLMin = 0, bestLMax = 0, bestRMin = 0, bestRMax = 0;
 	while (1)
 	{
 		while (1)
