@@ -4434,7 +4434,7 @@ int BVH::IntersectEx( RayEx& ray, const BVHLayout layout ) const
 		FATAL_ERROR_IF( true, "BVH::IntersectEx( .. , ? ), unsupported double-precision bvh layout." );
 		break;
 	}
-	return 0;		
+	return 0;
 }
 
 // Traverse the default BVH layout, double-precision.
@@ -4447,7 +4447,7 @@ int BVH::IntersectEx_WaldDouble( RayEx& ray ) const
 		steps++;
 		if (node->isLeaf())
 		{
-			for (unsigned i = 0; i < node->triCount; i++) 
+			for (unsigned i = 0; i < node->triCount; i++)
 			{
 				const unsigned long long int idx = triIdxEx[node->leftFirst + i];
 				const unsigned long long int vertIdx = idx * 3;
