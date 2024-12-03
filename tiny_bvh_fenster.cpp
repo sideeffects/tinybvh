@@ -15,7 +15,6 @@ BVH bvh;
 
 #ifdef LOADSCENE
 bvhvec4* triangles = 0;
-bvhdbl3* triEx = 0;
 const char scene[] = "cryteksponza.bin";
 #else
 ALIGNED( 16 ) bvhvec4 triangles[259 /* level 3 */ * 6 * 2 * 49 * 3]{};
@@ -96,7 +95,6 @@ void UpdateCamera(float delta_time_s, fenster& f)
 	bvhvec3 up = 0.8f * cross( view, right );
 
 	// get camera controls.
-
 	if (f.keys['A']) eye += right * -1.0f * delta_time_s * 10;
 	if (f.keys['D']) eye += right * delta_time_s * 10;
 	if (f.keys['W']) eye += view * delta_time_s * 10;
@@ -141,7 +139,7 @@ void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 	const bvhvec3 L = normalize( bvhvec3( 1, 2, 3 ) );
 	for (int i = 0, ty = 0; ty < SCRHEIGHT / 4; ty++) for (int tx = 0; tx < SCRWIDTH / 4; tx++)
 	{
-		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++, i++) // if (rays[i].hit.t < 10000)
+		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++, i++) if (rays[i].hit.t < 10000)
 		{
 			int pixel_x = tx * 4 + x, pixel_y = ty * 4 + y, primIdx = rays[i].hit.prim;
 			bvhvec3 v0 = triangles[primIdx * 3 + 0];
