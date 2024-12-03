@@ -12,6 +12,7 @@ using namespace tinybvh;
 // Application variables
 static BVH bvh;
 static bvhvec4* triangles = 0;
+static bvhvec3* triColor = 0;
 static int verts = 0, frameIdx = 0, spp = 0;
 static bvhvec3 accumulator[SCRWIDTH * SCRHEIGHT];
 
@@ -32,7 +33,7 @@ bvhvec3 DiffuseReflection( const bvhvec3 N, unsigned& seed )
 	{
 		R = bvhvec3( RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1 );
 	} while (dot( R, R ) > 1);
-	return normalize( dot( R, N ) < 0 ? R : (R * -1.0f ) );
+	return normalize( dot( R, N ) < 0 ? R : (R * -1.0f) );
 }
 
 // Application init
@@ -40,36 +41,45 @@ void Init()
 {
 	// load raw vertex data for Crytek's Sponza
 	std::fstream s{ "./testdata/cryteksponza.bin", s.binary | s.in };
-	s.seekp( 0 );
 	s.read( (char*)&verts, 4 );
 	printf( "Loading triangle data (%i tris).\n", verts );
 	verts *= 3, triangles = (bvhvec4*)malloc64( verts * 16 );
 	s.read( (char*)triangles, verts * 16 );
 	s.close();
+	// extract triangle colors
+	unsigned triCount = verts / 3;
+	triColor = (bvhvec3*)malloc64( triCount * 12 );
+	for (unsigned c, i = 0; i < triCount; i++)
+		c = *(unsigned*)&triangles[i * 3 + 0].w,
+		triColor[i] = bvhvec3( c & 255, (c >> 8) & 255, c >> 16 ) * (1 / 255.0f);
+	// build bvh
 	bvh.BuildAVX( triangles, verts / 3 );
+	bvh.Convert( BVH::WALD_32BYTE, BVH::BASIC_BVH4 );
+	bvh.Convert( BVH::BASIC_BVH4, BVH::BVH4_AFRA );
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
 	if (!t.is_open()) return;
-	t.seekp( 0 );
 	t.read( (char*)&eye, sizeof( eye ) );
 	t.read( (char*)&view, sizeof( view ) );
 	t.close();
 }
 
 // Keyboard handling
-bool UpdateCamera(float delta_time_s, fenster& f)
+bool UpdateCamera( float delta_time_s, fenster& f )
 {
 	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) ), up = 0.8f * cross( view, right );
 	// get camera controls.
 	bool moved = false;
-	if (f.keys['A']) eye += right * -1.0f * delta_time_s * 100, moved = true;
-	if (f.keys['D']) eye += right * delta_time_s * 100, moved = true;
-	if (f.keys['W']) eye += view * delta_time_s * 100, moved = true;
-	if (f.keys['S']) eye += view * -1.0f * delta_time_s * 100, moved = true;
-	if (f.keys['R']) eye += up * delta_time_s * 200, moved = true;
-	if (f.keys['F']) eye += up * -1.0f * delta_time_s * 200, moved = true;
+	if (f.keys['A']) eye += right * -1.0f * delta_time_s * 10, moved = true;
+	if (f.keys['D']) eye += right * delta_time_s * 10, moved = true;
+	if (f.keys['W']) eye += view * delta_time_s * 10, moved = true;
+	if (f.keys['S']) eye += view * -1.0f * delta_time_s * 10, moved = true;
+	if (f.keys['R']) eye += up * delta_time_s * 20, moved = true;
+	if (f.keys['F']) eye += up * -1.0f * delta_time_s * 20, moved = true;
 	if (f.keys[20]) view = normalize( view + right * -1.0f * delta_time_s ), moved = true;
 	if (f.keys[19]) view = normalize( view + right * delta_time_s ), moved = true;
+	if (f.keys[17]) view = normalize( view + up * -1.0f * delta_time_s ), moved = true;
+	if (f.keys[18]) view = normalize( view + up * delta_time_s ), moved = true;
 	// recalculate right, up
 	right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) ), up = 0.8f * cross( view, right );
 	bvhvec3 C = eye + 1.2f * view;
@@ -81,8 +91,8 @@ bool UpdateCamera(float delta_time_s, fenster& f)
 bvhvec3 Trace( Ray& ray, unsigned& seed )
 {
 	// find primary intersection
-	bvh.Intersect( ray );
-	if (ray.hit.t == 1e30f) return bvhvec3( 0 ); // hit nothing
+	bvh.Intersect( ray, BVH::BVH4_AFRA );
+	if (ray.hit.t == 1e30f) return bvhvec3( 0.6f, 0.7f, 2 ); // hit nothing
 	bvhvec3 I = ray.O + ray.hit.t * ray.D;
 	// get normal at intersection point
 	unsigned primIdx = ray.hit.prim;
@@ -92,16 +102,16 @@ bvhvec3 Trace( Ray& ray, unsigned& seed )
 	bvhvec3 N = normalize( cross( v1 - v0, v0 - v2 ) );
 	// shoot AO ray
 	bvhvec3 R = DiffuseReflection( N, seed );
-	Ray aoRay( I + R * 0.01f, R, 100 );
-	bvh.Intersect( aoRay );
-	return bvhvec3( aoRay.hit.t / 100 );
+	Ray aoRay( I + R * 0.001f, R, 10 );
+	bvh.Intersect( aoRay, BVH::BVH4_AFRA );
+	return triColor[primIdx] * bvhvec3( aoRay.hit.t / 10 );
 }
 
 // Application Tick
-void Tick(float delta_time_s, fenster & f, uint32_t* buf)
+void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 {
 	// handle user input and update camera
-	if (frameIdx++ == 0 || UpdateCamera(delta_time_s, f))
+	if (frameIdx++ == 0 || UpdateCamera( delta_time_s, f ))
 	{
 		memset( accumulator, 0, 800 * 600 * sizeof( bvhvec3 ) );
 		spp = 1;
@@ -111,7 +121,7 @@ void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 	const int xtiles = SCRWIDTH / 4, ytiles = SCRHEIGHT / 4, tiles = xtiles * ytiles;
 	const float scale = 1.0f / spp;
 #pragma omp parallel for schedule(dynamic)
-	for( int tile = 0; tile < tiles; tile++ )
+	for (int tile = 0; tile < tiles; tile++)
 	{
 		const int tx = tile % xtiles, ty = tile / xtiles;
 		unsigned seed = (tile + 17) * 171717 + frameIdx * 1023;
@@ -142,7 +152,6 @@ void Shutdown()
 {
 	// save camera position / direction to file
 	std::fstream s = std::fstream{ "camera.bin", s.binary | s.out };
-	s.seekp( 0 );
 	s.write( (char*)&eye, sizeof( eye ) );
 	s.write( (char*)&view, sizeof( view ) );
 	s.close();

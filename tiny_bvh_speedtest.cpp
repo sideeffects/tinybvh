@@ -68,7 +68,7 @@ ALIGNED( 64 ) bvhvec4 triangles[259 /* level 3 */ * 6 * 2 * 49 * 3]{};
 int verts = 0;
 BVH bvh;
 float traceTime, buildTime, * refDist = 0, * refDistFull = 0;
-unsigned refOccluded = 0, *refOccl = 0;
+unsigned refOccluded = 0, * refOccl = 0;
 
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 #include "embree4/rtcore.h"
@@ -183,7 +183,7 @@ float TestShadowRays( BVH::BVHLayout layout, Ray* batch, unsigned N, unsigned pa
 	// kernels will lead to some diverging results. We check if no more than about
 	// 1/1000 checks differ. Shadow rays also use an origin offset, based on scene
 	// extend, to account for limited floating point accuracy.
-	if (abs( (int)occluded - (int)refOccluded) > 500) // allow some slack, we're using various tri intersectors
+	if (abs( (int)occluded - (int)refOccluded ) > 500) // allow some slack, we're using various tri intersectors
 	{
 		fprintf( stderr, "\nValidation for shadow rays failed (%i != %i).\n", (int)occluded, (int)refOccluded );
 		exit( 1 );
@@ -288,7 +288,7 @@ int main()
 	// setup view pyramid for a pinhole camera: 
 	// eye, p1 (top-left), p2 (top-right) and p3 (bottom-left)
 #ifdef LOADSPONZA
-	bvhvec3 eye( 0, 30, 0 ), view = normalize( bvhvec3( -8, 2, -1.7f ) );
+	bvhvec3 eye( -15.24f, 21.5f, 2.54f ), view = normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 #else
 	bvhvec3 eye( -3.5f, -1.5f, -6.5f ), view = normalize( bvhvec3( 3, 1.5f, 5 ) );
 #endif
@@ -316,7 +316,7 @@ int main()
 				float v = (float)(pixel_y * 4 + (s >> 2)) / (SCRHEIGHT * 4);
 				bvhvec3 P = p1 + u * (p2 - p1) + v * (p3 - p1);
 				fullBatch[Nfull++] = Ray( eye, normalize( P - eye ) );
-				if ((s & 7) == 0) 
+				if ((s & 7) == 0)
 				{
 					smallBatch[Nsmall] = fullBatch[Nfull - 1];
 				#ifdef DOUBLE_PRECISION_SUPPORT
@@ -369,7 +369,7 @@ int main()
 	printf( "- 'double' builder:  " );
 	t.reset();
 	tinybvh::bvhdbl3* triEx = (tinybvh::bvhdbl3*)tinybvh::malloc64( verts * sizeof( tinybvh::bvhdbl3 ) );
-	for( int i = 0; i < verts; i++ ) 
+	for (int i = 0; i < verts; i++)
 		triEx[i].x = (double)triangles[i].x,
 		triEx[i].y = (double)triangles[i].y,
 		triEx[i].z = (double)triangles[i].z;
@@ -452,13 +452,13 @@ int main()
 
 	// estimate correct shadow ray epsilon based on scene extends
 	tinybvh::bvhvec4 bmin( 1e30f ), bmax( -1e30f );
-	for( int i = 0; i < verts; i++ )
+	for (int i = 0; i < verts; i++)
 		bmin = tinybvh::tinybvh_min( bmin, triangles[i] ),
 		bmax = tinybvh::tinybvh_max( bmax, triangles[i] );
 	tinybvh::bvhvec3 e = bmax - bmin;
 	float maxExtent = tinybvh::tinybvh_max( tinybvh::tinybvh_max( e.x, e.y ), e.z );
 	float shadowEpsilon = maxExtent * 5e-7f;
-	
+
 	// setup proper shadow ray batch
 	traceTime = TestPrimaryRays( BVH::WALD_32BYTE, smallBatch, Nsmall, 1 ); // just to generate intersection points
 	Ray* shadowBatch = (Ray*)tinybvh::malloc64( sizeof( Ray ) * Nsmall );
@@ -472,7 +472,7 @@ int main()
 	}
 	// get reference shadow ray query result
 	refOccluded = 0, refOccl = new unsigned[Nsmall];
-	for (int i = 0; i < Nsmall; i++) 
+	for (int i = 0; i < Nsmall; i++)
 		refOccluded += (refOccl[i] = bvh.IsOccluded( shadowBatch[i], BVH::WALD_32BYTE ) ? 1 : 0);
 
 #ifdef TRAVERSE_2WAY_ST
