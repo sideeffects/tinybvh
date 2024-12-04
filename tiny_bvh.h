@@ -372,11 +372,31 @@ inline float32x4_t SIMD_SETRVEC( float x, float y, float z, float w )
 	ALIGNED( 64 ) float data[4] = { x, y, z, w };
 	return vld1q_f32( data );
 }
+
+inline uint32x4_t SIMD_SETRVECU( uint32_t x, uint32_t y, uint32_t z, uint32_t w )
+{
+	ALIGNED(64) uint32_t data[4] = { x, y, z, w };
+	return vld1q_u32( data );
+}
+
 #else
 typedef bvhvec4 SIMDVEC4;
 #define SIMD_SETVEC(a,b,c,d) bvhvec4( d, c, b, a )
 #define SIMD_SETRVEC(a,b,c,d) bvhvec4( a, b, c, d )
 #endif
+
+static unsigned __bfind( unsigned x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
+{
+#if defined(_MSC_VER) && !defined(__clang__)
+	return 31 - __lzcnt( x );
+#elif defined(__EMSCRIPTEN__)
+	return 31 - __builtin_clz( x );
+#elif defined(__GNUC__) || defined(__clang__)
+	unsigned r;
+	__asm__ __volatile__("lzcnt{l %1, %0| %0, %1}" : "=r"(r) : "r"(x) : "cc");
+	return 31 - r;
+#endif
+}
 
 // error handling
 #define FATAL_ERROR_IF(c,s) if (c) { fprintf( stderr, \
@@ -2320,15 +2340,17 @@ int BVH::Intersect( Ray& ray, const BVHLayout layout ) const
 		return Intersect_AltSoA( ray );
 		break;
 	#endif
-	#if defined BVH_USEAVX
+	#if defined BVH_USEAVX || defined BVH_USENEON
 	case BVH4_AFRA:
 		FATAL_ERROR_IF( bvh4Alt2 == 0, "BVH::Intersect( .. , BVH4_AFRA ), bvh not available." );
 		return Intersect_Afra( ray );
 		break;
+	#if defined BVH_USEAVX
 	case CWBVH:
 		FATAL_ERROR_IF( bvh8Compact == 0, "BVH::Intersect( .. , CWBVH ), bvh not available." );
 		return Intersect_CWBVH( ray );
 		break;
+	#endif
 	#endif
 	default:
 		FATAL_ERROR_IF( true, "BVH::Intersect( .. , ? ), unsupported bvh layout." );
@@ -2352,7 +2374,7 @@ bool BVH::IsOccluded( const Ray& ray, const BVHLayout layout ) const
 	{
 	case WALD_32BYTE: return IsOccluded_Wald32Byte( ray );
 	case AILA_LAINE: return IsOccluded_AilaLaine( ray );
-	#if defined BVH_USEAVX
+	#if defined BVH_USEAVX || defined BVH_USENEON
 	case ALT_SOA: return IsOccluded_AltSoA( ray );
 	case BVH4_AFRA: return IsOccluded_Afra( ray );
 	#endif
@@ -3469,18 +3491,6 @@ bool BVH::IsOccluded_AltSoA( const Ray& ray ) const
 // Not technically limited to BVH_USEAVX, but __lzcnt and __popcnt will require
 // exotic compiler flags (in combination with __builtin_ia32_lzcnt_u32), so... Since
 // this is just here to test data before it goes to the GPU: MSVC-only for now.
-static unsigned __bfind( unsigned x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
-{
-#if defined(_MSC_VER) && !defined(__clang__)
-	return 31 - __lzcnt( x );
-#elif defined(__EMSCRIPTEN__)
-	return 31 - __builtin_clz( x );
-#elif defined(__GNUC__) || defined(__clang__)
-	unsigned r;
-	__asm__ __volatile__( "lzcnt{l %1, %0| %0, %1}" : "=r"(r) : "r"(x) : "cc" );
-	return 31 - r;
-#endif
-}
 static unsigned __popc( unsigned x )
 {
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -4014,6 +4024,19 @@ inline float halfArea( const float32x4x2_t& a /* a contains aabb itself, with mi
 	float ex = c[4] + c[0], ey = c[5] + c[1], ez = c[6] + c[2];
 	return ex * ey + ey * ez + ez * ex;
 }
+
+#if defined(__ARM_FEATURE_NEON) && defined(__ARM_NEON) && __ARM_ARCH >= 85
+// Use the native vrnd32xq_f32 if NEON 8.5 is available
+#else
+// Custom implementation of vrnd32xq_f32
+static inline int32x4_t vrnd32xq_f32(float32x4_t a) {
+	const float32x4_t half = vdupq_n_f32(0.5f);
+	uint32x4_t isNegative = vcltq_f32(a, vdupq_n_f32(0.0f)); // Mask for negative numbers
+	float32x4_t adjustment = vbslq_f32(isNegative, vnegq_f32(half), half);
+	return vcvtq_s32_f32(vaddq_f32(a, adjustment));
+}
+#endif
+
 #define PROCESS_PLANE( a, pos, ANLR, lN, rN, lb, rb ) if (lN * rN != 0) { \
 	ANLR = halfArea( lb ) * (float)lN + halfArea( rb ) * (float)rN; \
 	const float C = C_TRAV + C_INT * rSAV * ANLR; if (C < splitCost) \
@@ -4266,6 +4289,340 @@ int BVH::Intersect_AltSoA( Ray& ray ) const
 		}
 	}
 	return steps;
+}
+
+// Traverse a 4-way BVH stored in 'Atilla Áfra' layout.
+inline void IntersectCompactTri( Ray& r, float32x4_t& t4, const float* T )
+{
+	const float transS = T[8] * r.O.x + T[9] * r.O.y + T[10] * r.O.z + T[11];
+	const float transD = T[8] * r.D.x + T[9] * r.D.y + T[10] * r.D.z;
+	const float ta = -transS / transD;
+	if (ta <= 0 || ta >= r.hit.t) return;
+	const bvhvec3 wr = r.O + ta * r.D;
+	const float u = T[0] * wr.x + T[1] * wr.y + T[2] * wr.z + T[3];
+	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
+	const bool hit = u >= 0 && v >= 0 && u + v < 1;
+	if (hit) r.hit = { ta, u, v, *(unsigned*)&T[15] }, t4 = vdupq_n_f32( ta );
+}
+
+inline int ARMVecMovemask(uint32x4_t v) {
+	const int shiftArr[4] = { 0, 1, 2, 3 };
+	int32x4_t shift = vld1q_s32(shiftArr);
+	return vaddvq_u32(vshlq_u32(vshrq_n_u32(v, 31), shift));
+}
+
+int BVH::Intersect_Afra( Ray& ray ) const
+{
+	unsigned nodeIdx = 0, stack[1024], stackPtr = 0, steps = 0;
+	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
+	const float32x4_t oy4 = vdupq_n_f32( ray.O.y ), rdy4 = vdupq_n_f32( ray.rD.y );
+	const float32x4_t oz4 = vdupq_n_f32( ray.O.z ), rdz4 = vdupq_n_f32( ray.rD.z );
+	float32x4_t t4 = vdupq_n_f32( ray.hit.t ), zero4 = vdupq_n_f32(0.0f);
+	const uint32x4_t idx4 = SIMD_SETRVECU( 0, 1, 2, 3 );
+	const uint32x4_t idxMask = vdupq_n_u32( 0xfffffffc );
+	const float32x4_t inf4 = vdupq_n_f32( BVH_FAR );
+	while (1)
+	{
+		steps++;
+		const BVHNode4Alt2& node = bvh4Alt2[nodeIdx];
+		// intersect the ray with four AABBs
+		const float32x4_t xmin4 = node.xmin4, xmax4 = node.xmax4;
+		const float32x4_t ymin4 = node.ymin4, ymax4 = node.ymax4;
+		const float32x4_t zmin4 = node.zmin4, zmax4 = node.zmax4;
+		const float32x4_t x0 = vsubq_f32( xmin4, ox4 ), x1 = vsubq_f32( xmax4, ox4 );
+		const float32x4_t y0 = vsubq_f32( ymin4, oy4 ), y1 = vsubq_f32( ymax4, oy4 );
+		const float32x4_t z0 = vsubq_f32( zmin4, oz4 ), z1 = vsubq_f32( zmax4, oz4 );
+		const float32x4_t tx1 = vmulq_f32( x0, rdx4 ), tx2 = vmulq_f32( x1, rdx4 );
+		const float32x4_t ty1 = vmulq_f32( y0, rdy4 ), ty2 = vmulq_f32( y1, rdy4 );
+		const float32x4_t tz1 = vmulq_f32( z0, rdz4 ), tz2 = vmulq_f32( z1, rdz4 );
+		const float32x4_t txmin = vminq_f32( tx1, tx2 ), tymin = vminq_f32( ty1, ty2 ), tzmin = vminq_f32( tz1, tz2 );
+		const float32x4_t txmax = vmaxq_f32( tx1, tx2 ), tymax = vmaxq_f32( ty1, ty2 ), tzmax = vmaxq_f32( tz1, tz2 );
+		const float32x4_t tmin = vmaxq_f32( vmaxq_f32( txmin, tymin ), tzmin );
+		const float32x4_t tmax = vminq_f32( vminq_f32( txmax, tymax ), tzmax );
+
+		uint32x4_t hit = vandq_u32(vandq_u32(vcgeq_f32(tmax, tmin), vcltq_f32(tmin, t4)), vcgeq_f32(tmax, zero4));
+		int hitBits = ARMVecMovemask( hit ), hits =  vcnt_s8( vreinterpret_s8_s32( vcreate_u32( hitBits ) ) )[0];
+		
+		if (hits == 1 /* 43% */)
+		{
+			// just one node was hit - no sorting needed.
+			const unsigned lane = __bfind( hitBits ), count = node.triCount[lane];
+			if (count == 0) nodeIdx = node.childFirst[lane]; else
+			{
+				const unsigned first = node.childFirst[lane];
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
+				if (stackPtr == 0) break;
+				nodeIdx = stack[--stackPtr];
+			}
+			continue;
+		}
+		if (hits == 0 /* 29% */)
+		{
+			if (stackPtr == 0) break;
+			nodeIdx = stack[--stackPtr];
+			continue;
+		}
+		if (hits == 2 /* 16% */)
+		{
+			// two nodes hit
+			unsigned lane0 = __bfind( hitBits ), lane1 = __bfind( hitBits - (1 << lane0) );
+			float dist0 = ((float*)&tmin)[lane0], dist1 = ((float*)&tmin)[lane1];
+			if (dist1 < dist0)
+			{
+				unsigned t = lane0; lane0 = lane1; lane1 = t;
+				float ft = dist0; dist0 = dist1; dist1 = ft;
+			}
+			const unsigned triCount0 = node.triCount[lane0], triCount1 = node.triCount[lane1];
+			// process first lane
+			if (triCount0 == 0) nodeIdx = node.childFirst[lane0]; else
+			{
+				const unsigned first = node.childFirst[lane0];
+				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf 
+					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
+				nodeIdx = 0;
+			}
+			// process second lane
+			if (triCount1 == 0)
+			{
+				if (nodeIdx) stack[stackPtr++] = nodeIdx;
+				nodeIdx = node.childFirst[lane1];
+			}
+			else
+			{
+				const unsigned first = node.childFirst[lane1];
+				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf 
+					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
+			}
+		}
+		else if (hits == 3 /* 8% */)
+		{
+			// blend in lane indices
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ) , idx4 ) );
+			
+			// sort
+			float tmp, d0 =  tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
+			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
+			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
+			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
+			if (d2 < d3) tmp = d2, d2 = d3, d3 = tmp;
+			if (d1 < d2) tmp = d1, d1 = d2, d2 = tmp;
+			// process hits
+			float d[4] = { d0, d1, d2, d3 };
+			nodeIdx = 0;
+			for (int i = 1; i < 4; i++)
+			{
+				unsigned lane = *(unsigned*)&d[i] & 3;
+				if (node.triCount[lane] == 0)
+				{
+					const unsigned childIdx = node.childFirst[lane];
+					if (nodeIdx) stack[stackPtr++] = nodeIdx;
+					nodeIdx = childIdx;
+					continue;
+				}
+				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
+			}
+		}
+		else /* hits == 4, 2%: rare */
+		{
+			// blend in lane indices
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ) , idx4 ) );
+			// sort
+			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
+			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
+			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
+			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
+			if (d2 < d3) tmp = d2, d2 = d3, d3 = tmp;
+			if (d1 < d2) tmp = d1, d1 = d2, d2 = tmp;
+			// process hits
+			float d[4] = { d0, d1, d2, d3 };
+			nodeIdx = 0;
+			for (int i = 0; i < 4; i++)
+			{
+				unsigned lane = *(unsigned*)&d[i] & 3;
+				if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
+				if (node.triCount[lane] == 0)
+				{
+					const unsigned childIdx = node.childFirst[lane];
+					if (nodeIdx) stack[stackPtr++] = nodeIdx;
+					nodeIdx = childIdx;
+					continue;
+				}
+				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
+			}
+		}
+		// get next task
+		if (nodeIdx) continue;
+		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
+	}
+	return steps;
+}
+
+// Find occlusions in a 4-way BVH stored in 'Atilla Áfra' layout.
+inline bool OccludedCompactTri( const Ray& r, const float* T )
+{
+	const float transS = T[8] * r.O.x + T[9] * r.O.y + T[10] * r.O.z + T[11];
+	const float transD = T[8] * r.D.x + T[9] * r.D.y + T[10] * r.D.z;
+	const float ta = -transS / transD;
+	if (ta <= 0 || ta >= r.hit.t) return false;
+	const bvhvec3 wr = r.O + ta * r.D;
+	const float u = T[0] * wr.x + T[1] * wr.y + T[2] * wr.z + T[3];
+	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
+	return u >= 0 && v >= 0 && u + v < 1;
+}
+
+bool BVH::IsOccluded_Afra( const Ray& ray ) const
+{
+	unsigned nodeIdx = 0, stack[1024], stackPtr = 0;
+	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
+	const float32x4_t oy4 = vdupq_n_f32( ray.O.y ), rdy4 = vdupq_n_f32( ray.rD.y );
+	const float32x4_t oz4 = vdupq_n_f32( ray.O.z ), rdz4 = vdupq_n_f32( ray.rD.z );
+	float32x4_t t4 = vdupq_n_f32( ray.hit.t ), zero4 = vdupq_n_f32(0.0f);
+	const uint32x4_t idx4 = SIMD_SETRVECU( 0, 1, 2, 3 );
+	const uint32x4_t idxMask = vdupq_n_u32( 0xfffffffc );
+	const float32x4_t inf4 = vdupq_n_f32( BVH_FAR );
+	
+	while (1)
+	{
+		const BVHNode4Alt2& node = bvh4Alt2[nodeIdx];
+		// intersect the ray with four AABBs
+		const float32x4_t xmin4 = node.xmin4, xmax4 = node.xmax4;
+		const float32x4_t ymin4 = node.ymin4, ymax4 = node.ymax4;
+		const float32x4_t zmin4 = node.zmin4, zmax4 = node.zmax4;
+		const float32x4_t x0 = vsubq_f32( xmin4, ox4 ), x1 = vsubq_f32( xmax4, ox4 );
+		const float32x4_t y0 = vsubq_f32( ymin4, oy4 ), y1 = vsubq_f32( ymax4, oy4 );
+		const float32x4_t z0 = vsubq_f32( zmin4, oz4 ), z1 = vsubq_f32( zmax4, oz4 );
+		const float32x4_t tx1 = vmulq_f32( x0, rdx4 ), tx2 = vmulq_f32( x1, rdx4 );
+		const float32x4_t ty1 = vmulq_f32( y0, rdy4 ), ty2 = vmulq_f32( y1, rdy4 );
+		const float32x4_t tz1 = vmulq_f32( z0, rdz4 ), tz2 = vmulq_f32( z1, rdz4 );
+		const float32x4_t txmin = vminq_f32( tx1, tx2 ), tymin = vminq_f32( ty1, ty2 ), tzmin = vminq_f32( tz1, tz2 );
+		const float32x4_t txmax = vmaxq_f32( tx1, tx2 ), tymax = vmaxq_f32( ty1, ty2 ), tzmax = vmaxq_f32( tz1, tz2 );
+		const float32x4_t tmin = vmaxq_f32( vmaxq_f32( txmin, tymin ), tzmin );
+		const float32x4_t tmax = vminq_f32( vminq_f32( txmax, tymax ), tzmax );
+
+		uint32x4_t hit = vandq_u32(vandq_u32(vcgeq_f32(tmax, tmin), vcltq_f32(tmin, t4)), vcgeq_f32(tmax, zero4));
+		int hitBits = ARMVecMovemask( hit ), hits =  vcnt_s8( vreinterpret_s8_s32( vcreate_u32( hitBits ) ) )[0];
+		
+		if (hits == 1 /* 43% */)
+		{
+			// just one node was hit - no sorting needed.
+			const unsigned lane = __bfind( hitBits ), count = node.triCount[lane];
+			if (count == 0) nodeIdx = node.childFirst[lane]; else
+			{
+				const unsigned first = node.childFirst[lane];
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
+				if (stackPtr == 0) break;
+				nodeIdx = stack[--stackPtr];
+			}
+			continue;
+		}
+		if (hits == 0 /* 29% */)
+		{
+			if (stackPtr == 0) break;
+			nodeIdx = stack[--stackPtr];
+			continue;
+		}
+		if (hits == 2 /* 16% */)
+		{
+			// two nodes hit
+			unsigned lane0 = __bfind( hitBits ), lane1 = __bfind( hitBits - (1 << lane0) );
+			float dist0 = ((float*)&tmin)[lane0], dist1 = ((float*)&tmin)[lane1];
+			if (dist1 < dist0)
+			{
+				unsigned t = lane0; lane0 = lane1; lane1 = t;
+				float ft = dist0; dist0 = dist1; dist1 = ft;
+			}
+			const unsigned triCount0 = node.triCount[lane0], triCount1 = node.triCount[lane1];
+			// process first lane
+			if (triCount0 == 0) nodeIdx = node.childFirst[lane0]; else
+			{
+				const unsigned first = node.childFirst[lane0];
+				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf 
+					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
+				nodeIdx = 0;
+			}
+			// process second lane
+			if (triCount1 == 0)
+			{
+				if (nodeIdx) stack[stackPtr++] = nodeIdx;
+				nodeIdx = node.childFirst[lane1];
+			}
+			else
+			{
+				const unsigned first = node.childFirst[lane1];
+				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf 
+					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
+			}
+		}
+		else if (hits == 3 /* 8% */)
+		{
+			// blend in lane indices
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ) , idx4 ) );
+			// sort
+			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
+			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
+			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
+			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
+			if (d2 < d3) tmp = d2, d2 = d3, d3 = tmp;
+			if (d1 < d2) tmp = d1, d1 = d2, d2 = tmp;
+			// process hits
+			float d[4] = { d0, d1, d2, d3 };
+			nodeIdx = 0;
+			for (int i = 1; i < 4; i++)
+			{
+				unsigned lane = *(unsigned*)&d[i] & 3;
+				if (node.triCount[lane] == 0)
+				{
+					const unsigned childIdx = node.childFirst[lane];
+					if (nodeIdx) stack[stackPtr++] = nodeIdx;
+					nodeIdx = childIdx;
+					continue;
+				}
+				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
+			}
+		}
+		else /* hits == 4, 2%: rare */
+		{
+			// blend in lane indices
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ) , idx4 ) );
+			// sort
+			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
+			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
+			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
+			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
+			if (d2 < d3) tmp = d2, d2 = d3, d3 = tmp;
+			if (d1 < d2) tmp = d1, d1 = d2, d2 = tmp;
+			// process hits
+			float d[4] = { d0, d1, d2, d3 };
+			nodeIdx = 0;
+			for (int i = 0; i < 4; i++)
+			{
+				unsigned lane = *(unsigned*)&d[i] & 3;
+				if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
+				if (node.triCount[lane] == 0)
+				{
+					const unsigned childIdx = node.childFirst[lane];
+					if (nodeIdx) stack[stackPtr++] = nodeIdx;
+					nodeIdx = childIdx;
+					continue;
+				}
+				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
+			}
+		}
+		// get next task
+		if (nodeIdx) continue;
+		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
+	}
+	return false;
 }
 
 #endif // BVH_USENEON
