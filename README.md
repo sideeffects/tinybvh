@@ -34,6 +34,7 @@ A constructed BVH can be used to quickly intersect a ray with the geometry, usin
 
 The constructed BVH will have a layout suitable for construction ('````WALD_32BYTE````'). Several other layouts for the same data are available, which all serve one or more specific purposes. You can convert between layouts using ````BVH::Convert````. The available layouts are:
 * ````BVH::WALD_32BYTE```` : A compact format that stores the AABB for a node, along with child pointers and leaf information in a cross-platform-friendly way. The 32-byte size allows for cache-line alignment.
+* ````BVH::ALT_SOA```` : This format stores bounding box information in a SIMD-friendly format, making the BVH faster to traverse.
 * ````BVH::WALD_DOUBLE```` : Double-precision version of ````BVH::WALD_32BYTE````.
 * ````BVH::VERBOSE```` : A format designed for modifying BVHs, e.g. for post-build optimizations using ````BVH::Optimize()````.
 * ````BVH::AILA_LAINE```` : This format uses 64 bytes per node and stores the AABBs of the two child nodes. This is the format presented in the [2009 Aila & Laine paper](https://research.nvidia.com/sites/default/files/pubs/2009-08_Understanding-the-Efficiency/aila2009hpg_paper.pdf) and recommended for basic GPU ray tracing.
