@@ -1,6 +1,7 @@
 #define FENSTER_APP_IMPLEMENTATION
 #define SCRWIDTH 800
 #define SCRHEIGHT 600
+#define TILESIZE 8
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
 #define TINYBVH_IMPLEMENTATION
@@ -11,9 +12,8 @@ using namespace tinybvh;
 
 // Application variables
 static BVH bvh;
-static bvhvec4* triangles = 0;
-static bvhvec3* triColor = 0;
-static int verts = 0, frameIdx = 0, spp = 0;
+static bvhvec4* tris = 0;
+static int triCount = 0, frameIdx = 0, spp = 0;
 static bvhvec3 accumulator[SCRWIDTH * SCRHEIGHT];
 
 // Setup view pyramid for a pinhole camera: 
@@ -36,26 +36,43 @@ bvhvec3 DiffuseReflection( const bvhvec3 N, unsigned& seed )
 	return normalize( dot( R, N ) < 0 ? R : (R * -1.0f) );
 }
 
+// Color conversion
+bvhvec3 rgb32_to_vec3( const unsigned c )
+{
+	return bvhvec3( (float)(c >> 16), (float)((c >> 8) & 255), (float)(c & 255) ) * (1 / 255.f);
+}
+
+// Scene management - Append a file, with optional position, scale and color override, tinyfied
+void AddMesh( const char* file, float scale = 1, bvhvec3 pos = {}, int c = 0, int N = 0 )
+{
+	std::fstream s{ file, s.binary | s.in };
+	s.read( (char*)&N, 4 );
+	bvhvec4* data = (bvhvec4*)malloc64( (N + triCount) * 48 );
+	if (tris) memcpy( data, tris, triCount * 48 ), free64( tris );
+	tris = data, s.read( (char*)tris + triCount * 48, N * 48 ), triCount += N;
+	for (int* b = (int*)tris + (triCount - N) * 12, i = 0; i < N * 3; i++)
+		*(bvhvec3*)b = *(bvhvec3*)b * scale + pos, b[3] = c ? c : b[3], b += 4;
+}
+
 // Application init
 void Init()
 {
-	// load raw vertex data for Crytek's Sponza
-	std::fstream s{ "./testdata/cryteksponza.bin", s.binary | s.in };
-	s.read( (char*)&verts, 4 );
-	printf( "Loading triangle data (%i tris).\n", verts );
-	verts *= 3, triangles = (bvhvec4*)malloc64( verts * 16 );
-	s.read( (char*)triangles, verts * 16 );
-	s.close();
-	// extract triangle colors
-	unsigned triCount = verts / 3;
-	triColor = (bvhvec3*)malloc64( triCount * 12 );
-	for (unsigned c, i = 0; i < triCount; i++)
-		c = *(unsigned*)&triangles[i * 3 + 0].w,
-		triColor[i] = bvhvec3( c & 255, (c >> 8) & 255, c >> 16 ) * (1 / 255.0f);
+	// load raw vertex data
+	AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
+	AddMesh( "./testdata/dragon.bin", 1.1f, bvhvec3( 29, 3.01f, 0 ), 0xffbb88 );
+	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0xaaaaff );
+	AddMesh( "./testdata/bunny.bin", 0.2f, bvhvec3( -7, 0.13f, 0 ), 0x333333 );
+	AddMesh( "./testdata/legocar.bin", 0.3f, bvhvec3( -12, 0.8f, -5 ) );
+	AddMesh( "./testdata/armadillo.bin", 0.3f, bvhvec3( 7, 1, 3 ), 0xff2020 );
+	AddMesh( "./testdata/xyzrgb_dragon.bin", 0.5f, bvhvec3( -22, 0.95f, 0 ), 0xffffaa );
+	AddMesh( "./testdata/suzanne.bin", 0.2f, bvhvec3( -18, 0.95f, -16 ), 0x90ff90 );
+	AddMesh( "./testdata/head.bin", 0.5f, bvhvec3( 0, 3, 9 ) );
 	// build bvh
-	bvh.BuildAVX( triangles, verts / 3 );
+	bvh.BuildAVX( tris, triCount );
+#if defined BVH_USEAVX || defined BVH_USENEON
 	bvh.Convert( BVH::WALD_32BYTE, BVH::BASIC_BVH4 );
 	bvh.Convert( BVH::BASIC_BVH4, BVH::BVH4_AFRA );
+#endif
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
 	if (!t.is_open()) return;
@@ -91,20 +108,26 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 bvhvec3 Trace( Ray& ray, unsigned& seed )
 {
 	// find primary intersection
-	bvh.Intersect( ray, BVH::BVH4_AFRA );
+	bvh.Intersect( ray, bvh.bvh4Alt2 ? BVH::BVH4_AFRA : BVH::WALD_32BYTE );
 	if (ray.hit.t == 1e30f) return bvhvec3( 0.6f, 0.7f, 2 ); // hit nothing
 	bvhvec3 I = ray.O + ray.hit.t * ray.D;
 	// get normal at intersection point
 	unsigned primIdx = ray.hit.prim;
-	bvhvec3 v0 = triangles[primIdx * 3 + 0];
-	bvhvec3 v1 = triangles[primIdx * 3 + 1];
-	bvhvec3 v2 = triangles[primIdx * 3 + 2];
+	bvhvec3 v0 = tris[primIdx * 3 + 0];
+	bvhvec3 v1 = tris[primIdx * 3 + 1];
+	bvhvec3 v2 = tris[primIdx * 3 + 2];
 	bvhvec3 N = normalize( cross( v1 - v0, v0 - v2 ) );
-	// shoot AO ray
-	bvhvec3 R = DiffuseReflection( N, seed );
-	Ray aoRay( I + R * 0.001f, R, 10 );
-	bvh.Intersect( aoRay, BVH::BVH4_AFRA );
-	return triColor[primIdx] * bvhvec3( aoRay.hit.t / 10 );
+	// shoot AO rays
+	float total = 0;
+	for (int i = 0; i < 4; i++)
+	{
+		bvhvec3 R = DiffuseReflection( N, seed );
+		Ray aoRay( I + R * 0.001f, R, 10 );
+		bvh.Intersect( aoRay, bvh.bvh4Alt2 ? BVH::BVH4_AFRA : BVH::WALD_32BYTE );
+		total += aoRay.hit.t;
+	}
+	unsigned triColor = *(unsigned*)&tris[primIdx * 3 + 0].w;
+	return rgb32_to_vec3( triColor ) * bvhvec3( total / 40 );
 }
 
 // Application Tick
@@ -113,22 +136,23 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	// handle user input and update camera
 	if (frameIdx++ == 0 || UpdateCamera( delta_time_s, f ))
 	{
-		memset( accumulator, 0, 800 * 600 * sizeof( bvhvec3 ) );
+		memset( accumulator, 0, SCRWIDTH * SCRHEIGHT * sizeof( bvhvec3 ) );
 		spp = 1;
 	}
 
 	// render tiles
-	const int xtiles = SCRWIDTH / 4, ytiles = SCRHEIGHT / 4, tiles = xtiles * ytiles;
+	const int xtiles = SCRWIDTH / TILESIZE, ytiles = SCRHEIGHT / TILESIZE;
+	const int tiles = xtiles * ytiles;
 	const float scale = 1.0f / spp;
 #pragma omp parallel for schedule(dynamic)
 	for (int tile = 0; tile < tiles; tile++)
 	{
 		const int tx = tile % xtiles, ty = tile / xtiles;
 		unsigned seed = (tile + 17) * 171717 + frameIdx * 1023;
-		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
+		for (int y = 0; y < TILESIZE; y++) for (int x = 0; x < TILESIZE; x++)
 		{
-			const int pixel_x = tx * 4 + x;
-			const int pixel_y = ty * 4 + y;
+			const int pixel_x = tx * TILESIZE + x;
+			const int pixel_y = ty * TILESIZE + y;
 			// setup primary ray
 			const float u = (float)pixel_x / SCRWIDTH, v = (float)pixel_y / SCRHEIGHT;
 			const bvhvec3 D = normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
