@@ -15,6 +15,7 @@ static BVH bvh;
 static bvhvec4* tris = 0;
 static int triCount = 0, frameIdx = 0, spp = 0;
 static bvhvec3 accumulator[SCRWIDTH * SCRHEIGHT];
+static BVH::BVHLayout layout = BVH::WALD_32BYTE;
 
 // Setup view pyramid for a pinhole camera: 
 // eye, p1 (top-left), p2 (top-right) and p3 (bottom-left)
@@ -85,6 +86,7 @@ void Init()
 #if defined BVH_USEAVX || defined BVH_USENEON
 	bvh.Convert( BVH::WALD_32BYTE, BVH::BASIC_BVH4 );
 	bvh.Convert( BVH::BASIC_BVH4, BVH::BVH4_AFRA );
+	layout = BVH::BVH4_AFRA;
 #endif
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
@@ -117,16 +119,16 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 	return moved;
 }
 
-// Light transport calculation - Basic Path Tracer with IS and Next Event Estimation
+// Light transport calculation - Basic recursive Path Tracer with IS and Next Event Estimation
 bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 {
 	// find primary intersection
-	bvh.Intersect( ray, bvh.bvh4Alt2 ? BVH::BVH4_AFRA : BVH::WALD_32BYTE );
+	bvh.Intersect( ray, layout );
 	// shade
 	if (ray.hit.t == 1e30f) return bvhvec3( 0.6f, 0.7f, 1 ); // hit nothing
 	bvhvec3 I = ray.O + ray.hit.t * ray.D;
 	bvhvec3 N = TriangleNormal( ray.hit.prim );
-	if (dot( N, ray.D ) > 0 ) N = -N;
+	if (dot( N, ray.D ) > 0) N = -N;
 	bvhvec3 BRDF = TriangleColor( ray.hit.prim ) * (1.0f / 3.14159f);
 	bvhvec3 Lpos( RandomFloat( seed ) * 30 - 15, 40, RandomFloat( seed ) * 6 - 3 ); // virtual
 	float dist = length( Lpos - I );
@@ -134,14 +136,14 @@ bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 	bvhvec3 direct = {}, indirect = {};
 	float NdotL = dot( N, L ), NLdotL = fabs( dot( L, bvhvec3( 0, 1, 0 ) ) );
 	if (NdotL > 0)
-		if (!bvh.IsOccluded( Ray( I + L * 0.001f, L, dist ) )) 
-			direct = BRDF * NdotL * NLdotL * bvhvec3( 3000 ) * (1.0f / (dist * dist));  
+		if (!bvh.IsOccluded( Ray( I + L * 0.001f, L, dist ), layout ) )
+			direct = BRDF * NdotL * NLdotL * bvhvec3( 9, 9, 8 ) * 500 * (1.0f / (dist * dist));
 	// random bounce
-	if (depth < 1)
+	if (depth < 4)
 	{
 		bvhvec3 R = CosWeightedDiffReflection( N, seed );
-		float pdf = 1 / dot( N, R );
-		bvhvec3 irradiance = Trace( Ray( I + R * 0.001f, R ), seed, depth + 1 ) * NdotL;
+		float pdf = 1.0f / dot( N, R );
+		bvhvec3 irradiance = Trace( Ray( I + R * 0.001f, R ), seed, depth + 1 );
 		indirect = BRDF * irradiance * (1.0f / pdf);
 	}
 	// finalize
@@ -152,7 +154,7 @@ bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 {
 	// handle user input and update camera
-	if (frameIdx++ == 0 || UpdateCamera( delta_time_s, f ))
+	if (UpdateCamera( delta_time_s, f ) || frameIdx++ == 0 )
 	{
 		memset( accumulator, 0, SCRWIDTH * SCRHEIGHT * sizeof( bvhvec3 ) );
 		spp = 1;
@@ -161,7 +163,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	// render tiles
 	const int xtiles = SCRWIDTH / TILESIZE, ytiles = SCRHEIGHT / TILESIZE;
 	const int tiles = xtiles * ytiles;
-	const float scale = 1.0f / spp;
+	const float scale = 1.0f / spp++;
 #pragma omp parallel for schedule(dynamic)
 	for (int tile = 0; tile < tiles; tile++)
 	{
@@ -184,7 +186,6 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 			buf[pixelIdx] = b + (g << 8) + (r << 16);
 		}
 	}
-	spp++;
 }
 
 // Application Shutdown
