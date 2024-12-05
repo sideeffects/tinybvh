@@ -303,7 +303,7 @@ inline bvhvec4 operator*( float b, const bvhvec4& a ) { return bvhvec4( b * a.x,
 inline bvhvec2 operator/( float b, const bvhvec2& a ) { return bvhvec2( b / a.x, b / a.y ); }
 inline bvhvec3 operator/( float b, const bvhvec3& a ) { return bvhvec3( b / a.x, b / a.y, b / a.z ); }
 inline bvhvec4 operator/( float b, const bvhvec4& a ) { return bvhvec4( b / a.x, b / a.y, b / a.z, b / a.w ); }
-inline bvhvec3 operator*=( bvhvec3& a, const float b ) { return bvhvec3( a.x * b, a.y * b, a.z * b ); }
+inline void operator*=( bvhvec3& a, const float b ) { a.x *= b; a.y *= b; a.z *= b; }
 
 // Vector math: cross and dot.
 static inline bvhvec3 cross( const bvhvec3& a, const bvhvec3& b )
@@ -376,7 +376,7 @@ inline float32x4_t SIMD_SETRVEC( float x, float y, float z, float w )
 
 inline uint32x4_t SIMD_SETRVECU( uint32_t x, uint32_t y, uint32_t z, uint32_t w )
 {
-	ALIGNED(64) uint32_t data[4] = { x, y, z, w };
+	ALIGNED( 64 ) uint32_t data[4] = { x, y, z, w };
 	return vld1q_u32( data );
 }
 
@@ -394,7 +394,7 @@ static unsigned __bfind( unsigned x ) // https://github.com/mackron/refcode/blob
 	return 31 - __builtin_clz( x );
 #elif defined(__GNUC__) || defined(__clang__)
 	unsigned r;
-	__asm__ __volatile__("lzcnt{l %1, %0| %0, %1}" : "=r"(r) : "r"(x) : "cc");
+	__asm__ __volatile__( "lzcnt{l %1, %0| %0, %1}" : "=r"(r) : "r"(x) : "cc" );
 	return 31 - r;
 #endif
 }
@@ -4033,11 +4033,11 @@ inline float halfArea( const float32x4x2_t& a /* a contains aabb itself, with mi
 // Use the native vrnd32xq_f32 if NEON 8.5 is available
 #else
 // Custom implementation of vrnd32xq_f32
-static inline int32x4_t vrnd32xq_f32(float32x4_t a) {
-	const float32x4_t half = vdupq_n_f32(0.5f);
-	uint32x4_t isNegative = vcltq_f32(a, vdupq_n_f32(0.0f)); // Mask for negative numbers
-	float32x4_t adjustment = vbslq_f32(isNegative, vnegq_f32(half), half);
-	return vcvtq_s32_f32(vaddq_f32(a, adjustment));
+static inline int32x4_t vrnd32xq_f32( float32x4_t a ) {
+	const float32x4_t half = vdupq_n_f32( 0.5f );
+	uint32x4_t isNegative = vcltq_f32( a, vdupq_n_f32( 0.0f ) ); // Mask for negative numbers
+	float32x4_t adjustment = vbslq_f32( isNegative, vnegq_f32( half ), half );
+	return vcvtq_s32_f32( vaddq_f32( a, adjustment ) );
 }
 #endif
 
@@ -4309,10 +4309,10 @@ inline void IntersectCompactTri( Ray& r, float32x4_t& t4, const float* T )
 	if (hit) r.hit = { ta, u, v, *(unsigned*)&T[15] }, t4 = vdupq_n_f32( ta );
 }
 
-inline int ARMVecMovemask(uint32x4_t v) {
+inline int ARMVecMovemask( uint32x4_t v ) {
 	const int shiftArr[4] = { 0, 1, 2, 3 };
-	int32x4_t shift = vld1q_s32(shiftArr);
-	return vaddvq_u32(vshlq_u32(vshrq_n_u32(v, 31), shift));
+	int32x4_t shift = vld1q_s32( shiftArr );
+	return vaddvq_u32( vshlq_u32( vshrq_n_u32( v, 31 ), shift ) );
 }
 
 int BVH::Intersect_Afra( Ray& ray ) const
@@ -4321,7 +4321,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
 	const float32x4_t oy4 = vdupq_n_f32( ray.O.y ), rdy4 = vdupq_n_f32( ray.rD.y );
 	const float32x4_t oz4 = vdupq_n_f32( ray.O.z ), rdz4 = vdupq_n_f32( ray.rD.z );
-	float32x4_t t4 = vdupq_n_f32( ray.hit.t ), zero4 = vdupq_n_f32(0.0f);
+	float32x4_t t4 = vdupq_n_f32( ray.hit.t ), zero4 = vdupq_n_f32( 0.0f );
 	const uint32x4_t idx4 = SIMD_SETRVECU( 0, 1, 2, 3 );
 	const uint32x4_t idxMask = vdupq_n_u32( 0xfffffffc );
 	const float32x4_t inf4 = vdupq_n_f32( BVH_FAR );
@@ -4344,9 +4344,9 @@ int BVH::Intersect_Afra( Ray& ray ) const
 		const float32x4_t tmin = vmaxq_f32( vmaxq_f32( txmin, tymin ), tzmin );
 		const float32x4_t tmax = vminq_f32( vminq_f32( txmax, tymax ), tzmax );
 
-		uint32x4_t hit = vandq_u32(vandq_u32(vcgeq_f32(tmax, tmin), vcltq_f32(tmin, t4)), vcgeq_f32(tmax, zero4));
-		int hitBits = ARMVecMovemask( hit ), hits =  vcnt_s8( vreinterpret_s8_s32( vcreate_u32( hitBits ) ) )[0];
-		
+		uint32x4_t hit = vandq_u32( vandq_u32( vcgeq_f32( tmax, tmin ), vcltq_f32( tmin, t4 ) ), vcgeq_f32( tmax, zero4 ) );
+		int hitBits = ARMVecMovemask( hit ), hits = vcnt_s8( vreinterpret_s8_s32( vcreate_u32( hitBits ) ) )[0];
+
 		if (hits == 1 /* 43% */)
 		{
 			// just one node was hit - no sorting needed.
@@ -4402,10 +4402,10 @@ int BVH::Intersect_Afra( Ray& ray ) const
 		else if (hits == 3 /* 8% */)
 		{
 			// blend in lane indices
-			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ) , idx4 ) );
-			
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
+
 			// sort
-			float tmp, d0 =  tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
+			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
 			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
 			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
 			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
@@ -4432,7 +4432,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 		else /* hits == 4, 2%: rare */
 		{
 			// blend in lane indices
-			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ) , idx4 ) );
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
 			// sort
 			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
 			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
@@ -4485,11 +4485,11 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
 	const float32x4_t oy4 = vdupq_n_f32( ray.O.y ), rdy4 = vdupq_n_f32( ray.rD.y );
 	const float32x4_t oz4 = vdupq_n_f32( ray.O.z ), rdz4 = vdupq_n_f32( ray.rD.z );
-	float32x4_t t4 = vdupq_n_f32( ray.hit.t ), zero4 = vdupq_n_f32(0.0f);
+	float32x4_t t4 = vdupq_n_f32( ray.hit.t ), zero4 = vdupq_n_f32( 0.0f );
 	const uint32x4_t idx4 = SIMD_SETRVECU( 0, 1, 2, 3 );
 	const uint32x4_t idxMask = vdupq_n_u32( 0xfffffffc );
 	const float32x4_t inf4 = vdupq_n_f32( BVH_FAR );
-	
+
 	while (1)
 	{
 		const BVHNode4Alt2& node = bvh4Alt2[nodeIdx];
@@ -4508,9 +4508,9 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 		const float32x4_t tmin = vmaxq_f32( vmaxq_f32( txmin, tymin ), tzmin );
 		const float32x4_t tmax = vminq_f32( vminq_f32( txmax, tymax ), tzmax );
 
-		uint32x4_t hit = vandq_u32(vandq_u32(vcgeq_f32(tmax, tmin), vcltq_f32(tmin, t4)), vcgeq_f32(tmax, zero4));
-		int hitBits = ARMVecMovemask( hit ), hits =  vcnt_s8( vreinterpret_s8_s32( vcreate_u32( hitBits ) ) )[0];
-		
+		uint32x4_t hit = vandq_u32( vandq_u32( vcgeq_f32( tmax, tmin ), vcltq_f32( tmin, t4 ) ), vcgeq_f32( tmax, zero4 ) );
+		int hitBits = ARMVecMovemask( hit ), hits = vcnt_s8( vreinterpret_s8_s32( vcreate_u32( hitBits ) ) )[0];
+
 		if (hits == 1 /* 43% */)
 		{
 			// just one node was hit - no sorting needed.
@@ -4566,7 +4566,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 		else if (hits == 3 /* 8% */)
 		{
 			// blend in lane indices
-			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ) , idx4 ) );
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
 			// sort
 			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
 			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
@@ -4595,7 +4595,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 		else /* hits == 4, 2%: rare */
 		{
 			// blend in lane indices
-			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ) , idx4 ) );
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
 			// sort
 			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
 			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
