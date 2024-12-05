@@ -33,13 +33,26 @@ bvhvec3 DiffuseReflection( const bvhvec3 N, unsigned& seed )
 	{
 		R = bvhvec3( RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1 );
 	} while (dot( R, R ) > 1);
-	return normalize( dot( R, N ) < 0 ? R : (R * -1.0f) );
+	return normalize( dot( R, N ) < 0 ? R : -R );
+}
+bvhvec3 CosWeightedDiffReflection( const bvhvec3 N, unsigned& seed )
+{
+	bvhvec3 R = DiffuseReflection( N, seed );
+	return normalize( N + R );
 }
 
 // Color conversion
 bvhvec3 rgb32_to_vec3( const unsigned c )
 {
 	return bvhvec3( (float)(c >> 16), (float)((c >> 8) & 255), (float)(c & 255) ) * (1 / 255.f);
+}
+
+// Geometry access
+bvhvec3 TriangleColor( const unsigned idx ) { return rgb32_to_vec3( *(unsigned*)&tris[idx * 3].w ); }
+bvhvec3 TriangleNormal( const unsigned idx )
+{
+	bvhvec3 a = tris[idx * 3], b = tris[idx * 3 + 1], c = tris[idx * 3 + 2];
+	return normalize( cross( b - a, a - c ) );
 }
 
 // Scene management - Append a file, with optional position, scale and color override, tinyfied
@@ -104,30 +117,35 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 	return moved;
 }
 
-// Light transport calculation - Ambient Occlusion
-bvhvec3 Trace( Ray& ray, unsigned& seed )
+// Light transport calculation - Basic Path Tracer with IS and Next Event Estimation
+bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 {
 	// find primary intersection
 	bvh.Intersect( ray, bvh.bvh4Alt2 ? BVH::BVH4_AFRA : BVH::WALD_32BYTE );
-	if (ray.hit.t == 1e30f) return bvhvec3( 0.6f, 0.7f, 2 ); // hit nothing
+	// shade
+	if (ray.hit.t == 1e30f) return bvhvec3( 0.6f, 0.7f, 1 ); // hit nothing
 	bvhvec3 I = ray.O + ray.hit.t * ray.D;
-	// get normal at intersection point
-	unsigned primIdx = ray.hit.prim;
-	bvhvec3 v0 = tris[primIdx * 3 + 0];
-	bvhvec3 v1 = tris[primIdx * 3 + 1];
-	bvhvec3 v2 = tris[primIdx * 3 + 2];
-	bvhvec3 N = normalize( cross( v1 - v0, v0 - v2 ) );
-	// shoot AO rays
-	float total = 0;
-	for (int i = 0; i < 4; i++)
+	bvhvec3 N = TriangleNormal( ray.hit.prim );
+	if (dot( N, ray.D ) > 0 ) N = -N;
+	bvhvec3 BRDF = TriangleColor( ray.hit.prim ) * (1.0f / 3.14159f);
+	bvhvec3 Lpos( RandomFloat( seed ) * 30 - 15, 40, RandomFloat( seed ) * 6 - 3 ); // virtual
+	float dist = length( Lpos - I );
+	bvhvec3 L = (Lpos - I) * (1.0f / dist); // normalize
+	bvhvec3 direct = {}, indirect = {};
+	float NdotL = dot( N, L ), NLdotL = fabs( dot( L, bvhvec3( 0, 1, 0 ) ) );
+	if (NdotL > 0)
+		if (!bvh.IsOccluded( Ray( I + L * 0.001f, L, dist ) )) 
+			direct = BRDF * NdotL * NLdotL * bvhvec3( 3000 ) * (1.0f / (dist * dist));  
+	// random bounce
+	if (depth < 1)
 	{
-		bvhvec3 R = DiffuseReflection( N, seed );
-		Ray aoRay( I + R * 0.001f, R, 10 );
-		bvh.Intersect( aoRay, bvh.bvh4Alt2 ? BVH::BVH4_AFRA : BVH::WALD_32BYTE );
-		total += aoRay.hit.t;
+		bvhvec3 R = CosWeightedDiffReflection( N, seed );
+		float pdf = 1 / dot( N, R );
+		bvhvec3 irradiance = Trace( Ray( I + R * 0.001f, R ), seed, depth + 1 ) * NdotL;
+		indirect = BRDF * irradiance * (1.0f / pdf);
 	}
-	unsigned triColor = *(unsigned*)&tris[primIdx * 3 + 0].w;
-	return rgb32_to_vec3( triColor ) * bvhvec3( total / 40 );
+	// finalize
+	return direct + indirect;
 }
 
 // Application Tick
@@ -151,21 +169,19 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		unsigned seed = (tile + 17) * 171717 + frameIdx * 1023;
 		for (int y = 0; y < TILESIZE; y++) for (int x = 0; x < TILESIZE; x++)
 		{
-			const int pixel_x = tx * TILESIZE + x;
-			const int pixel_y = ty * TILESIZE + y;
+			const int pixel_x = tx * TILESIZE + x, pixel_y = ty * TILESIZE + y;
+			const int pixelIdx = pixel_x + pixel_y * SCRWIDTH;
 			// setup primary ray
 			const float u = (float)pixel_x / SCRWIDTH, v = (float)pixel_y / SCRHEIGHT;
 			const bvhvec3 D = normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
-			Ray primaryRay( eye, D );
 			// trace
-			const unsigned pixelIdx = pixel_x + pixel_y * SCRWIDTH;
-			accumulator[pixelIdx] += Trace( primaryRay, seed );
+			accumulator[pixelIdx] += Trace( Ray( eye, D ), seed );
 			const bvhvec3 E = accumulator[pixelIdx] * scale;
 			// visualize, with a poor man's gamma correct
 			const int r = (int)tinybvh_min( 255.0f, sqrtf( E.x ) * 255.0f );
 			const int g = (int)tinybvh_min( 255.0f, sqrtf( E.y ) * 255.0f );
 			const int b = (int)tinybvh_min( 255.0f, sqrtf( E.z ) * 255.0f );
-			buf[pixel_x + pixel_y * SCRWIDTH] = b + (g << 8) + (r << 16);
+			buf[pixelIdx] = b + (g << 8) + (r << 16);
 		}
 	}
 	spp++;
