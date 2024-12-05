@@ -284,6 +284,7 @@ inline bvhvec4 operator-( const bvhvec4& a ) { return bvhvec4( -a.x, -a.y, -a.z,
 inline bvhvec2 operator+( const bvhvec2& a, const bvhvec2& b ) { return bvhvec2( a.x + b.x, a.y + b.y ); }
 inline bvhvec3 operator+( const bvhvec3& a, const bvhvec3& b ) { return bvhvec3( a.x + b.x, a.y + b.y, a.z + b.z ); }
 inline bvhvec4 operator+( const bvhvec4& a, const bvhvec4& b ) { return bvhvec4( a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w ); }
+inline bvhvec4 operator+( const bvhvec4& a, const bvhvec3& b ) { return bvhvec4( a.x + b.x, a.y + b.y, a.z + b.z, a.w ); }
 inline bvhvec2 operator-( const bvhvec2& a, const bvhvec2& b ) { return bvhvec2( a.x - b.x, a.y - b.y ); }
 inline bvhvec3 operator-( const bvhvec3& a, const bvhvec3& b ) { return bvhvec3( a.x - b.x, a.y - b.y, a.z - b.z ); }
 inline bvhvec4 operator-( const bvhvec4& a, const bvhvec4& b ) { return bvhvec4( a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w ); }
@@ -2971,11 +2972,12 @@ void BVH::BuildAVX( const bvhvec4* vertices, const unsigned primCount )
 	// some constants
 	static const __m128 max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
 	static const __m128 two4 = _mm_set1_ps( 2.0f ), min1 = _mm_set1_ps( -1 );
-	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR );
-	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
 	static const __m128 signFlip4 = _mm_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f );
 	static const __m128 mask3 = _mm_cmpeq_ps( _mm_setr_ps( 0, 0, 0, 1 ), _mm_setzero_ps() );
 	static const __m128 binmul3 = _mm_set1_ps( BVHBINS * 0.49999f );
+	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR );
+	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
 	for (unsigned i = 0; i < 3 * BVHBINS; i++) binboxOrig[i] = max8; // binbox initialization template
 	// reset node pool
 	const unsigned spaceNeeded = primCount * 2;
@@ -3029,9 +3031,10 @@ void BVH::BuildAVX( const bvhvec4* vertices, const unsigned primCount )
 			unsigned fi = triIdx[node.leftFirst];
 			memset( count, 0, sizeof( count ) );
 			__m256 r0, r1, r2, f = frag8[fi];
-			__m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_sub_ps( frag4[fi].bmax4, frag4[fi].bmin4 ), nmin4 ), rpd4 ), half4 ) );
+			const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_sub_ps( frag4[fi].bmax4, frag4[fi].bmin4 ), nmin4 ), rpd4 ), half4 ) );
+			const __m128i b4c = _mm_max_epi32( _mm_min_epi32( bi4, maxbin4 ), _mm_setzero_si128() ); // clamp needed after all
 			memcpy( binbox, binboxOrig, sizeof( binbox ) );
-			unsigned i0 = ILANE( bi4, 0 ), i1 = ILANE( bi4, 1 ), i2 = ILANE( bi4, 2 ), * ti = triIdx + node.leftFirst + 1;
+			unsigned i0 = ILANE( b4c, 0 ), i1 = ILANE( b4c, 1 ), i2 = ILANE( b4c, 2 ), * ti = triIdx + node.leftFirst + 1;
 			for (unsigned i = 0; i < node.triCount - 1; i++)
 			{
 				unsigned fid = *ti++;
@@ -3041,11 +3044,12 @@ void BVH::BuildAVX( const bvhvec4* vertices, const unsigned primCount )
 				const __m256 b0 = binbox[i0], b1 = binbox[BVHBINS + i1], b2 = binbox[2 * BVHBINS + i2];
 				const __m128 fmin = frag4[fid].bmin4, fmax = frag4[fid].bmax4;
 				r0 = _mm256_max_ps( b0, f ), r1 = _mm256_max_ps( b1, f ), r2 = _mm256_max_ps( b2, f );
-				const __m128i b4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_sub_ps( fmax, fmin ), nmin4 ), rpd4 ), half4 ) );
+				const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_sub_ps( fmax, fmin ), nmin4 ), rpd4 ), half4 ) );
+				const __m128i b4c = _mm_max_epi32( _mm_min_epi32( bi4, maxbin4 ), _mm_setzero_si128() ); // clamp needed after all
 				f = frag8[fid], count[0][i0]++, count[1][i1]++, count[2][i2]++;
-				binbox[i0] = r0, i0 = ILANE( b4, 0 );
-				binbox[BVHBINS + i1] = r1, i1 = ILANE( b4, 1 );
-				binbox[2 * BVHBINS + i2] = r2, i2 = ILANE( b4, 2 );
+				binbox[i0] = r0, i0 = ILANE( b4c, 0 );
+				binbox[BVHBINS + i1] = r1, i1 = ILANE( b4c, 1 );
+				binbox[2 * BVHBINS + i2] = r2, i2 = ILANE( b4c, 2 );
 			}
 			// final business for final fragment
 			const __m256 b0 = binbox[i0], b1 = binbox[BVHBINS + i1], b2 = binbox[2 * BVHBINS + i2];
