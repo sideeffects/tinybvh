@@ -2419,10 +2419,8 @@ bool BVH::IsOccluded( const Ray& ray, const BVHLayout layout ) const
 	{
 	case WALD_32BYTE: return IsOccluded_Wald32Byte( ray );
 	case AILA_LAINE: return IsOccluded_AilaLaine( ray );
-	#if defined BVH_USEAVX || defined BVH_USENEON
-	case ALT_SOA: return IsOccluded_AltSoA( ray );
-	#endif
 	#if defined BVH_USEAVX
+	case ALT_SOA: return IsOccluded_AltSoA( ray );
 	case BVH4_AFRA: return IsOccluded_Afra( ray );
 	#endif
 	default:
@@ -4527,7 +4525,7 @@ inline bool OccludedCompactTri( const Ray& r, const float* T )
 	return u >= 0 && v >= 0 && u + v < 1;
 }
 
-bool BVH::IsOccluded_AfIsOccluded_Afra( const Ray& ray ) const
+bool BVH::IsOccluded_Afra( const Ray& ray ) const
 {
 	unsigned nodeIdx = 0, stack[1024], stackPtr = 0;
 	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
