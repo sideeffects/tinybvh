@@ -4353,8 +4353,6 @@ inline void IntersectCompactTri( Ray& r, float32x4_t& t4, const float* T )
 	if (hit) r.hit = { ta, u, v, *(unsigned*)&T[15] }, t4 = vdupq_n_f32( ta );
 }
 
-#if 0
-
 inline int ARMVecMovemask( uint32x4_t v ) {
 	const int shiftArr[4] = { 0, 1, 2, 3 };
 	int32x4_t shift = vld1q_s32( shiftArr );
@@ -4674,8 +4672,6 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 	}
 	return false;
 }
-
-#endif
 
 #endif // BVH_USENEON
 
