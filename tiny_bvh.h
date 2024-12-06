@@ -395,9 +395,13 @@ static unsigned __bfind( unsigned x ) // https://github.com/mackron/refcode/blob
 #elif defined(__EMSCRIPTEN__)
 	return 31 - __builtin_clz( x );
 #elif defined(__GNUC__) || defined(__clang__)
+#ifndef __APPLE__
 	unsigned r;
 	__asm__ __volatile__( "lzcnt{l %1, %0| %0, %1}" : "=r"(r) : "r"(x) : "cc" );
 	return 31 - r;
+#else
+	return 31 - __builtin_clz( x ); // TODO: unverified.
+#endif
 #endif
 }
 
