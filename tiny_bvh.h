@@ -386,25 +386,6 @@ typedef bvhvec4 SIMDVEC4;
 #define SIMD_SETRVEC(a,b,c,d) bvhvec4( a, b, c, d )
 #endif
 
-#if defined BVH_USEAVX || defined BVH_USENEON
-
-static unsigned __bfind( unsigned x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
-{
-#if defined(_MSC_VER) && !defined(__clang__)
-	return 31 - __lzcnt( x );
-#elif defined(__EMSCRIPTEN__)
-	return 31 - __builtin_clz( x );
-#elif defined(__GNUC__) || defined(__clang__)
-#ifndef __APPLE__
-	unsigned r;
-	__asm__ __volatile__( "lzcnt{l %1, %0| %0, %1}" : "=r"(r) : "r"(x) : "cc" );
-	return 31 - r;
-#else
-	return 31 - __builtin_clz( x ); // TODO: unverified.
-#endif
-#endif
-}
-
 #endif
 
 // error handling
@@ -857,6 +838,25 @@ ALIGNED(64) static unsigned long long int compactlut[24][2] = { { 0, 0 }, { 0, 0
 	0x1617160a0b0a0001 }, { 0xd0c0001000a0b0a, 0x20003000001000c } }; // actually 24x16 uchars in 6 cache lines.
 
 #endif
+
+#if defined BVH_USEAVX || defined BVH_USENEON
+
+static unsigned __bfind( unsigned x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
+{
+#if defined(_MSC_VER) && !defined(__clang__)
+	return 31 - __lzcnt( x );
+#elif defined(__EMSCRIPTEN__)
+	return 31 - __builtin_clz( x );
+#elif defined(__GNUC__) || defined(__clang__)
+#ifndef __APPLE__
+	unsigned r;
+	__asm__ __volatile__( "lzcnt{l %1, %0| %0, %1}" : "=r"(r) : "r"(x) : "cc" );
+	return 31 - r;
+#else
+	return 31 - __builtin_clz( x ); // TODO: unverified.
+#endif
+#endif
+}
 
 void* BVH::AlignedAlloc( size_t size )
 {
