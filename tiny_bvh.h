@@ -2385,7 +2385,7 @@ int BVH::Intersect( Ray& ray, const BVHLayout layout ) const
 		return Intersect_AltSoA( ray );
 		break;
 	#endif
-	#if defined BVH_USEAVX || defined BVH_USENEON
+	#if defined BVH_USEAVX
 	case BVH4_AFRA:
 		FATAL_ERROR_IF( bvh4Alt2 == 0, "BVH::Intersect( .. , BVH4_AFRA ), bvh not available." );
 		return Intersect_Afra( ray );
@@ -2421,6 +2421,8 @@ bool BVH::IsOccluded( const Ray& ray, const BVHLayout layout ) const
 	case AILA_LAINE: return IsOccluded_AilaLaine( ray );
 	#if defined BVH_USEAVX || defined BVH_USENEON
 	case ALT_SOA: return IsOccluded_AltSoA( ray );
+	#endif
+	#if defined BVH_USEAVX
 	case BVH4_AFRA: return IsOccluded_Afra( ray );
 	#endif
 	default:
@@ -4353,6 +4355,8 @@ inline void IntersectCompactTri( Ray& r, float32x4_t& t4, const float* T )
 	if (hit) r.hit = { ta, u, v, *(unsigned*)&T[15] }, t4 = vdupq_n_f32( ta );
 }
 
+#if 0
+
 inline int ARMVecMovemask( uint32x4_t v ) {
 	const int shiftArr[4] = { 0, 1, 2, 3 };
 	int32x4_t shift = vld1q_s32( shiftArr );
@@ -4523,7 +4527,7 @@ inline bool OccludedCompactTri( const Ray& r, const float* T )
 	return u >= 0 && v >= 0 && u + v < 1;
 }
 
-bool BVH::IsOccluded_Afra( const Ray& ray ) const
+bool BVH::IsOccluded_AfIsOccluded_Afra( const Ray& ray ) const
 {
 	unsigned nodeIdx = 0, stack[1024], stackPtr = 0;
 	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
@@ -4672,6 +4676,8 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 	}
 	return false;
 }
+
+#endif
 
 #endif // BVH_USENEON
 
