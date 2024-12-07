@@ -1,3 +1,6 @@
+# dev
+This is the **development branch** for tinybvh. Potentially unstable code, consider yourself warned.
+
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). The library has no dependencies. 
 
@@ -8,6 +11,8 @@ Single-header OpenCL library, which helps you select and initialize a device. It
 * Host/device buffer management
 * Vendor and architecture detection and propagation to #defines in OpenCL code
 * ..And many other things.
+
+![Rendered with tinybvh](images/test.png)
 
 To use tinyocl, just include ````tiny_ocl.h````; this will automatically cause linking with ````OpenCL.lib```` in the 'external' folder, which in turn passes on work to vendor-specific driver code. But all that is not your problem!
 
@@ -31,6 +36,7 @@ A constructed BVH can be used to quickly intersect a ray with the geometry, usin
 
 The constructed BVH will have a layout suitable for construction ('````WALD_32BYTE````'). Several other layouts for the same data are available, which all serve one or more specific purposes. You can convert between layouts using ````BVH::Convert````. The available layouts are:
 * ````BVH::WALD_32BYTE```` : A compact format that stores the AABB for a node, along with child pointers and leaf information in a cross-platform-friendly way. The 32-byte size allows for cache-line alignment.
+* ````BVH::ALT_SOA```` : This format stores bounding box information in a SIMD-friendly format, making the BVH faster to traverse.
 * ````BVH::WALD_DOUBLE```` : Double-precision version of ````BVH::WALD_32BYTE````.
 * ````BVH::VERBOSE```` : A format designed for modifying BVHs, e.g. for post-build optimizations using ````BVH::Optimize()````.
 * ````BVH::AILA_LAINE```` : This format uses 64 bytes per node and stores the AABBs of the two child nodes. This is the format presented in the [2009 Aila & Laine paper](https://research.nvidia.com/sites/default/files/pubs/2009-08_Understanding-the-Efficiency/aila2009hpg_paper.pdf) and recommended for basic GPU ray tracing.
@@ -56,6 +62,10 @@ The cross-platform fenster-based single-source **bitmap renderer** can be compil
 ````g++ -std=c++20 -mavx -mwindows -O3 tiny_bvh_fenster.cpp -o tiny_bvh_fenster```` (on windows)
 
 ```g++ -std=c++20 -mavx -O3 -framework Cocoa tiny_bvh_fenster.cpp -o tiny_bvh_fenster``` (on macOS)
+
+The multi-threaded **ambient occlusion** demo can be compiled with
+
+````g++ -std=c++20 -mavx -mwindows -fopenmp -O3 tiny_bvh_pt.cpp -o tiny_bvh_pt```` (on windows)
 
 The **performance measurement tool** uses OpenMP and can be compiled with:
 
