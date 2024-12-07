@@ -129,6 +129,7 @@ THE SOFTWARE.
 #include <cmath>
 #include <cstring>
 #endif
+#include <cstdint>
 
 // aligned memory allocation
 // note: formally size needs to be a multiple of 'alignment'. See:
@@ -460,7 +461,7 @@ struct BVHContext
 class BVH
 {
 public:
-	enum BVHLayout {
+	enum BVHLayout: uint32_t {
 		WALD_32BYTE = 1,	// Default format, obtained using BVH::Build variants.
 		WALD_DOUBLE,		// Double-precision version of the default format.
 		AILA_LAINE,			// For GPU rendering. Obtained by converting WALD_32BYTE.
@@ -472,11 +473,11 @@ public:
 		BASIC_BVH8,			// Input for CWBVH. Obtained by converting WALD_32BYTE.
 		CWBVH				// Fastest GPU rendering. Obtained by converting BASIC_BVH8.
 	};
-	enum TraceDevice {
+	enum TraceDevice: uint32_t {
 		USE_CPU = 1,
 		USE_GPU
 	};
-	enum BuildFlags {
+	enum BuildFlags: uint32_t {
 		NONE = 0,			// Default building behavior (binned, SAH-driven).
 		FULLSPLIT = 1		// Split as far as possible, even when SAH doesn't agree.
 	};
