@@ -643,7 +643,7 @@ int main()
 	// create OpenCL buffers for the BVH data calculated by tiny_bvh.h
 	tinyocl::Buffer gpuNodes( bvh.usedAltNodes * sizeof( BVH::BVHNodeAlt ), bvh.altNode );
 	tinyocl::Buffer idxData( bvh.idxCount * sizeof( unsigned ), bvh.triIdx );
-	tinyocl::Buffer triData( bvh.triCount * 3 * sizeof( tinybvh::bvhvec4 ), bvh.verts );
+	tinyocl::Buffer triData( bvh.triCount * 3 * sizeof( tinybvh::bvhvec4 ), triangles );
 	// synchronize the host-side data to the gpu side
 	gpuNodes.CopyToDevice();
 	idxData.CopyToDevice();
