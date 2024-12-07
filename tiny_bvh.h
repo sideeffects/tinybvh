@@ -501,6 +501,7 @@ public:
 		BASIC_BVH4,			// Input for BVH4_GPU conversion. Obtained by converting WALD_32BYTE.
 		BVH4_GPU,			// For fast GPU rendering. Obtained by converting BASIC_BVH4.
 		BVH4_AFRA,			// For fast CPU rendering. Obtained by converting BASIC_BVH4.
+		BVH4_WIVE,			// For fast CPU rendering. Obtained by converting BASIC_BVH4.
 		BASIC_BVH8,			// Input for CWBVH. Obtained by converting WALD_32BYTE.
 		CWBVH				// Fastest GPU rendering. Obtained by converting BASIC_BVH8.
 	};
@@ -609,6 +610,19 @@ public:
 		unsigned childFirst[4];
 		unsigned triCount[4];
 	};
+	struct BVHNode4WiVe
+	{
+		// 4-way BVH node, optimized for CPU rendering.
+		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units",
+		// Fuetterling1 et al., 2017.
+		union { SIMDVEC4 xmin4; float xmin[4]; };
+		union { SIMDVEC4 xmax4; float xmax[4]; };
+		union { SIMDVEC4 ymin4; float ymin[4]; };
+		union { SIMDVEC4 ymax4; float ymax[4]; };
+		union { SIMDVEC4 zmin4; float zmin[4]; };
+		union { SIMDVEC4 zmax4; float zmax[4]; };
+		// ORSTRec rec[4];
+	};
 	struct BVHNode8
 	{
 		// 8-wide (aka 'shallow') BVH layout.
@@ -683,8 +697,8 @@ public:
 	void Compact( const BVHLayout layout /* must be WALD_32BYTE or VERBOSE */ );
 	void BuildQuick( const bvhvec4* vertices, const unsigned primCount );
 	void Build( const bvhvec4* vertices, const unsigned primCount );
-	void Build( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void Build( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const unsigned primCount );
 #ifdef BVH_USEAVX
 	void BuildAVX( const bvhvec4* vertices, const unsigned primCount );
@@ -769,7 +783,7 @@ private:
 #endif
 public:
 	// Basic BVH data (WALD_32BYTE layout).
-	bvhvec4slice verts;				// pointer to input primitive array: 3x16 bytes per tri.
+	bvhvec4slice verts = {};				// pointer to input primitive array: 3x16 bytes per tri.
 	unsigned triCount = 0;			// number of primitives in tris.
 	unsigned* triIdx = 0;			// primitive index array.
 	BVHNode* bvhNode = 0;			// BVH node pool, Wald 32-byte format. Root is always in node 0.
@@ -782,7 +796,8 @@ public:
 	BVHNodeVerbose* verbose = 0;	// BVH node with additional info, for BVH optimizer.
 	BVHNode4* bvh4Node = 0;			// BVH node for 4-wide BVH.
 	bvhvec4* bvh4Alt = 0;			// 64-byte 4-wide BVH node for efficient GPU rendering.
-	BVHNode4Alt2* bvh4Alt2 = 0;		// 64-byte 4-wide BVH node for efficient CPU rendering.
+	BVHNode4Alt2* bvh4Alt2 = 0;		// 128-byte 4-wide BVH node for efficient CPU rendering.
+	BVHNode4WiVe* bvh4WiVe = 0;		// 128-byte 4-wide BVH node for efficient CPU rendering.
 	bvhvec4* bvh4Tris = 0;			// triangle data for BVHNode4Alt2 nodes.
 	BVHNode8* bvh8Node = 0;			// BVH node for 8-wide BVH.
 	bvhvec4* bvh8Compact = 0;		// nodes in CWBVH format.
@@ -802,6 +817,7 @@ public:
 	unsigned allocatedBVH4Nodes = 0;
 	unsigned allocatedAlt4aBlocks = 0;
 	unsigned allocatedAlt4bNodes = 0;
+	unsigned allocatedWiVeNodes = 0;
 	unsigned allocatedBVH8Nodes = 0;
 	unsigned allocatedCWBVHBlocks = 0;
 	unsigned usedBVHNodes = 0;
@@ -811,6 +827,7 @@ public:
 	unsigned usedBVH4Nodes = 0;
 	unsigned usedAlt4aBlocks = 0;
 	unsigned usedAlt4bNodes = 0;
+	unsigned usedWiVeNodes = 0;
 	unsigned usedBVH8Nodes = 0;
 	unsigned usedCWBVHBlocks = 0;
 };
@@ -830,48 +847,14 @@ public:
 #include <intrin.h>			// for __lzcnt
 #endif
 
+// We need quite a bit of type reinterpretation, so we'll 
+// turn off the gcc warning here until the end of the file.
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif
 
 namespace tinybvh {
-
-#if 0
-
-// Lookup tables for Fuetterling's traversal, under construction
-
-ALIGNED(64) static const unsigned long long int v_ = 0x1717171717171717, orderlut[8][17] = { { 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, { 0xe140e0e14111117, 0x60000060303090e, 0x60303090000, 0xa10111117000006,
-	0x607070d0a0a100a, 0x7070d0000060000, 0x1617000006000006, 0x512121312121316, 0x10000010404, 0x1000001040405,
-	0xb0a0a0b16161700, 0x10c0c0d0a0a, 0x10c0c0d000001, 0x1514141700000100, 0x202051212151212, 0x205000003000003,
-	0x300000302 }, { 0x600030903000600, 0xe1117110e140e00, 0x309030006000e14, 0xd07000600000600, 0x110a100a00060007,
-	0x6000a100a1117, 0x100000600070d07, 0x1200010004050400, 0x1213121617161213, 0x100040504000100, 0xc0d0c00010000,
-	0x1617160a0b0a0001, 0xd0c0001000a0b0a, 0x20003000001000c, 0x1215120003000205, 0x300121512141714, 0x30002050200 },
-	{ 0x1414111717111717, 0x141117171117170e, 0x309090309090e14, 0x1717111717000606, 0x171117170a101011,
-	0x70d0d0a10101117, 0x1717000606070d0d, 0x1712131316171716, 0x1213131617171617, 0x101040505040505, 0xb16171716171700,
-	0x1617171617170a0b,0xd0d0c0d0d0a0b0b, 0x171417170001010c, 0x1417171215151417, 0x505121515141717, 0x30302050502 },
-	{ 0x303060000060000, 0x306000006000009, 0x140e0e140e0e0903, 0x60000171111, 0x600000d070706, 0x100a0a0d07070600,
-	0x171111100a0a, 0x5040401000001, 0x504040100000100, 0x1616131212131212, 0xc01000001000017, 0x100000100000d0c,
-	0xa0a0b0a0a0d0c0c, 0x300001716160b, 0x300000502020300, 0x1212050202030000, 0x17141415121215 },
-	{ 0x1117140e14171117, 0x906000609030917, 0x140e141711170903, 0xa10171117171117, 0x60d070d17111710,
-	0x1711170d070d0600, 0x1617171117100a10, 0x517161713121317, 0x504050100010504, 0x1617131213171617, 0x170b0a0b17161717,
-	0x100010d0c0d1716, 0xa0b1716170d0c0d, 0x151714171716170b, 0x502051714171512, 0x1417050205030003, 0x17141715121517 },
-	{ 0x903090903060600, 0x1117171114140e09, 0x17171114140e1717, 0xd07060600171711, 0x1110100a0d0d070d,
-	0x10100a1717111717, 0x100171711171711, 0x1205050405050401, 0x1717161717161313, 0x1716171716131312, 0xc0d0d0c01010017,
-	0x1717160b0b0a0d0d, 0x17160b0b0a171716, 0x203030017171617, 0x1515120505020505, 0x1512171714171714, 0x17171417171415 },
-	{ v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_ } }; // actually 8x136 uchars.
-
-ALIGNED(64) static unsigned long long int compactlut[24][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
-	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0xe140e0e14111117 }, { 0x60000060303090e, 0x60303090000 },
-	{ 0xa10111117000006, 0x607070d0a0a100a }, { 0x7070d0000060000, 0x1617000006000006 }, { 0x512121312121316,
-	0x10000010404 }, { 0x1000001040405, 0xb0a0a0b16161700 }, { 0x10c0c0d0a0a, 0x10c0c0d000001 },
-	{ 0x1514141700000100, 0x202051212151212 }, { 0x205000003000003, 0x300000302 }, { 0x600030903000600,
-	0xe1117110e140e00 }, { 0x309030006000e14, 0xd07000600000600 }, { 0x110a100a00060007, 0x6000a100a1117 },
-	{ 0x100000600070d07, 0x1200010004050400 }, { 0x1213121617161213, 0x100040504000100 }, { 0xc0d0c00010000,
-	0x1617160a0b0a0001 }, { 0xd0c0001000a0b0a, 0x20003000001000c } }; // actually 24x16 uchars in 6 cache lines.
-
-#endif
 
 #if defined BVH_USEAVX || defined BVH_USENEON
 
@@ -1040,9 +1023,9 @@ void BVH::BuildQuick( const bvhvec4* vertices, const unsigned primCount )
 // format after construction.
 void BVH::Build( const bvhvec4slice& vertices )
 {
-	const unsigned primCount = vertices.count / 3;
-	FATAL_ERROR_IF( primCount == 0, "BVH::Build( .. ), primCount == 0." );
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::Build( .. ), primCount == 0." );
 	// allocate on first build
+	const unsigned primCount = vertices.count / 3;
 	const unsigned spaceNeeded = primCount * 2; // upper limit
 	if (allocatedBVHNodes < spaceNeeded)
 	{
@@ -1192,9 +1175,9 @@ void BVH::Build( const bvhvec4* vertices, const unsigned primCount )
 // primarily useful for static geometry.
 void BVH::BuildHQ( const bvhvec4slice& vertices )
 {
-	const unsigned primCount = vertices.count / 3;
-	FATAL_ERROR_IF( primCount == 0, "BVH::BuildHQ( .. ), primCount == 0." );
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildHQ( .. ), primCount == 0." );
 	// allocate on first build
+	const unsigned primCount = vertices.count / 3;
 	const unsigned slack = primCount >> 2; // for split prims
 	const unsigned spaceNeeded = primCount * 3;
 	if (allocatedBVHNodes < spaceNeeded)
@@ -1816,6 +1799,28 @@ void BVH::Convert( const BVHLayout from, const BVHLayout to, const bool /* delet
 			nodeIdx = stack[--stackPtr];
 		}
 		usedAlt4bNodes = newAlt4Ptr;
+	}
+	else if (from == BASIC_BVH4 && to == BVH4_WIVE)
+	{
+		// Convert a 4-wide BVH to a format suitable for CPU traversal.
+		// See "Accelerated Single Ray Tracing for Wide Vector Units",
+		// Fuetterling et al., 2017.
+		unsigned spaceNeeded = usedBVH4Nodes;
+		if (allocatedAlt4bNodes < spaceNeeded)
+		{
+			FATAL_ERROR_IF( bvh4Node == 0, "BVH::Convert( BASIC_BVH4, BVH4_WIVE ), bvh4Node == 0." );
+			AlignedFree( bvh4WiVe );
+			bvh4WiVe = (BVHNode4WiVe*)AlignedAlloc( spaceNeeded * sizeof( BVHNode4WiVe ) );
+			allocatedWiVeNodes = spaceNeeded;
+		}
+		memset( bvh4WiVe, 0, spaceNeeded * sizeof( BVHNode4WiVe ) );
+		// start conversion
+		// unsigned newNodePtr = 0, nodeIdx = 0, stack[128], stackPtr = 0;
+		// while (1)
+		// {
+		// 	const BVHNode4& orig = bvh4Node[nodeIdx];
+		// .. TODO - under construction.
+		// }
 	}
 	else if (from == WALD_32BYTE && to == BASIC_BVH8)
 	{
