@@ -267,11 +267,6 @@ struct bvhuint2
 	uint32_t x, y;
 };
 
-#ifdef TINYBVH_IMPLEMENTATION
-bvhvec4::bvhvec4( const bvhvec3& a ) { x = a.x; y = a.y; z = a.z; w = 0; }
-bvhvec4::bvhvec4( const bvhvec3& a, float b ) { x = a.x; y = a.y; z = a.z; w = b; }
-#endif
-
 #endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
 struct bvhaabb
@@ -904,8 +899,12 @@ static uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 #endif
 }
 
+#ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 bvhvec4::bvhvec4( const bvhvec3& a ) { x = a.x; y = a.y; z = a.z; w = 0; }
 bvhvec4::bvhvec4( const bvhvec3& a, float b ) { x = a.x; y = a.y; z = a.z; w = b; }
+
+#endif
 
 bvhvec4slice::bvhvec4slice( const bvhvec4* data, uint32_t count, uint32_t stride ) :
 	data{ reinterpret_cast<const int8_t*>(data) },
