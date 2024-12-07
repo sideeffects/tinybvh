@@ -199,8 +199,8 @@ static LRESULT CALLBACK fenster_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(hwnd, &ps);
     HDC memdc = CreateCompatibleDC(hdc);
-    auto hbmp = CreateCompatibleBitmap(hdc, f->width, f->height);
-    auto oldbmp = SelectObject(memdc, hbmp);
+    HBITMAP hbmp = CreateCompatibleBitmap(hdc, f->width, f->height);
+	HBITMAP oldbmp = static_cast<HBITMAP>(SelectObject(memdc, hbmp));
     BINFO bi = {{sizeof(bi), f->width, -f->height, 1, 32, BI_BITFIELDS}};
     bi.bmiColors[0].rgbRed = 0xff;
     bi.bmiColors[1].rgbGreen = 0xff;
@@ -249,10 +249,13 @@ FENSTER_API int fenster_open(struct fenster *f) {
   wc.hInstance = hInstance;
   wc.lpszClassName = f->title;
   RegisterClassEx(&wc);
+  RECT desiredRect = {0, 0, f->width, f->height};
+  AdjustWindowRectEx(&desiredRect, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CLIENTEDGE);
+  int adjustedWidth = desiredRect.right - desiredRect.left;
+  int adjustedHeight = desiredRect.bottom - desiredRect.top;
   f->hwnd = CreateWindowEx(WS_EX_CLIENTEDGE, f->title, f->title,
                            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                           f->width, f->height, NULL, NULL, hInstance, NULL);
-
+                           adjustedWidth, adjustedHeight, NULL, NULL, hInstance, NULL);
   if (f->hwnd == NULL)
     return -1;
   SetWindowLongPtr(f->hwnd, GWLP_USERDATA, (LONG_PTR)f);
@@ -261,7 +264,10 @@ FENSTER_API int fenster_open(struct fenster *f) {
   return 0;
 }
 
-FENSTER_API void fenster_close(struct fenster *f) { (void)f; }
+FENSTER_API void fenster_close(struct fenster *f) {
+  PostMessage(f->hwnd, WM_CLOSE, 0, 0);
+  (void)f;
+}
 
 FENSTER_API int fenster_loop(struct fenster *f) {
   MSG msg;
