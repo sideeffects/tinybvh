@@ -34,7 +34,7 @@ THE SOFTWARE.
 // Mov 16: version 0.9.0 : (external) OpenCL in speedtest.
 // Nov 15: version 0.8.3 : Incremental update / bugfixes.
 // Nov 14: version 0.8.0 : ARM/NEON support.
-// Nov 13: version 0.7.5 : Support for WASM with EMSCRIPTEN. 
+// Nov 13: version 0.7.5 : Support for WASM with EMSCRIPTEN.
 // Nov 12: version 0.7.0 : CWBVH construction and traversal.
 // Nov 11: version 0.5.1 : SBVH builder, BVH4_GPU traversal.
 // Nov 10: version 0.4.2 : BVH4/8, gpu-friendly BVH4.
@@ -113,7 +113,7 @@ THE SOFTWARE.
 // ============================================================================
 //
 //        P R E L I M I N A R I E S
-// 
+//
 // ============================================================================
 
 // needful includes
@@ -129,6 +129,7 @@ THE SOFTWARE.
 #include <cmath>
 #include <cstring>
 #endif
+#include <cstdint>
 
 // aligned memory allocation
 // note: formally size needs to be a multiple of 'alignment'. See:
@@ -245,9 +246,40 @@ struct bvhaabb
 	bvhvec3 maxBounds; unsigned dummy2;
 };
 
+/**
+ * Strided slice of @ref bvhvec4
+ */
+struct bvhvec4slice
+{
+	bvhvec4slice() = default;
+	/**
+	 * @param data Pointer to the first element
+	 * @param count Number of @ref bvhvec4 in the slice, not **bytes**
+	 * @param stride Byte stride between each @ref bvhvec4 element
+	 */
+	bvhvec4slice(const bvhvec4* data, uint32_t count, uint32_t stride = sizeof(bvhvec4));
+
+	operator bool() const { return !!data; }
+	const bvhvec4& operator [] ( size_t i ) const;
+	const char* data = nullptr;
+	uint32_t count;
+	uint32_t stride;
+};
+
 #ifdef TINYBVH_IMPLEMENTATION
 bvhvec4::bvhvec4( const bvhvec3& a ) { x = a.x; y = a.y; z = a.z; w = 0; }
 bvhvec4::bvhvec4( const bvhvec3& a, float b ) { x = a.x; y = a.y; z = a.z; w = b; }
+
+bvhvec4slice::bvhvec4slice( const bvhvec4* data, uint32_t count, uint32_t stride ):
+	data{reinterpret_cast<const char*>(data)},
+	count{count},
+	stride{stride} {}
+
+const bvhvec4& bvhvec4slice::operator[]( size_t i ) const
+{
+	// TODO: Bound check in debug
+	return *reinterpret_cast<const bvhvec4*>(data + stride * i);
+}
 #endif
 
 #ifdef _MSC_VER
@@ -395,7 +427,7 @@ typedef bvhvec4 SIMDVEC4;
 // ============================================================================
 //
 //        T I N Y _ B V H   I N T E R F A C E
-// 
+//
 // ============================================================================
 
 struct Intersection
@@ -541,7 +573,7 @@ public:
 	};
 	struct BVHNode4
 	{
-		// 4-wide (aka 'shallow') BVH layout.  
+		// 4-wide (aka 'shallow') BVH layout.
 		bvhvec3 aabbMin; unsigned firstTri;
 		bvhvec3 aabbMax; unsigned triCount;
 		unsigned child[4];
@@ -579,7 +611,7 @@ public:
 	};
 	struct BVHNode8
 	{
-		// 8-wide (aka 'shallow') BVH layout.  
+		// 8-wide (aka 'shallow') BVH layout.
 		bvhvec3 aabbMin; unsigned firstTri;
 		bvhvec3 aabbMax; unsigned triCount;
 		unsigned child[8];
@@ -599,7 +631,7 @@ public:
 	};
 	// BLASInstance: A TLAS is built over BLAS instances, where a single BLAS can be
 	// used with multiple transforms, and multiple BLASses can be combined in a complex
-	// scene. The TLAS is built over the world-space AABBs of the BLAS root nodes. 
+	// scene. The TLAS is built over the world-space AABBs of the BLAS root nodes.
 	class BLASInstance
 	{
 	public:
@@ -651,6 +683,8 @@ public:
 	void Compact( const BVHLayout layout /* must be WALD_32BYTE or VERBOSE */ );
 	void BuildQuick( const bvhvec4* vertices, const unsigned primCount );
 	void Build( const bvhvec4* vertices, const unsigned primCount );
+	void Build( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const unsigned primCount );
 #ifdef BVH_USEAVX
 	void BuildAVX( const bvhvec4* vertices, const unsigned primCount );
@@ -704,7 +738,7 @@ private:
 		bvhvec3 e = aabbMax - aabbMin; // extent of the node
 		return e.x * e.y + e.y * e.z + e.z * e.x;
 	}
-	void PrecomputeTriangle( const bvhvec4* const vert, float* T );
+	void PrecomputeTriangle( const bvhvec4slice& vert, uint32_t triIndex, float* T );
 	bool ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim );
 	void RefitUpVerbose( unsigned nodeIdx );
 	unsigned FindBestNewPosition( const unsigned Lid );
@@ -735,7 +769,7 @@ private:
 #endif
 public:
 	// Basic BVH data (WALD_32BYTE layout).
-	bvhvec4* verts = 0;				// pointer to input primitive array: 3x16 bytes per tri.
+	bvhvec4slice verts;				// pointer to input primitive array: 3x16 bytes per tri.
 	unsigned triCount = 0;			// number of primitives in tris.
 	unsigned* triIdx = 0;			// primitive index array.
 	BVHNode* bvhNode = 0;			// BVH node pool, Wald 32-byte format. Root is always in node 0.
@@ -786,7 +820,7 @@ public:
 // ============================================================================
 //
 //        I M P L E M E N T A T I O N
-// 
+//
 // ============================================================================
 
 #ifdef TINYBVH_IMPLEMENTATION
@@ -807,34 +841,34 @@ namespace tinybvh {
 
 // Lookup tables for Fuetterling's traversal, under construction
 
-ALIGNED(64) static const unsigned long long int v_ = 0x1717171717171717, orderlut[8][17] = { { 0, 0, 0, 0, 0, 0, 
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, { 0xe140e0e14111117, 0x60000060303090e, 0x60303090000, 0xa10111117000006, 
-	0x607070d0a0a100a, 0x7070d0000060000, 0x1617000006000006, 0x512121312121316, 0x10000010404, 0x1000001040405, 
-	0xb0a0a0b16161700, 0x10c0c0d0a0a, 0x10c0c0d000001, 0x1514141700000100, 0x202051212151212, 0x205000003000003, 
-	0x300000302 }, { 0x600030903000600, 0xe1117110e140e00, 0x309030006000e14, 0xd07000600000600, 0x110a100a00060007, 
-	0x6000a100a1117, 0x100000600070d07, 0x1200010004050400, 0x1213121617161213, 0x100040504000100, 0xc0d0c00010000, 
-	0x1617160a0b0a0001, 0xd0c0001000a0b0a, 0x20003000001000c, 0x1215120003000205, 0x300121512141714, 0x30002050200 }, 
-	{ 0x1414111717111717, 0x141117171117170e, 0x309090309090e14, 0x1717111717000606, 0x171117170a101011, 
-	0x70d0d0a10101117, 0x1717000606070d0d, 0x1712131316171716, 0x1213131617171617, 0x101040505040505, 0xb16171716171700, 
-	0x1617171617170a0b,0xd0d0c0d0d0a0b0b, 0x171417170001010c, 0x1417171215151417, 0x505121515141717, 0x30302050502 }, 
-	{ 0x303060000060000, 0x306000006000009, 0x140e0e140e0e0903, 0x60000171111, 0x600000d070706, 0x100a0a0d07070600, 
-	0x171111100a0a, 0x5040401000001, 0x504040100000100, 0x1616131212131212, 0xc01000001000017, 0x100000100000d0c, 
-	0xa0a0b0a0a0d0c0c, 0x300001716160b, 0x300000502020300, 0x1212050202030000, 0x17141415121215 }, 
-	{ 0x1117140e14171117, 0x906000609030917, 0x140e141711170903, 0xa10171117171117, 0x60d070d17111710, 
-	0x1711170d070d0600, 0x1617171117100a10, 0x517161713121317, 0x504050100010504, 0x1617131213171617, 0x170b0a0b17161717, 
-	0x100010d0c0d1716, 0xa0b1716170d0c0d, 0x151714171716170b, 0x502051714171512, 0x1417050205030003, 0x17141715121517 }, 
+ALIGNED(64) static const unsigned long long int v_ = 0x1717171717171717, orderlut[8][17] = { { 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, { 0xe140e0e14111117, 0x60000060303090e, 0x60303090000, 0xa10111117000006,
+	0x607070d0a0a100a, 0x7070d0000060000, 0x1617000006000006, 0x512121312121316, 0x10000010404, 0x1000001040405,
+	0xb0a0a0b16161700, 0x10c0c0d0a0a, 0x10c0c0d000001, 0x1514141700000100, 0x202051212151212, 0x205000003000003,
+	0x300000302 }, { 0x600030903000600, 0xe1117110e140e00, 0x309030006000e14, 0xd07000600000600, 0x110a100a00060007,
+	0x6000a100a1117, 0x100000600070d07, 0x1200010004050400, 0x1213121617161213, 0x100040504000100, 0xc0d0c00010000,
+	0x1617160a0b0a0001, 0xd0c0001000a0b0a, 0x20003000001000c, 0x1215120003000205, 0x300121512141714, 0x30002050200 },
+	{ 0x1414111717111717, 0x141117171117170e, 0x309090309090e14, 0x1717111717000606, 0x171117170a101011,
+	0x70d0d0a10101117, 0x1717000606070d0d, 0x1712131316171716, 0x1213131617171617, 0x101040505040505, 0xb16171716171700,
+	0x1617171617170a0b,0xd0d0c0d0d0a0b0b, 0x171417170001010c, 0x1417171215151417, 0x505121515141717, 0x30302050502 },
+	{ 0x303060000060000, 0x306000006000009, 0x140e0e140e0e0903, 0x60000171111, 0x600000d070706, 0x100a0a0d07070600,
+	0x171111100a0a, 0x5040401000001, 0x504040100000100, 0x1616131212131212, 0xc01000001000017, 0x100000100000d0c,
+	0xa0a0b0a0a0d0c0c, 0x300001716160b, 0x300000502020300, 0x1212050202030000, 0x17141415121215 },
+	{ 0x1117140e14171117, 0x906000609030917, 0x140e141711170903, 0xa10171117171117, 0x60d070d17111710,
+	0x1711170d070d0600, 0x1617171117100a10, 0x517161713121317, 0x504050100010504, 0x1617131213171617, 0x170b0a0b17161717,
+	0x100010d0c0d1716, 0xa0b1716170d0c0d, 0x151714171716170b, 0x502051714171512, 0x1417050205030003, 0x17141715121517 },
 	{ 0x903090903060600, 0x1117171114140e09, 0x17171114140e1717, 0xd07060600171711, 0x1110100a0d0d070d,
-	0x10100a1717111717, 0x100171711171711, 0x1205050405050401, 0x1717161717161313, 0x1716171716131312, 0xc0d0d0c01010017, 
-	0x1717160b0b0a0d0d, 0x17160b0b0a171716, 0x203030017171617, 0x1515120505020505, 0x1512171714171714, 0x17171417171415 }, 
-	{ v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_ } }; // actually 8x136 uchars. 
+	0x10100a1717111717, 0x100171711171711, 0x1205050405050401, 0x1717161717161313, 0x1716171716131312, 0xc0d0d0c01010017,
+	0x1717160b0b0a0d0d, 0x17160b0b0a171716, 0x203030017171617, 0x1515120505020505, 0x1512171714171714, 0x17171417171415 },
+	{ v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_, v_ } }; // actually 8x136 uchars.
 
-ALIGNED(64) static unsigned long long int compactlut[24][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, 
-	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0xe140e0e14111117 }, { 0x60000060303090e, 0x60303090000 }, 
-	{ 0xa10111117000006, 0x607070d0a0a100a }, { 0x7070d0000060000, 0x1617000006000006 }, { 0x512121312121316, 
-	0x10000010404 }, { 0x1000001040405, 0xb0a0a0b16161700 }, { 0x10c0c0d0a0a, 0x10c0c0d000001 }, 
-	{ 0x1514141700000100, 0x202051212151212 }, { 0x205000003000003, 0x300000302 }, { 0x600030903000600, 
-	0xe1117110e140e00 }, { 0x309030006000e14, 0xd07000600000600 }, { 0x110a100a00060007, 0x6000a100a1117 }, 
-	{ 0x100000600070d07, 0x1200010004050400 }, { 0x1213121617161213, 0x100040504000100 }, { 0xc0d0c00010000, 
+ALIGNED(64) static unsigned long long int compactlut[24][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0xe140e0e14111117 }, { 0x60000060303090e, 0x60303090000 },
+	{ 0xa10111117000006, 0x607070d0a0a100a }, { 0x7070d0000060000, 0x1617000006000006 }, { 0x512121312121316,
+	0x10000010404 }, { 0x1000001040405, 0xb0a0a0b16161700 }, { 0x10c0c0d0a0a, 0x10c0c0d000001 },
+	{ 0x1514141700000100, 0x202051212151212 }, { 0x205000003000003, 0x300000302 }, { 0x600030903000600,
+	0xe1117110e140e00 }, { 0x309030006000e14, 0xd07000600000600 }, { 0x110a100a00060007, 0x6000a100a1117 },
+	{ 0x100000600070d07, 0x1200010004050400 }, { 0x1213121617161213, 0x100040504000100 }, { 0xc0d0c00010000,
 	0x1617160a0b0a0001 }, { 0xd0c0001000a0b0a, 0x20003000001000c } }; // actually 24x16 uchars in 6 cache lines.
 
 #endif
@@ -934,7 +968,7 @@ void BVH::BuildQuick( const bvhvec4* vertices, const unsigned primCount )
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildQuick( .. ), bvh not rebuildable." );
-	verts = (bvhvec4*)vertices; // note: we're not copying this data; don't delete.
+	verts = bvhvec4slice{vertices, primCount * 3}; // note: we're not copying this data; don't delete.
 	idxCount = triCount = primCount;
 	// reset node pool
 	unsigned newNodePtr = 2;
@@ -998,14 +1032,15 @@ void BVH::BuildQuick( const bvhvec4* vertices, const unsigned primCount )
 	usedBVHNodes = newNodePtr;
 }
 
-// Basic single-function binned-SAH-builder. 
-// This is the reference builder; it yields a decent tree suitable for ray 
-// tracing on the CPU. This code uses no SIMD instructions. 
+// Basic single-function binned-SAH-builder.
+// This is the reference builder; it yields a decent tree suitable for ray
+// tracing on the CPU. This code uses no SIMD instructions.
 // Faster code, using SSE/AVX, is available for x64 CPUs.
 // For GPU rendering: The resulting BVH should be converted to a more optimal
 // format after construction.
-void BVH::Build( const bvhvec4* vertices, const unsigned primCount )
+void BVH::Build( const bvhvec4slice& vertices )
 {
+	const unsigned primCount = vertices.count / 3;
 	FATAL_ERROR_IF( primCount == 0, "BVH::Build( .. ), primCount == 0." );
 	// allocate on first build
 	const unsigned spaceNeeded = primCount * 2; // upper limit
@@ -1022,7 +1057,7 @@ void BVH::Build( const bvhvec4* vertices, const unsigned primCount )
 		else FATAL_ERROR_IF( fragment == 0, "BVH::Build( 0, .. ), not called from ::Build( aabb )." );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::Build( .. ), bvh not rebuildable." );
-	verts = (bvhvec4*)vertices; // note: we're not copying this data; don't delete.
+	verts = vertices;
 	idxCount = triCount = primCount;
 	// reset node pool
 	unsigned newNodePtr = 2;
@@ -1142,16 +1177,22 @@ void BVH::Build( const bvhvec4* vertices, const unsigned primCount )
 	usedBVHNodes = newNodePtr;
 }
 
+void BVH::Build( const bvhvec4* vertices, const unsigned primCount )
+{
+	Build(bvhvec4slice{vertices, primCount * 3});
+}
+
 // SBVH builder.
 // Besides the regular object splits used in the reference builder, the SBVH
 // algorithm also considers spatial splits, where primitives may be cut in
 // multiple parts. This increases primitive count but may reduce overlap of
-// BVH nodes. The cost of each option is considered per split. 
-// For typical geometry, SBVH yields a tree that can be traversed 25% faster. 
-// This comes at greatly increased construction cost, making the SBVH 
+// BVH nodes. The cost of each option is considered per split.
+// For typical geometry, SBVH yields a tree that can be traversed 25% faster.
+// This comes at greatly increased construction cost, making the SBVH
 // primarily useful for static geometry.
-void BVH::BuildHQ( const bvhvec4* vertices, const unsigned primCount )
+void BVH::BuildHQ( const bvhvec4slice& vertices )
 {
+	const unsigned primCount = vertices.count / 3;
 	FATAL_ERROR_IF( primCount == 0, "BVH::BuildHQ( .. ), primCount == 0." );
 	// allocate on first build
 	const unsigned slack = primCount >> 2; // for split prims
@@ -1168,7 +1209,7 @@ void BVH::BuildHQ( const bvhvec4* vertices, const unsigned primCount )
 		fragment = (Fragment*)AlignedAlloc( (primCount + slack) * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildHQ( .. ), bvh not rebuildable." );
-	verts = (bvhvec4*)vertices; // note: we're not copying this data; don't delete.
+	verts = vertices; // note: we're not copying this data; don't delete.
 	idxCount = primCount + slack;
 	triCount = primCount;
 	unsigned* triIdxA = triIdx, * triIdxB = new unsigned[triCount + slack];
@@ -1383,6 +1424,11 @@ void BVH::BuildHQ( const bvhvec4* vertices, const unsigned primCount )
 	frag_min_flipped = false; // did not use AVX for binning
 	may_have_holes = false; // there may be holes in the index list, but not in the node list
 	usedBVHNodes = newNodePtr;
+}
+
+void BVH::BuildHQ( const bvhvec4* vertices, const unsigned primCount )
+{
+	BuildHQ(bvhvec4slice{vertices, primCount * 3});
 }
 
 // Convert: Change the BVH layout from one format into another.
@@ -1617,7 +1663,7 @@ void BVH::Convert( const BVHLayout from, const BVHLayout to, const bool /* delet
 				{
 					unsigned t = triIdx[childNode[i]->firstTri + j];
 				#ifdef BVH4_GPU_COMPRESSED_TRIS
-					PrecomputeTriangle( verts + t * 3, (float*)&bvh4Alt[newAlt4Ptr] );
+					PrecomputeTriangle( verts, t * 3, (float*)&bvh4Alt[newAlt4Ptr] );
 					bvh4Alt[newAlt4Ptr + 3] = bvhvec4( 0, 0, 0, *(float*)&t );
 					newAlt4Ptr += 4;
 				#else
@@ -1760,7 +1806,7 @@ void BVH::Convert( const BVHLayout from, const BVHLayout to, const bool /* delet
 					for (unsigned j = 0; j < count; j++)
 					{
 						unsigned fi = triIdx[first + j];
-						PrecomputeTriangle( verts + fi * 3, (float*)&bvh4Tris[triPtr] );
+						PrecomputeTriangle( verts, fi * 3, (float*)&bvh4Tris[triPtr] );
 						bvh4Tris[triPtr + 3] = bvhvec4( 0, 0, 0, *(float*)&fi );
 						triPtr += 4;
 					}
@@ -1840,8 +1886,8 @@ void BVH::Convert( const BVHLayout from, const BVHLayout to, const bool /* delet
 		FATAL_ERROR_IF( bvh8Node[0].isLeaf(), "BVH::Convert( BASIC_BVH8, CWBVH ), collapsing single-node bvh." );
 		// allocate memory
 		// Note: This can be far lower (specifically: usedBVH8Nodes) if we know that
-		// none of the BVH8 leafs has more than three primitives. 
-		// Without this guarantee, the only safe upper limit is triCount * 2, since 
+		// none of the BVH8 leafs has more than three primitives.
+		// Without this guarantee, the only safe upper limit is triCount * 2, since
 		// we will be splitting fat BVH8 leafs to as we go.
 		unsigned spaceNeeded = triCount * 2 * 5; // CWBVH nodes use 80 bytes each.
 		if (spaceNeeded > allocatedCWBVHBlocks)
@@ -1946,7 +1992,7 @@ void BVH::Convert( const BVHLayout from, const BVHLayout to, const bool /* delet
 				{
 					int primitiveIndex = triIdx[child->firstTri + j];
 				#ifdef CWBVH_COMPRESSED_TRIS
-					PrecomputeTriangle( verts + primitiveIndex * 3, (float*)&bvh8Tris[triDataPtr] );
+					PrecomputeTriangle( verts, + primitiveIndex * 3, (float*)&bvh8Tris[triDataPtr] );
 					bvh8Tris[triDataPtr + 3] = bvhvec4( 0, 0, 0, *(float*)&primitiveIndex );
 					triDataPtr += 4;
 				#else
@@ -2014,7 +2060,7 @@ void BVH::Convert( const BVHLayout from, const BVHLayout to, const bool /* delet
 int BVH::NodeCount( const BVHLayout layout ) const
 {
 	// Determine the number of nodes in the tree. Typically the result should
-	// be usedBVHNodes - 1 (second node is always unused), but some builders may 
+	// be usedBVHNodes - 1 (second node is always unused), but some builders may
 	// have unused nodes besides node 1. TODO: Support more layouts.
 	unsigned retVal = 0, nodeIdx = 0, stack[64], stackPtr = 0;
 	if (layout == WALD_32BYTE)
@@ -2410,9 +2456,9 @@ void BVH::BatchIntersect( Ray* rayBatch, const unsigned N, const BVHLayout layou
 }
 
 // Detect if a ray is occluded / shadow ray query.
-// Unlike Intersect, this function only returns a yes/no answer: Yes if any 
-// geometry blocks it (taking into account ray length); no if the ray can 
-// travel the specified distance without encountering anything. 
+// Unlike Intersect, this function only returns a yes/no answer: Yes if any
+// geometry blocks it (taking into account ray length); no if the ray can
+// travel the specified distance without encountering anything.
 bool BVH::IsOccluded( const Ray& ray, const BVHLayout layout ) const
 {
 	switch (layout)
@@ -2781,7 +2827,7 @@ int BVH::Intersect_Alt4BVH( Ray& ray ) const
 }
 
 // Intersect a WALD_32BYTE BVH with a ray packet.
-// The 256 rays travel together to better utilize the caches and to amortize the cost 
+// The 256 rays travel together to better utilize the caches and to amortize the cost
 // of memory transfers over the rays in the bundle.
 // Note that this basic implementation assumes a specific layout of the rays. Provided
 // as 'proof of concept', should not be used in production code.
@@ -2954,7 +3000,7 @@ void BVH::Intersect256Rays( Ray* packet ) const
 // ============================================================================
 //
 //        I M P L E M E N T A T I O N  -  A V X / S S E  C O D E
-// 
+//
 // ============================================================================
 
 #ifdef BVH_USEAVX
@@ -3037,13 +3083,13 @@ void BVH::BuildAVX( const bvhvec4* vertices, const unsigned primCount )
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildAVX( .. ), bvh not rebuildable." );
-	verts = (bvhvec4*)vertices; // note: we're not copying this data; don't delete.
+	verts = bvhvec4slice{vertices, primCount * 3}; // note: we're not copying this data; don't delete.
 	triCount = idxCount = primCount;
 	unsigned newNodePtr = 2;
 	struct FragSSE { __m128 bmin4, bmax4; };
 	FragSSE* frag4 = (FragSSE*)fragment;
 	__m256* frag8 = (__m256*)fragment;
-	const __m128* verts4 = (__m128*)verts;
+	const __m128* verts4 = (__m128*)vertices;
 	// assign all triangles to the root node
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount;
@@ -3552,8 +3598,8 @@ static unsigned __popc( unsigned x )
 static inline unsigned extract_byte( const unsigned i, const unsigned n ) { return (i >> (n * 8)) & 0xFF; }
 static inline unsigned sign_extend_s8x4( const unsigned i )
 {
-	// asm("prmt.b32 %0, %1, 0x0, 0x0000BA98;" : "=r"(v) : "r"(i)); // BA98: 1011`1010`1001`1000 
-	// with the given parameters, prmt will extend the sign to all bits in a byte. 
+	// asm("prmt.b32 %0, %1, 0x0, 0x0000BA98;" : "=r"(v) : "r"(i)); // BA98: 1011`1010`1001`1000
+	// with the given parameters, prmt will extend the sign to all bits in a byte.
 	unsigned b0 = (i & 0b10000000000000000000000000000000) ? 0xff000000 : 0;
 	unsigned b1 = (i & 0b00000000100000000000000000000000) ? 0x00ff0000 : 0;
 	unsigned b2 = (i & 0b00000000000000001000000000000000) ? 0x0000ff00 : 0;
@@ -3761,7 +3807,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 			if (count == 0) nodeIdx = node.childFirst[lane]; else
 			{
 				const unsigned first = node.childFirst[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 				if (stackPtr == 0) break;
 				nodeIdx = stack[--stackPtr];
@@ -3789,7 +3835,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 			if (triCount0 == 0) nodeIdx = node.childFirst[lane0]; else
 			{
 				const unsigned first = node.childFirst[lane0];
-				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 				nodeIdx = 0;
 			}
@@ -3802,7 +3848,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 			else
 			{
 				const unsigned first = node.childFirst[lane1];
-				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -3831,7 +3877,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 					continue;
 				}
 				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -3861,7 +3907,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 					continue;
 				}
 				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -3924,7 +3970,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 			if (count == 0) nodeIdx = node.childFirst[lane]; else
 			{
 				const unsigned first = node.childFirst[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 				if (stackPtr == 0) break;
 				nodeIdx = stack[--stackPtr];
@@ -3952,7 +3998,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 			if (triCount0 == 0) nodeIdx = node.childFirst[lane0]; else
 			{
 				const unsigned first = node.childFirst[lane0];
-				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 				nodeIdx = 0;
 			}
@@ -3965,7 +4011,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 			else
 			{
 				const unsigned first = node.childFirst[lane1];
-				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
 		}
@@ -3994,7 +4040,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 					continue;
 				}
 				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
 		}
@@ -4024,7 +4070,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 					continue;
 				}
 				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
 		}
@@ -4043,7 +4089,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 // ============================================================================
 //
 //        I M P L E M E N T A T I O N  -  A R M / N E O N  C O D E
-// 
+//
 // ============================================================================
 
 #ifdef BVH_USENEON
@@ -4124,13 +4170,13 @@ void BVH::BuildNEON( const bvhvec4* vertices, const unsigned primCount )
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildNEON( .. ), bvh not rebuildable." );
-	verts = (bvhvec4*)vertices; // note: we're not copying this data; don't delete.
+	verts = bvhvec4slice{vertices, primCount * 3}; // note: we're not copying this data; don't delete.
 	triCount = idxCount = primCount;
 	unsigned newNodePtr = 2;
 	struct FragSSE { float32x4_t bmin4, bmax4; };
 	FragSSE* frag4 = (FragSSE*)fragment;
 	float32x4x2_t* frag8 = (float32x4x2_t*)fragment;
-	const float32x4_t* verts4 = (float32x4_t*)verts;
+	const float32x4_t* verts4 = (float32x4_t*)vertices;
 	// assign all triangles to the root node
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount;
@@ -4398,7 +4444,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 			if (count == 0) nodeIdx = node.childFirst[lane]; else
 			{
 				const unsigned first = node.childFirst[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 				if (stackPtr == 0) break;
 				nodeIdx = stack[--stackPtr];
@@ -4426,7 +4472,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 			if (triCount0 == 0) nodeIdx = node.childFirst[lane0]; else
 			{
 				const unsigned first = node.childFirst[lane0];
-				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 				nodeIdx = 0;
 			}
@@ -4439,7 +4485,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 			else
 			{
 				const unsigned first = node.childFirst[lane1];
-				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -4469,7 +4515,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 					continue;
 				}
 				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -4499,7 +4545,7 @@ int BVH::Intersect_Afra( Ray& ray ) const
 					continue;
 				}
 				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -4562,7 +4608,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 			if (count == 0) nodeIdx = node.childFirst[lane]; else
 			{
 				const unsigned first = node.childFirst[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 				if (stackPtr == 0) break;
 				nodeIdx = stack[--stackPtr];
@@ -4590,7 +4636,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 			if (triCount0 == 0) nodeIdx = node.childFirst[lane0]; else
 			{
 				const unsigned first = node.childFirst[lane0];
-				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 				nodeIdx = 0;
 			}
@@ -4603,7 +4649,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 			else
 			{
 				const unsigned first = node.childFirst[lane1];
-				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
 		}
@@ -4632,7 +4678,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 					continue;
 				}
 				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
 		}
@@ -4662,7 +4708,7 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 					continue;
 				}
 				const unsigned first = node.childFirst[lane], count = node.triCount[lane];
-				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf 
+				for (unsigned j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
 		}
@@ -4678,12 +4724,12 @@ bool BVH::IsOccluded_Afra( const Ray& ray ) const
 // ============================================================================
 //
 //        D O U B L E   P R E C I S I O N   S U P P O R T
-// 
+//
 // ============================================================================
 
 #ifdef DOUBLE_PRECISION_SUPPORT
 
-// Basic single-function binned-SAH-builder, double-precision version. 
+// Basic single-function binned-SAH-builder, double-precision version.
 void BVH::BuildEx( const bvhdbl3* vertices, const unsigned primCount )
 {
 	// allocate on first build
@@ -4915,7 +4961,7 @@ double BVH::BVHNodeEx::Intersect( const RayEx& ray ) const
 // ============================================================================
 //
 //        H E L P E R S
-// 
+//
 // ============================================================================
 
 // TransformPoint
@@ -4978,10 +5024,10 @@ float BVH::IntersectAABB( const Ray& ray, const bvhvec3& aabbMin, const bvhvec3&
 }
 
 // PrecomputeTriangle (helper), transforms a triangle to the format used in:
-// Fast Ray-Triangle Intersections by Coordinate Transformation. Baldwin & Weber, 2016. 
-void BVH::PrecomputeTriangle( const bvhvec4* const vert, float* T )
+// Fast Ray-Triangle Intersections by Coordinate Transformation. Baldwin & Weber, 2016.
+void BVH::PrecomputeTriangle( const bvhvec4slice& vert, uint32_t triIndex, float* T )
 {
-	bvhvec3 v0 = vert[0], v1 = vert[1], v2 = vert[2];
+	bvhvec3 v0 = vert[triIndex], v1 = vert[triIndex + 1], v2 = vert[triIndex + 2];
 	bvhvec3 e1 = v1 - v0, e2 = v2 - v0, N = cross( e1, e2 );
 	float x1, x2, n = dot( v0, N ), rN;
 	if (fabs( N[0] ) > fabs( N[1] ) && fabs( N[0] ) > fabs( N[2] ))
