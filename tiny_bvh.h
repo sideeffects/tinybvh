@@ -79,7 +79,10 @@ THE SOFTWARE.
 #ifndef TINY_BVH_H_
 #define TINY_BVH_H_
 
-// binned BVH building: bin count
+// Run-time checks; disabled by default.
+// #define PARANOID
+
+// Binned BVH building: bin count.
 #define BVHBINS 8
 
 // SAH BVH building: Heuristic parameters
@@ -111,7 +114,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	0
-#define TINY_BVH_VERSION_SUB	5
+#define TINY_BVH_VERSION_SUB	6
 
 // ============================================================================
 //
@@ -266,22 +269,6 @@ struct bvhvec4slice
 	const int8_t* data = nullptr;
 	uint32_t count, stride;
 };
-
-#ifdef TINYBVH_IMPLEMENTATION
-bvhvec4::bvhvec4( const bvhvec3& a ) { x = a.x; y = a.y; z = a.z; w = 0; }
-bvhvec4::bvhvec4( const bvhvec3& a, float b ) { x = a.x; y = a.y; z = a.z; w = b; }
-
-bvhvec4slice::bvhvec4slice( const bvhvec4* data, uint32_t count, uint32_t stride ) :
-	data{ reinterpret_cast<const int8_t*>(data) },
-	count{ count },
-	stride{ stride } {}
-
-const bvhvec4& bvhvec4slice::operator[]( size_t i ) const
-{
-	// TODO: Bound check in debug
-	return *reinterpret_cast<const bvhvec4*>(data + stride * i);
-}
-#endif
 
 #ifdef _MSC_VER
 #pragma warning ( pop )
@@ -874,6 +861,21 @@ static uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 	return 31 - __builtin_clz( x ); // TODO: unverified.
 #endif
 #endif
+}
+
+bvhvec4::bvhvec4( const bvhvec3& a ) { x = a.x; y = a.y; z = a.z; w = 0; }
+bvhvec4::bvhvec4( const bvhvec3& a, float b ) { x = a.x; y = a.y; z = a.z; w = b; }
+
+bvhvec4slice::bvhvec4slice( const bvhvec4* data, uint32_t count, uint32_t stride ) :
+	data{ reinterpret_cast<const int8_t*>(data) },
+	count{ count }, stride{ stride } {}
+
+const bvhvec4& bvhvec4slice::operator[]( size_t i ) const
+{
+#ifdef PARANOID
+	FATAL_ERROR_IF( i >= count, "bvhvec4slice::[..], Reading outside slice." );
+#endif
+	return *reinterpret_cast<const bvhvec4*>(data + stride * i);
 }
 
 void* BVH::AlignedAlloc( size_t size )
