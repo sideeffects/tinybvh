@@ -87,12 +87,15 @@ This version of the library includes the following functionality:
 * OpenCL traversal: Aila & Laine, 4-way quantized, CWBVH
 * Support for WASM / EMSCRIPTEN, g++, clang, Visual Studio
 * Optional user-defined memory allocation, by [Thierry Cantenot](https://github.com/tcantenot)
+* Vertex array can now have a custom stride, by [David Peicho](https://github.com/DavidPeicho)
+* You can now also BYOVT ('bring your own vector types'), thanks [Tijmen Verhoef](https://github.com/nemjit001)
 * 'SpeedTest' tool that times and validates all (well, most) traversal kernels.
 
 The current version of the library is rapidly gaining functionality. Please expect changes to the interface.
 
 Plans, ordered by priority:
 
+* NEW: We now use the "Issues" list for this!
 * TLAS/BLAS traversal with BLAS transforms
 * Documentation:
   * Wiki
@@ -108,8 +111,6 @@ Plans, ordered by priority:
   * Reverse-engineer Embree & PhysX
   * Implement Fuetterling et al.'s 2017 paper
   
-These features have already been completed but need polishing and adapting to the interface, once it is settled. CWBVH GPU traversal combined with an optimized SBVH provides state-of-the-art **#RTXOff** performance; expect _billions of rays per second_.
-
 # tinybvh in the Wild
 A list of projects using tinybvh:
 * [unity-tinybvh](https://github.com/andr3wmac/unity-tinybvh): An example implementation for tinybvh in Unity and a foundation for building compute based raytracing solutions, by Andrew MacIntyre.
