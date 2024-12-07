@@ -46,13 +46,12 @@ THE SOFTWARE.
 // Oct 29: version 0.0.1 : Establishing interface.
 //
 
+// How to use:
 //
 // Use this in *one* .c or .cpp
 //   #define TINYBVH_IMPLEMENTATION
 //   #include "tiny_bvh.h"
-//
 
-//
 // tinybvh can use custom vector types by defining TINYBVH_USE_CUSTOM_VECTOR_TYPES once before inclusion.
 // To define custom vector types create a tinybvh namespace with the appropriate using directives, e.g.:
 //	 namespace tinybvh
@@ -68,9 +67,7 @@ THE SOFTWARE.
 // 
 //	 #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
 //   #include <tiny_bvh.h>
-// 
 
-// How to use:
 // See tiny_bvh_test.cpp for basic usage. In short:
 // instantiate a BVH: tinybvh::BVH bvh;
 // build it: bvh.Build( (tinybvh::bvhvec4*)triangleData, TRIANGLE_COUNT );
@@ -720,14 +717,17 @@ public:
 	}
 	void Compact( const BVHLayout layout /* must be WALD_32BYTE or VERBOSE */ );
 	void BuildQuick( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildQuick( const bvhvec4slice& vertices );
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
-	void BuildHQ( const bvhvec4slice& vertices );
 	void Build( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
 #ifdef BVH_USEAVX
 	void BuildAVX( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildAVX( const bvhvec4slice& vertices );
 #elif defined BVH_USENEON
 	void BuildNEON( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildNEON( const bvhvec4slice& vertices );
 #endif
 	void BuildTLAS( const bvhaabb* aabbs, const uint32_t aabbCount );
 	void BuildTLAS( const BLASInstance* bvhs, const uint32_t instCount );
@@ -979,8 +979,15 @@ void BVH::BuildTLAS( const BLASInstance* bvhs, const uint32_t instCount )
 // your application (e.g., when you need to trace few rays).
 void BVH::BuildQuick( const bvhvec4* vertices, const uint32_t primCount )
 {
-	FATAL_ERROR_IF( primCount == 0, "BVH::BuildQuick( .. ), primCount == 0." );
+	// build the BVH with a continuous array of bvhvec4 vertices:
+	// in this case, the stride for the slice is 16 bytes.
+	BuildQuick( bvhvec4slice{ vertices, primCount * 3, 16U } );
+}
+void BVH::BuildQuick( const bvhvec4slice& vertices )
+{
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildQuick( .. ), primCount == 0." );
 	// allocate on first build
+	const uint32_t primCount = vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2; // upper limit
 	if (allocatedBVHNodes < spaceNeeded)
 	{
@@ -994,7 +1001,7 @@ void BVH::BuildQuick( const bvhvec4* vertices, const uint32_t primCount )
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildQuick( .. ), bvh not rebuildable." );
-	verts = bvhvec4slice{ vertices, primCount * 3 }; // note: we're not copying this data; don't delete.
+	verts = vertices; // note: we're not copying this data; don't delete.
 	idxCount = triCount = primCount;
 	// reset node pool
 	uint32_t newNodePtr = 2;
@@ -1063,7 +1070,13 @@ void BVH::BuildQuick( const bvhvec4* vertices, const uint32_t primCount )
 // tracing on the CPU. This code uses no SIMD instructions.
 // Faster code, using SSE/AVX, is available for x64 CPUs.
 // For GPU rendering: The resulting BVH should be converted to a more optimal
-// format after construction.
+// format after construction, e.g. BVH::AILA_LAINE.
+void BVH::Build( const bvhvec4* vertices, const uint32_t primCount )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices:
+	// in this case, the stride for the slice is 16 bytes.
+	Build( bvhvec4slice{ vertices, primCount * 3, 16U } );
+}
 void BVH::Build( const bvhvec4slice& vertices )
 {
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::Build( .. ), primCount == 0." );
@@ -1096,8 +1109,10 @@ void BVH::Build( const bvhvec4slice& vertices )
 		// building a BVH over triangles specified as three 16-byte vertices each.
 		for (uint32_t i = 0; i < triCount; i++)
 		{
-			fragment[i].bmin = tinybvh_min( tinybvh_min( verts[i * 3], verts[i * 3 + 1] ), verts[i * 3 + 2] );
-			fragment[i].bmax = tinybvh_max( tinybvh_max( verts[i * 3], verts[i * 3 + 1] ), verts[i * 3 + 2] );
+			const bvhvec4 v0 = verts[i * 3], v1 = verts[i * 3 + 1], v2 = verts[i * 3 + 2];
+			const bvhvec4 fmin = tinybvh_min( v0, tinybvh_min( v1, v2 ) );
+			const bvhvec4 fmax = tinybvh_max( v0, tinybvh_max( v1, v2 ) );
+			fragment[i].bmin = fmin, fragment[i].bmax = fmax;
 			root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
 			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
 		}
@@ -1203,11 +1218,6 @@ void BVH::Build( const bvhvec4slice& vertices )
 	usedBVHNodes = newNodePtr;
 }
 
-void BVH::Build( const bvhvec4* vertices, const uint32_t primCount )
-{
-	Build( bvhvec4slice{ vertices, primCount * 3 } );
-}
-
 // SBVH builder.
 // Besides the regular object splits used in the reference builder, the SBVH
 // algorithm also considers spatial splits, where primitives may be cut in
@@ -1216,6 +1226,10 @@ void BVH::Build( const bvhvec4* vertices, const uint32_t primCount )
 // For typical geometry, SBVH yields a tree that can be traversed 25% faster.
 // This comes at greatly increased construction cost, making the SBVH
 // primarily useful for static geometry.
+void BVH::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice{ vertices, primCount * 3, 16U } );
+}
 void BVH::BuildHQ( const bvhvec4slice& vertices )
 {
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildHQ( .. ), primCount == 0." );
@@ -1450,11 +1464,6 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 	frag_min_flipped = false; // did not use AVX for binning
 	may_have_holes = false; // there may be holes in the index list, but not in the node list
 	usedBVHNodes = newNodePtr;
-}
-
-void BVH::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
-{
-	BuildHQ( bvhvec4slice{ vertices, primCount * 3 } );
 }
 
 // Convert: Change the BVH layout from one format into another.
@@ -2380,35 +2389,26 @@ void BVH::MergeLeafs()
 			// cost of leaving things as they are
 			BVHNodeVerbose& left = verbose[node.left];
 			BVHNodeVerbose& right = verbose[node.right];
-			float Ckeepsplit =
-				C_TRAV + C_INT *
-				(SA( left.aabbMin, left.aabbMax ) * leftCount +
-					SA( right.aabbMin, right.aabbMax ) * rightCount);
+			float Ckeepsplit = C_TRAV + C_INT * (SA( left.aabbMin, left.aabbMax ) *
+				leftCount + SA( right.aabbMin, right.aabbMax ) * rightCount);
 			if (Cunsplit <= Ckeepsplit)
 			{
 				// collapse the subtree
 				uint32_t start = newIdxPtr;
 				MergeSubtree( nodeIdx, newIdx, newIdxPtr );
-				node.firstTri = start;
-				node.triCount = mergedCount;
+				node.firstTri = start, node.triCount = mergedCount;
 				node.left = node.right = 0;
 				// pop new task
 				if (stackPtr == 0) break;
 				nodeIdx = stack[--stackPtr];
 			}
-			else
-			{
-				// recurse
-				nodeIdx = node.left;
-				stack[stackPtr++] = node.right;
-			}
+			else /* recurse */ nodeIdx = node.left, stack[stackPtr++] = node.right;
 		}
 	}
 	// cleanup
 	AlignedFree( subtreeTriCount );
 	AlignedFree( triIdx );
-	triIdx = newIdx;
-	may_have_holes = true; // all over the place, in fact
+	triIdx = newIdx, may_have_holes = true; // all over the place, in fact
 }
 
 // Optimizing a BVH: BVH must be in 'verbose' format.
@@ -3098,10 +3098,17 @@ inline float halfArea( const __m256& a /* a contains aabb itself, with min.xyz n
 #endif
 void BVH::BuildAVX( const bvhvec4* vertices, const uint32_t primCount )
 {
-	FATAL_ERROR_IF( primCount == 0, "BVH::BuildAVX( .. ), primCount == 0." );
+	// build the BVH with a continuous array of bvhvec4 vertices:
+	// in this case, the stride for the slice is 16 bytes.
+	BuildAVX( bvhvec4slice{ vertices, primCount * 3, 16U } );
+}
+void BVH::BuildAVX( const bvhvec4slice& vertices )
+{
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildAVX( .. ), primCount == 0." );
+	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildAVX( .. ), stride must be multiple of 16." );
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildAVX( .. ), primCount == 0." );
 	int32_t test = BVHBINS;
 	if (test != 8) assert( false ); // AVX builders require BVHBINS == 8.
-	assert( ((long long)vertices & 63) == 0 ); // buffer must be cacheline-aligned
 	// aligned data
 	ALIGNED( 64 ) __m256 binbox[3 * BVHBINS];			// 768 bytes
 	ALIGNED( 64 ) __m256 binboxOrig[3 * BVHBINS];		// 768 bytes
@@ -3118,6 +3125,7 @@ void BVH::BuildAVX( const bvhvec4* vertices, const uint32_t primCount )
 	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
 	for (uint32_t i = 0; i < 3 * BVHBINS; i++) binboxOrig[i] = max8; // binbox initialization template
 	// reset node pool
+	const uint32_t primCount = vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2;
 	if (allocatedBVHNodes < spaceNeeded)
 	{
@@ -3131,13 +3139,13 @@ void BVH::BuildAVX( const bvhvec4* vertices, const uint32_t primCount )
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildAVX( .. ), bvh not rebuildable." );
-	verts = bvhvec4slice{ vertices, primCount * 3 }; // note: we're not copying this data; don't delete.
+	verts = vertices; // note: we're not copying this data; don't delete.
 	triCount = idxCount = primCount;
 	uint32_t newNodePtr = 2;
 	struct FragSSE { __m128 bmin4, bmax4; };
 	FragSSE* frag4 = (FragSSE*)fragment;
 	__m256* frag8 = (__m256*)fragment;
-	const __m128* verts4 = (__m128*)vertices;
+	const __m128* verts4 = (__m128*)verts.data; // that's why it must be 16-byte aligned.
 	// assign all triangles to the root node
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount;
@@ -3681,7 +3689,7 @@ int32_t BVH::Intersect_CWBVH( Ray& ray ) const
 				const bvhvec4 n2 = blasNodes[child_node_index * 5 + 2], n3 = blasNodes[child_node_index * 5 + 3];
 				const bvhvec4 n4 = blasNodes[child_node_index * 5 + 4], p = n0;
 				bvhint3 e;
-				e.x = (int32_t)*((int8_t*)&n0.w + 0), e.y = (int32_t)*((int8_t*)&n0.w + 1), e.z = (int32_t)*((int8_t*)&n0.w + 2);
+				e.x = (int32_t) * ((int8_t*)&n0.w + 0), e.y = (int32_t) * ((int8_t*)&n0.w + 1), e.z = (int32_t) * ((int8_t*)&n0.w + 2);
 				ngroup.x = as_uint( n1.x ), tgroup.x = as_uint( n1.y ), tgroup.y = 0;
 				uint32_t hitmask = 0;
 				const uint32_t vx = (e.x + 127) << 23u; const float adjusted_idirx = *(float*)&vx * ray.rD.x;
@@ -4186,10 +4194,17 @@ static inline int32x4_t vrnd32xq_f32( float32x4_t a ) {
 
 void BVH::BuildNEON( const bvhvec4* vertices, const uint32_t primCount )
 {
-	FATAL_ERROR_IF( primCount == 0, "BVH::BuildNEON( .. ), primCount == 0." );
+	// build the BVH with a continuous array of bvhvec4 vertices:
+	// in this case, the stride for the slice is 16 bytes.
+	BuildNEON( bvhvec4slice{ vertices, primCount * 3, 16U } );
+}
+void BVH::BuildNEON( const bvhvec4slice& vertices )
+{
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
+	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildNEON( .. ), stride must be multiple of 16." );
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
 	int32_t test = BVHBINS;
 	if (test != 8) assert( false ); // AVX builders require BVHBINS == 8.
-	assert( ((long long)vertices & 63) == 0 ); // buffer must be cacheline-aligned
 	// aligned data
 	ALIGNED( 64 ) float32x4x2_t binbox[3 * BVHBINS];		// 768 bytes
 	ALIGNED( 64 ) float32x4x2_t binboxOrig[3 * BVHBINS];	// 768 bytes
@@ -4205,6 +4220,7 @@ void BVH::BuildNEON( const bvhvec4* vertices, const uint32_t primCount )
 	static const float32x4_t binmul3 = vdupq_n_f32( BVHBINS * 0.49999f );
 	for (uint32_t i = 0; i < 3 * BVHBINS; i++) binboxOrig[i] = max8; // binbox initialization template
 	// reset node pool
+	const uint32_t primCount = vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2;
 	if (allocatedBVHNodes < spaceNeeded)
 	{
@@ -4218,13 +4234,13 @@ void BVH::BuildNEON( const bvhvec4* vertices, const uint32_t primCount )
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildNEON( .. ), bvh not rebuildable." );
-	verts = bvhvec4slice{ vertices, primCount * 3 }; // note: we're not copying this data; don't delete.
+	verts = vertices; // note: we're not copying this data; don't delete.
 	triCount = idxCount = primCount;
 	uint32_t newNodePtr = 2;
 	struct FragSSE { float32x4_t bmin4, bmax4; };
 	FragSSE* frag4 = (FragSSE*)fragment;
 	float32x4x2_t* frag8 = (float32x4x2_t*)fragment;
-	const float32x4_t* verts4 = (float32x4_t*)vertices;
+	const float32x4_t* verts4 = (float32x4_t*)vertices.data;
 	// assign all triangles to the root node
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount;
