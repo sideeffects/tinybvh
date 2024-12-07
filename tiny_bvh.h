@@ -50,6 +50,24 @@ THE SOFTWARE.
 //   #include "tiny_bvh.h"
 //
 
+//
+// tinybvh can use custom vector types by defining TINYBVH_USE_CUSTOM_VECTOR_TYPES once before inclusion.
+// To define custom vector types create a tinybvh namespace with the appropriate using directives, e.g.:
+//	 namespace tinybvh
+//   {  
+//     using bvhint2 = math::int2;
+//     using bvhint3 = math::int3;
+//     using bvhuint2 = math::uint2;
+//     using bvhvec2 = math::float2;
+//     using bvhvec3 = math::float3;
+//     using bvhvec4 = math::float4;
+//     using bvhdbl3 = math::double3;
+//   }
+// 
+//	 #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
+//   #include <tiny_bvh.h>
+// 
+
 // How to use:
 // See tiny_bvh_test.cpp for basic usage. In short:
 // instantiate a BVH: tinybvh::BVH bvh;
