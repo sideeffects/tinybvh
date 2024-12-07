@@ -1,6 +1,3 @@
-# dev
-This is the **development branch** for tinybvh. Potentially unstable code, consider yourself warned.
-
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). The library has no dependencies. 
 
@@ -71,7 +68,7 @@ The **performance measurement tool** uses OpenMP and can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast -fopenmp tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.0.5
+# Version 1.0.6
 This version of the library includes the following functionality:
 * Binned SAH BVH builder
 * Fast binned SAH BVH builder using AVX intrinsics
