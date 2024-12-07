@@ -263,7 +263,7 @@ struct bvhvec4slice
 	bvhvec4slice( const bvhvec4* data, uint32_t count, uint32_t stride = sizeof( bvhvec4 ) );
 	operator bool() const { return !!data; }
 	const bvhvec4& operator [] ( size_t i ) const;
-	const char* data = nullptr;
+	const int8_t* data = nullptr;
 	uint32_t count, stride;
 };
 
@@ -272,7 +272,7 @@ bvhvec4::bvhvec4( const bvhvec3& a ) { x = a.x; y = a.y; z = a.z; w = 0; }
 bvhvec4::bvhvec4( const bvhvec3& a, float b ) { x = a.x; y = a.y; z = a.z; w = b; }
 
 bvhvec4slice::bvhvec4slice( const bvhvec4* data, uint32_t count, uint32_t stride ) :
-	data{ reinterpret_cast<const char*>(data) },
+	data{ reinterpret_cast<const int8_t*>(data) },
 	count{ count },
 	stride{ stride } {}
 
@@ -3639,7 +3639,7 @@ int32_t BVH::Intersect_CWBVH( Ray& ray ) const
 				const bvhvec4 n2 = blasNodes[child_node_index * 5 + 2], n3 = blasNodes[child_node_index * 5 + 3];
 				const bvhvec4 n4 = blasNodes[child_node_index * 5 + 4], p = n0;
 				bvhint3 e;
-				e.x = (int32_t)*((char*)&n0.w + 0), e.y = (int32_t)*((char*)&n0.w + 1), e.z = (int32_t)*((char*)&n0.w + 2);
+				e.x = (int32_t)*((int8_t*)&n0.w + 0), e.y = (int32_t)*((int8_t*)&n0.w + 1), e.z = (int32_t)*((int8_t*)&n0.w + 2);
 				ngroup.x = as_uint( n1.x ), tgroup.x = as_uint( n1.y ), tgroup.y = 0;
 				uint32_t hitmask = 0;
 				const uint32_t vx = (e.x + 127) << 23u; const float adjusted_idirx = *(float*)&vx * ray.rD.x;
