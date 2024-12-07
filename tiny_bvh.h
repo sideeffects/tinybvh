@@ -50,6 +50,24 @@ THE SOFTWARE.
 //   #include "tiny_bvh.h"
 //
 
+//
+// tinybvh can use custom vector types by defining TINYBVH_USE_CUSTOM_VECTOR_TYPES once before inclusion.
+// To define custom vector types create a tinybvh namespace with the appropriate using directives, e.g.:
+//	 namespace tinybvh
+//   {  
+//     using bvhint2 = math::int2;
+//     using bvhint3 = math::int3;
+//     using bvhuint2 = math::uint2;
+//     using bvhvec2 = math::float2;
+//     using bvhvec3 = math::float3;
+//     using bvhvec4 = math::float4;
+//     using bvhdbl3 = math::double3;
+//   }
+// 
+//	 #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
+//   #include <tiny_bvh.h>
+// 
+
 // How to use:
 // See tiny_bvh_test.cpp for basic usage. In short:
 // instantiate a BVH: tinybvh::BVH bvh;
@@ -90,6 +108,7 @@ THE SOFTWARE.
 
 // Features
 #define DOUBLE_PRECISION_SUPPORT
+//#define TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
 // CWBVH triangle format: doesn't seem to help on GPU?
 // #define CWBVH_COMPRESSED_TRIS
@@ -179,6 +198,8 @@ namespace tinybvh {
 #pragma warning ( disable: 4201 /* nameless struct / union */ )
 #endif
 
+#ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 struct bvhvec3;
 struct ALIGNED( 16 ) bvhvec4
 {
@@ -239,16 +260,18 @@ struct bvhuint2
 	unsigned x, y;
 };
 
+#ifdef TINYBVH_IMPLEMENTATION
+bvhvec4::bvhvec4( const bvhvec3& a ) { x = a.x; y = a.y; z = a.z; w = 0; }
+bvhvec4::bvhvec4( const bvhvec3& a, float b ) { x = a.x; y = a.y; z = a.z; w = b; }
+#endif
+
+#endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 struct bvhaabb
 {
 	bvhvec3 minBounds; unsigned dummy1;
 	bvhvec3 maxBounds; unsigned dummy2;
 };
-
-#ifdef TINYBVH_IMPLEMENTATION
-bvhvec4::bvhvec4( const bvhvec3& a ) { x = a.x; y = a.y; z = a.z; w = 0; }
-bvhvec4::bvhvec4( const bvhvec3& a, float b ) { x = a.x; y = a.y; z = a.z; w = b; }
-#endif
 
 #ifdef _MSC_VER
 #pragma warning ( pop )
@@ -278,6 +301,8 @@ template <class T> inline static void tinybvh_swap( T& a, T& b ) { T t = a; a = 
 
 // Operator overloads.
 // Only a minimal set is provided.
+#ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 inline bvhvec2 operator-( const bvhvec2& a ) { return bvhvec2( -a.x, -a.y ); }
 inline bvhvec3 operator-( const bvhvec3& a ) { return bvhvec3( -a.x, -a.y, -a.z ); }
 inline bvhvec4 operator-( const bvhvec4& a ) { return bvhvec4( -a.x, -a.y, -a.z, -a.w ); }
@@ -304,6 +329,8 @@ inline bvhvec3 operator/( float b, const bvhvec3& a ) { return bvhvec3( b / a.x,
 inline bvhvec4 operator/( float b, const bvhvec4& a ) { return bvhvec4( b / a.x, b / a.y, b / a.z, b / a.w ); }
 inline bvhvec3 operator*=( bvhvec3& a, const float b ) { return bvhvec3( a.x * b, a.y * b, a.z * b ); }
 
+#endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 // Vector math: cross and dot.
 static inline bvhvec3 cross( const bvhvec3& a, const bvhvec3& b )
 {
@@ -322,8 +349,10 @@ static bvhvec3 normalize( const bvhvec3& a )
 }
 
 #ifdef DOUBLE_PRECISION_SUPPORT
-
 // Double-precision math
+
+#ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 struct bvhdbl3
 {
 	bvhdbl3() = default;
@@ -335,8 +364,13 @@ struct bvhdbl3
 	union { struct { double x, y, z; }; double cell[3]; };
 };
 
+#endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 static inline bvhdbl3 tinybvh_min( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( tinybvh_min( a.x, b.x ), tinybvh_min( a.y, b.y ), tinybvh_min( a.z, b.z ) ); }
 static inline bvhdbl3 tinybvh_max( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( tinybvh_max( a.x, b.x ), tinybvh_max( a.y, b.y ), tinybvh_max( a.z, b.z ) ); }
+
+#ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 inline bvhdbl3 operator-( const bvhdbl3& a ) { return bvhdbl3( -a.x, -a.y, -a.z ); }
 inline bvhdbl3 operator+( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( a.x + b.x, a.y + b.y, a.z + b.z ); }
 inline bvhdbl3 operator-( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( a.x - b.x, a.y - b.y, a.z - b.z ); }
@@ -346,6 +380,8 @@ inline bvhdbl3 operator*( const bvhdbl3& a, float b ) { return bvhdbl3( a.x * b,
 inline bvhdbl3 operator*( float b, const bvhdbl3& a ) { return bvhdbl3( b * a.x, b * a.y, b * a.z ); }
 inline bvhdbl3 operator/( float b, const bvhdbl3& a ) { return bvhdbl3( b / a.x, b / a.y, b / a.z ); }
 inline bvhdbl3 operator*=( bvhdbl3& a, const float b ) { return bvhdbl3( a.x * b, a.y * b, a.z * b ); }
+
+#endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
 static inline bvhdbl3 cross( const bvhdbl3& a, const bvhdbl3& b )
 {
