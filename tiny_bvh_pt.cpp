@@ -1,3 +1,9 @@
+// This example shows how to build a basic CPU path tracer using
+// tinybvh. Function Tick uses OpenMP to render tiles of pixels
+// in parallel. For each pixel, function Trace recursively evaluates 
+// light. The scene is here a single array of triangles, which
+// function AddMesh (repeatedly) adds to.
+
 #define FENSTER_APP_IMPLEMENTATION
 #define SCRWIDTH 800
 #define SCRHEIGHT 600

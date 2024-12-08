@@ -12,7 +12,7 @@
 
 #define TRIANGLE_COUNT	8192
 
-tinybvh::bvhvec4 triangles[TRIANGLE_COUNT * 3];
+tinybvh::bvhvec4 triangles[TRIANGLE_COUNT * 3]; // must be 16 byte!
 
 float uniform_rand() { return (float)rand() / (float)RAND_MAX; }
 
