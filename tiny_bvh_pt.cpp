@@ -21,8 +21,6 @@ static BVH::BVHLayout layout = BVH::WALD_32BYTE;
 
 // Multi-therading
 static unsigned threadCount = std::thread::hardware_concurrency();
-std::atomic<int> tileIdx(0);
-
 
 // Setup view pyramid for a pinhole camera: 
 // eye, p1 (top-left), p2 (top-right) and p3 (bottom-left)
@@ -204,7 +202,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 
 	tileIdx = 0;
 
-	std::thread** threads = new std::thread * [threadCount];
+	std::atomic<int> tileIdx(0);
 	std::vector<std::thread> threads;
 
 	for (int i = 0; i < threadCount; ++i) {
