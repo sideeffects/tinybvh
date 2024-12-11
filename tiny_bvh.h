@@ -1873,7 +1873,7 @@ void BVH::Intersect256Rays( Ray* packet ) const
 int32_t BVH::NodeCount() const
 {
 	// Determine the number of nodes in the tree. Typically the result should
-	// be usedBVHNodes - 1 (second node is always unused), but some builders may
+	// be usedNodes - 1 (second node is always unused), but some builders may
 	// have unused nodes besides node 1. TODO: Support more layouts.
 	uint32_t retVal = 0, nodeIdx = 0, stack[64], stackPtr = 0;
 	while (1)
@@ -1963,7 +1963,7 @@ void BVH_Verbose::ConvertFrom( const BVH& original )
 int32_t BVH_Verbose::NodeCount() const
 {
 	// Determine the number of nodes in the tree. Typically the result should
-	// be usedBVHNodes - 1 (second node is always unused), but some builders may
+	// be usedNodes - 1 (second node is always unused), but some builders may
 	// have unused nodes besides node 1. TODO: Support more layouts.
 	uint32_t retVal = 0, nodeIdx = 0, stack[64], stackPtr = 0;
 	while (1)
@@ -2763,7 +2763,7 @@ int32_t BVH4_GPU::Intersect( Ray& ray ) const
 void BVH8::ConvertFrom( const BVH& original )
 {
 	// allocate space
-	// Note: The safe upper bound here is usedBVHNodes when converting an existing
+	// Note: The safe upper bound here is usedNodes when converting an existing
 	// BVH2, but we need triCount * 2 to be safe in later conversions, e.g. to
 	// CWBVH, which may further split some leaf nodes.
 	const uint32_t spaceNeeded = original.triCount * 2;
@@ -2893,7 +2893,7 @@ void BVH8_CWBVH::ConvertFrom( BVH8& original )
 	// Adapted from code by "AlanWBFT".
 	FATAL_ERROR_IF( original.bvh8Node[0].isLeaf(), "BVH8_CWBVH::ConvertFrom( .. ), converting a single-node bvh." );
 	// allocate memory
-	// Note: This can be far lower (specifically: usedBVH8Nodes) if we know that
+	// Note: This can be far lower (specifically: usedNodes) if we know that
 	// none of the BVH8 leafs has more than three primitives.
 	// Without this guarantee, the only safe upper limit is triCount * 2, since
 	// we will be splitting fat BVH8 leafs to as we go.
@@ -4331,7 +4331,7 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	refittable = true; // not using spatial splits: can refit this BVH
 	frag_min_flipped = true; // NEON was used for binning; fragment.min flipped
 	may_have_holes = false; // the NEON builder produces a continuous list of nodes
-	usedBVHNodes = newNodePtr;
+	usedNodes = newNodePtr;
 }
 
 // Traverse the second alternative BVH layout (ALT_SOA).
