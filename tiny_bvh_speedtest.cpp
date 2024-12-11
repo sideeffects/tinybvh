@@ -24,7 +24,7 @@
 #define TRAVERSE_SOA2WAY_ST
 #define TRAVERSE_4WAY
 #define TRAVERSE_2WAY_DBL
-#define TRAVERSE_CWBVH
+// #define TRAVERSE_CWBVH
 #define TRAVERSE_BVH4
 #define TRAVERSE_BVH8
 #define TRAVERSE_2WAY_MT
@@ -145,13 +145,15 @@ float TestPrimaryRays( uint32_t layout, Ray* batch, unsigned N, unsigned passes 
 		switch (layout)
 		{
 		case _DEFAULT: for (unsigned i = 0; i < N; i++) bvh->Intersect( batch[i] ); break;
-		case _SOA: for (unsigned i = 0; i < N; i++) bvh_soa->Intersect( batch[i] ); break;
 		case _GPU2: for (unsigned i = 0; i < N; i++) bvh_gpu->Intersect( batch[i] ); break;
 		case _BVH4: for (unsigned i = 0; i < N; i++) bvh4->Intersect( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) bvh4_cpu->Intersect( batch[i] ); break;
 		case _GPU4: for (unsigned i = 0; i < N; i++) bvh4_gpu->Intersect( batch[i] ); break;
 		case _BVH8: for (unsigned i = 0; i < N; i++) bvh8->Intersect( batch[i] ); break;
+	#ifdef BVH_USEAVX
 		case _CWBVH: for (unsigned i = 0; i < N; i++) cwbvh->Intersect( batch[i] ); break;
+		case _SOA: for (unsigned i = 0; i < N; i++) bvh_soa->Intersect( batch[i] ); break;
+	#endif
 		default: break;
 		};
 	}
@@ -205,11 +207,7 @@ float TestShadowRays( uint32_t layout, Ray* batch, unsigned N, unsigned passes )
 		case _DEFAULT: for (unsigned i = 0; i < N; i++) occluded += bvh->IsOccluded( batch[i] ); break;
 		case _SOA: for (unsigned i = 0; i < N; i++) occluded += bvh_soa->IsOccluded( batch[i] ); break;
 		case _GPU2: for (unsigned i = 0; i < N; i++) occluded += bvh_gpu->IsOccluded( batch[i] ); break;
-		// case _BVH4: for (unsigned i = 0; i < N; i++) occluded += bvh4->IsOccluded( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
-		// case _GPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_gpu->IsOccluded( batch[i] ); break;
-		// case _BVH8: for (unsigned i = 0; i < N; i++) occluded += bvh8->IsOccluded( batch[i] ); break;
-		// case _CWBVH: for (unsigned i = 0; i < N; i++) occluded += cwbvh->IsOccluded( batch[i] ); break;
 		default: break;
 		}
 	}
@@ -535,7 +533,7 @@ int main()
 
 #endif
 
-#ifdef TRAVERSE_SOA2WAY_ST
+#if defined TRAVERSE_SOA2WAY_ST && (defined BVH_USEAVX || defined BVH_USENEON)
 
 	// SOA
 	if (!bvh_soa) bvh_soa = new BVH_SoA( *bvh );
