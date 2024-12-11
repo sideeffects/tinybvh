@@ -533,7 +533,7 @@ int main()
 
 #endif
 
-#if defined TRAVERSE_SOA2WAY_ST && (defined BVH_USEAVX || defined BVH_USENEON)
+#if defined TRAVERSE_SOA2WAY_ST && defined BVH_USEAVX // BVH_SoA::IsOccluded is not available for NEON yet.
 
 	// SOA
 	if (!bvh_soa) bvh_soa = new BVH_SoA( *bvh );
