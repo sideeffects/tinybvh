@@ -205,17 +205,15 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	tileIdx = 0;
 
 	std::thread** threads = new std::thread * [threadCount];
+	std::vector<std::thread> threads;
 
-	for (int i = 0; i < threadCount; i++)
-		threads[i] = new std::thread(&TraceWorkerThread, buf, scale, i);
-
-	for (int i = 0; i < threadCount; i++)
-	{
-		threads[i]->join();
-		delete threads[i];
+	for (int i = 0; i < threadCount; ++i) {
+	    threads.emplace_back(&TraceWorkerThread, buf, scale, i);
 	}
 
-	delete[] threads;
+	for (auto& thread : threads) {
+	    thread.join();
+	}
 }
 
 // Application Shutdown
