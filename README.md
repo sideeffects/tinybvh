@@ -71,7 +71,10 @@ The **performance measurement tool** uses OpenMP and can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast -fopenmp tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.0.6
+# Version 1.1.0
+
+Version 1.1.0 introduces a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. Conversion now happens with a ````ConvertFrom```` method in each of those. See ````tiny_bvh_fenster.cpp```` for an example. This API change is scheduled to be published to the main branch in January 2025.
+
 This version of the library includes the following functionality:
 * Binned SAH BVH builder
 * Fast binned SAH BVH builder using AVX intrinsics
