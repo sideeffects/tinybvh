@@ -4608,7 +4608,7 @@ inline bool OccludedCompactTri( const Ray& r, const float* T )
 	return u >= 0 && v >= 0 && u + v < 1;
 }
 
-bool BVH_Afra::IsOccluded( const Ray& ray ) const
+bool BVH4_GPU::IsOccluded( const Ray& ray ) const
 {
 	uint32_t nodeIdx = 0, stack[1024], stackPtr = 0;
 	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
