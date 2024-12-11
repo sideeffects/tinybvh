@@ -205,7 +205,9 @@ float TestShadowRays( uint32_t layout, Ray* batch, unsigned N, unsigned passes )
 		switch (layout)
 		{
 		case _DEFAULT: for (unsigned i = 0; i < N; i++) occluded += bvh->IsOccluded( batch[i] ); break;
+	#ifdef BVH_USEAVX
 		case _SOA: for (unsigned i = 0; i < N; i++) occluded += bvh_soa->IsOccluded( batch[i] ); break;
+	#endif
 		case _GPU2: for (unsigned i = 0; i < N; i++) occluded += bvh_gpu->IsOccluded( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
 		default: break;
