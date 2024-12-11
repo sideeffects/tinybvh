@@ -77,7 +77,7 @@ Version 1.1.0 introduces a <ins>change to the API</ins>. The single BVH class wi
 
 ````
 BVH bvh;
-bvh.Build( ... );
+bvh.Build( (bvhvec4*)myTriData, triangleCount );
 BVH_SoA bvh2( bvh ); // convert from BVH to BVH_SoA
 bvh.Intersect( ray );
 bvh2.Intersect( ray );
