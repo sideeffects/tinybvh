@@ -73,7 +73,15 @@ The **performance measurement tool** uses OpenMP and can be compiled with:
 
 # Version 1.1.0
 
-Version 1.1.0 introduces a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. Conversion now happens with a ````ConvertFrom```` method in each of those. See ````tiny_bvh_fenster.cpp```` for an example. This API change is scheduled to be published to the main branch in January 2025.
+Version 1.1.0 introduces a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. Conversion now happens with a ````ConvertFrom```` method in each of those, or directly via the constructor. Example:
+
+````
+BVH bvh;
+bvh.Build( ... );
+BVH_SoA bvh2( bvh ); // convert from BVH to BVH_SoA
+bvh.Intersect( ray );
+bvh2.Intersect( ray );
+````
 
 This version of the library includes the following functionality:
 * Binned SAH BVH builder
