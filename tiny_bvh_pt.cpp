@@ -7,7 +7,7 @@
 #define FENSTER_APP_IMPLEMENTATION
 #define SCRWIDTH 800
 #define SCRHEIGHT 600
-#define TILESIZE 8
+#define TILESIZE 20
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
 #define TINYBVH_IMPLEMENTATION
@@ -23,13 +23,14 @@ using namespace tinybvh;
 #if defined BVH_USEAVX || defined BVH_USENEON
 static BVH bvh_build;
 static BVH4 bvh4;
-static BVH4_Afra bvh_trace; // this is the one we will use for tracing
+static BVH4_CPU bvh_trace; // this is the one we will use for tracing
 #else
 static BVH bvh_build, bvh_trace;
 #endif
 static bvhvec4* tris = 0;
 static int triCount = 0, frameIdx = 0, spp = 0;
 static bvhvec3 accumulator[SCRWIDTH * SCRHEIGHT];
+static std::atomic<int> tileIdx( 0 );
 
 // Multi-therading
 static unsigned threadCount = std::thread::hardware_concurrency();
@@ -154,7 +155,7 @@ bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 	bvhvec3 direct = {}, indirect = {};
 	float NdotL = dot( N, L ), NLdotL = fabs( dot( L, bvhvec3( 0, 1, 0 ) ) );
 	if (NdotL > 0)
-		if (!bvh_trace.IsOccluded( Ray( I + L * 0.001f, L, dist ) ) )
+		if (!bvh_trace.IsOccluded( Ray( I + L * 0.001f, L, dist ) ))
 			direct = BRDF * NdotL * NLdotL * bvhvec3( 9, 9, 8 ) * 500 * (1.0f / (dist * dist));
 	// random bounce
 	if (depth < 4)
@@ -168,13 +169,11 @@ bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 	return direct + indirect;
 }
 
-void TraceWorkerThread(uint32_t* buf, float scale, int threadIdx)
+void TraceWorkerThread( uint32_t* buf, float scale, int threadIdx )
 {
 	const int xtiles = SCRWIDTH / TILESIZE, ytiles = SCRHEIGHT / TILESIZE;
 	const int tiles = xtiles * ytiles;
-
 	int tile = threadIdx;
-
 	while (tile < tiles)
 	{
 		const int tx = tile % xtiles, ty = tile / xtiles;
@@ -195,7 +194,6 @@ void TraceWorkerThread(uint32_t* buf, float scale, int threadIdx)
 			const int b = (int)tinybvh_min( 255.0f, sqrtf( E.z ) * 255.0f );
 			buf[pixelIdx] = b + (g << 8) + (r << 16);
 		}
-
 		tile = tileIdx++;
 	}
 }
@@ -204,25 +202,17 @@ void TraceWorkerThread(uint32_t* buf, float scale, int threadIdx)
 void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 {
 	// handle user input and update camera
-	if (UpdateCamera( delta_time_s, f ) || frameIdx++ == 0 )
+	if (UpdateCamera( delta_time_s, f ) || frameIdx++ == 0)
 	{
 		memset( accumulator, 0, SCRWIDTH * SCRHEIGHT * sizeof( bvhvec3 ) );
 		spp = 1;
 	}
-
 	// render tiles
 	const float scale = 1.0f / spp++;
-
-	std::atomic<int> tileIdx(0);
 	std::vector<std::thread> threads;
-
-	for (int i = 0; i < threadCount; ++i) {
-	    threads.emplace_back(&TraceWorkerThread, buf, scale, i);
-	}
-
-	for (auto& thread : threads) {
-	    thread.join();
-	}
+	for (uint32_t i = 0; i < threadCount; i++)
+		threads.emplace_back( &TraceWorkerThread, buf, scale, i );
+	for (auto& thread : threads) thread.join();
 }
 
 // Application Shutdown
