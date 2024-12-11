@@ -4197,14 +4197,14 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	// reset node pool
 	const uint32_t primCount = vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2;
-	if (allocatedBVHNodes < spaceNeeded)
+	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
 		AlignedFree( triIdx );
 		AlignedFree( fragment );
 		triIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
-		allocatedBVHNodes = spaceNeeded;
+		allocatedNodes = spaceNeeded;
 		memset( &bvhNode[1], 0, 32 ); // avoid crash in refit.
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
