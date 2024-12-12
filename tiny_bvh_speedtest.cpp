@@ -266,7 +266,6 @@ static std::atomic<int> batchIdx(0);
 void IntersectBvhWorkerThread(int batchCount, Ray* fullBatch, int threadIdx)
 {
 	int batch = threadIdx;
-
 	while (batch < batchCount)
 	{
 		const int batchStart = batch * 10000;
@@ -283,7 +282,6 @@ void IntersectBvhWorkerThread(int batchCount, Ray* fullBatch, int threadIdx)
 void IntersectBvh256WorkerThread(int batchCount, Ray* fullBatch, int threadIdx)
 {
 	int batch = threadIdx;
-
 	while (batch < batchCount)
 	{
 		const int batchStart = batch * 30 * 256;
@@ -300,7 +298,6 @@ void IntersectBvh256WorkerThread(int batchCount, Ray* fullBatch, int threadIdx)
 void IntersectBvh256SSEWorkerThread(int batchCount, Ray* fullBatch, int threadIdx)
 {
 	int batch = threadIdx;
-
 	while (batch < batchCount)
 	{
 		const int batchStart = batch * 30 * 256;
