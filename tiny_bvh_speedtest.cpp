@@ -253,6 +253,65 @@ void ValidateTraceResult( Ray* batch, float* ref, unsigned N, unsigned line )
 	}
 }
 
+// Multi-threading
+#include <atomic>
+#include <thread>
+#include <vector>
+
+static unsigned threadCount = std::thread::hardware_concurrency();
+static std::atomic<int> batchIdx(0);
+
+#if defined(TRAVERSE_2WAY_MT) || defined(ENABLE_OPENCL)
+
+void IntersectBvhWorkerThread(int batchCount, Ray* fullBatch, int threadIdx)
+{
+	int batch = threadIdx;
+
+	while (batch < batchCount)
+	{
+		const int batchStart = batch * 10000;
+		for (int i = 0; i < 10000; i++) bvh->Intersect(fullBatch[batchStart + i]);
+
+		batch = batchIdx++;
+	}
+}
+
+#endif
+
+#ifdef TRAVERSE_2WAY_MT_PACKET
+
+void IntersectBvh256WorkerThread(int batchCount, Ray* fullBatch, int threadIdx)
+{
+	int batch = threadIdx;
+
+	while (batch < batchCount)
+	{
+		const int batchStart = batch * 30 * 256;
+		for (int i = 0; i < 30; i++) bvh->Intersect256Rays(fullBatch + batchStart + i * 256);
+
+		batch = batchIdx++;
+	}
+}
+
+#endif
+
+#ifdef BVH_USEAVX
+
+void IntersectBvh256SSEWorkerThread(int batchCount, Ray* fullBatch, int threadIdx)
+{
+	int batch = threadIdx;
+
+	while (batch < batchCount)
+	{
+		const int batchStart = batch * 30 * 256;
+		for (int i = 0; i < 30; i++) bvh->Intersect256RaysSSE(fullBatch + batchStart + i * 256);
+
+		batch = batchIdx++;
+	}
+}
+
+#endif
+
 int main()
 {
 	int minor = TINY_BVH_VERSION_MINOR;
@@ -651,12 +710,13 @@ int main()
 
 	// calculate full res reference distances using threaded traversal on CPU.
 	const int batchCount = Nfull / 10000;
-#pragma omp parallel for schedule(dynamic)
-	for (int batch = 0; batch < batchCount; batch++)
-	{
-		const int batchStart = batch * 10000;
-		for (int i = 0; i < 10000; i++) bvh->Intersect( fullBatch[batchStart + i] );
-	}
+
+	batchIdx = threadCount;
+	std::vector<std::thread> threads;
+	for (uint32_t i = 0; i < threadCount; i++)
+		threads.emplace_back(&IntersectBvhWorkerThread, batchCount, fullBatch, i);
+	for (auto& thread : threads) thread.join();
+
 	refDistFull = new float[Nfull];
 	for (int i = 0; i < Nfull; i++) refDistFull[i] = fullBatch[i].hit.t;
 
@@ -803,12 +863,12 @@ int main()
 	{
 		if (pass == 1) t.reset(); // first pass is cache warming
 		const int batchCount = Nfull / 10000;
-	#pragma omp parallel for schedule(dynamic)
-		for (int batch = 0; batch < batchCount; batch++)
-		{
-			const int batchStart = batch * 10000;
-			for (int i = 0; i < 10000; i++) bvh->Intersect( fullBatch[batchStart + i] );
-		}
+
+		batchIdx = threadCount;
+		std::vector<std::thread> threads;
+		for (uint32_t i = 0; i < threadCount; i++)
+			threads.emplace_back(&IntersectBvhWorkerThread, batchCount, fullBatch, i);
+		for (auto& thread : threads) thread.join();
 	}
 	traceTime = t.elapsed() / 3.0f;
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nfull * 1e-6f, traceTime * 1000, (float)Nfull / traceTime * 1e-6f );
@@ -823,12 +883,12 @@ int main()
 	{
 		if (pass == 1) t.reset(); // first pass is cache warming
 		const int batchCount = Nfull / (30 * 256); // batches of 30 packets of 256 rays
-	#pragma omp parallel for schedule(dynamic)
-		for (int batch = 0; batch < batchCount; batch++)
-		{
-			const int batchStart = batch * 30 * 256;
-			for (int i = 0; i < 30; i++) bvh->Intersect256Rays( fullBatch + batchStart + i * 256 );
-		}
+
+		batchIdx = threadCount;
+		std::vector<std::thread> threads;
+		for (uint32_t i = 0; i < threadCount; i++)
+			threads.emplace_back(&IntersectBvh256WorkerThread, batchCount, fullBatch, i);
+		for (auto& thread : threads) thread.join();
 	}
 	traceTime = t.elapsed() / 3.0f;
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nfull * 1e-6f, traceTime * 1000, (float)Nfull / traceTime * 1e-6f );
@@ -842,12 +902,12 @@ int main()
 	{
 		if (pass == 1) t.reset(); // first pass is cache warming
 		const int batchCount = Nfull / (30 * 256); // batches of 30 packets of 256 rays
-	#pragma omp parallel for schedule(dynamic)
-		for (int batch = 0; batch < batchCount; batch++)
-		{
-			const int batchStart = batch * 30 * 256;
-			for (int i = 0; i < 30; i++) bvh->Intersect256RaysSSE( fullBatch + batchStart + i * 256 );
-		}
+
+		batchIdx = threadCount;
+		std::vector<std::thread> threads;
+		for (uint32_t i = 0; i < threadCount; i++)
+			threads.emplace_back(&IntersectBvh256SSEWorkerThread, batchCount, fullBatch, i);
+		for (auto& thread : threads) thread.join();
 	}
 	traceTime = t.elapsed() / 3.0f;
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nfull * 1e-6f, traceTime * 1000, (float)Nfull / traceTime * 1e-6f );
