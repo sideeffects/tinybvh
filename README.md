@@ -106,11 +106,17 @@ The current version of the library is rapidly gaining functionality. Please expe
 
 Plans, ordered by priority:
 
-* NEW: We now use the "Issues" list for this!
+* NEW: We now also use the "Issues" list for this!
 * TLAS/BLAS traversal with BLAS transforms
+  * Support more than two levels
 * Documentation:
   * Wiki
   * Article on architecture and intended use
+* Bridge to rt hw / layouts:
+  * Produce a BVH for Intel rt hw (mind the quads)
+  * Produce a BVH for AMD rt hw
+  * Use inline asm on AMD for aabb/tri intersect
+  * Support templated N-wide BVH
 * Example renderers:
   * CPU WHitted-style ray tracer
   * CPU and GPU path tracer
