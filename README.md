@@ -63,9 +63,9 @@ The cross-platform fenster-based single-source **bitmap renderer** can be compil
 
 ```g++ -std=c++20 -mavx -O3 -framework Cocoa tiny_bvh_fenster.cpp -o tiny_bvh_fenster``` (on macOS)
 
-The multi-threaded **ambient occlusion** demo can be compiled with
+The multi-threaded **path tracing** demo can be compiled with
 
-````g++ -std=c++20 -mavx -mwindows -fopenmp -O3 tiny_bvh_pt.cpp -o tiny_bvh_pt```` (on windows)
+````g++ -std=c++20 -mavx -mwindows -O3 tiny_bvh_pt.cpp -o tiny_bvh_pt```` (on windows)
 
 The **performance measurement tool** uses OpenMP and can be compiled with:
 
