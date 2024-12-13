@@ -4368,6 +4368,8 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 int32_t BVH_SoA::Intersect( Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
+	const bvhvec4slice& verts = bvh.verts;
+	const uint32_t* triIdx = bvh.triIdx;
 	uint32_t stackPtr = 0, steps = 0;
 	const float32x4_t Ox4 = vdupq_n_f32( ray.O.x ), rDx4 = vdupq_n_f32( ray.rD.x );
 	const float32x4_t Oy4 = vdupq_n_f32( ray.O.y ), rDy4 = vdupq_n_f32( ray.rD.y );
