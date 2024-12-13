@@ -2,7 +2,7 @@
 This is the **development branch** for tinybvh. Please send your PRs here.
 
 # tinybvh
-Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). The library has no dependencies. 
+Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
 # tinyocl
 Single-header OpenCL library, which helps you select and initialize a device. It also loads, compiles and runs kernels, with several convenient features:
@@ -71,9 +71,9 @@ The **performance measurement tool** uses OpenMP and can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast -fopenmp tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.1.0
+# Version 1.1.1
 
-Version 1.1.0 introduces a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. Conversion now happens with a ````ConvertFrom```` method in each of those, or directly via the constructor. Example:
+Version 1.1.x introduces a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. Conversion now happens with a ````ConvertFrom```` method in each of those, or directly via the constructor. Example:
 
 ````
 BVH bvh;
