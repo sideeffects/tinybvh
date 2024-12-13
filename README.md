@@ -67,9 +67,9 @@ The multi-threaded **path tracing** demo can be compiled with
 
 ````g++ -std=c++20 -mavx -mwindows -O3 tiny_bvh_pt.cpp -o tiny_bvh_pt```` (on windows)
 
-The **performance measurement tool** uses OpenMP and can be compiled with:
+The **performance measurement tool** can be compiled with:
 
-````g++ -std=c++20 -mavx -Ofast -fopenmp tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
+````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
 # Version 1.1.1
 
