@@ -87,10 +87,11 @@ THE SOFTWARE.
 // Jacco Bikker: BVH code and examples
 // Eddy L O Jansson: g++ / clang support
 // Aras Pranckevičius: non-Intel architecture support
-// Jefferson Amstutz: CMake surpport
+// Jefferson Amstutz: CMake support
 // Christian Oliveros: WASM / EMSCRIPTEN support
 // Thierry Cantenot: user-defined alloc & free
 // David Peicho: slices & Rust bindings, API advice
+// Aytek Aman: C++11 threading implementation
 
 #ifndef TINY_BVH_H_
 #define TINY_BVH_H_
@@ -131,7 +132,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	1
-#define TINY_BVH_VERSION_SUB	0
+#define TINY_BVH_VERSION_SUB	1
 
 // ============================================================================
 //
