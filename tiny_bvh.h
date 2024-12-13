@@ -573,17 +573,28 @@ public:
 	};
 	BVH( BVHContext ctx = {} ) { context = ctx; }
 	BVH( const BVH_Verbose& original ) { ConvertFrom( original ); }
-	~BVH()
-	{
-		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
-		AlignedFree( fragment );
-	}
+	BVH( const bvhvec4* vertices, const uint32_t primCount ) { Build( vertices, primCount ); }
+	BVH( const bvhvec4slice& vertices ) { Build( vertices ); }
+	~BVH();
 	void ConvertFrom( const BVH_Verbose& original );
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	int32_t NodeCount() const;
 	int32_t PrimCount( const uint32_t nodeIdx = 0 ) const;
 	void Compact();
+	void BuildDefault( const bvhvec4* vertices, const uint32_t primCount )
+	{
+		BuildDefault( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) } );
+	}
+	void BuildDefault( const bvhvec4slice& vertices )
+	{
+	#if defined(BVH_USEAVX)
+		BuildAVX( vertices );
+	#elif defined(BVH_USENEON)
+		BuildNEON( vertices );
+	#else
+		Build( vertices );
+	#endif
+	}
 	void BuildQuick( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildQuick( const bvhvec4slice& vertices );
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
@@ -701,14 +712,23 @@ public:
 	};
 	BVH_SoA( BVHContext ctx = {} ) { context = ctx; }
 	BVH_SoA( const BVH& original ) { ConvertFrom( original ); }
+	BVH_SoA( const bvhvec4* vertices, const uint32_t primCount ) 
+	{ 
+		bvh.BuildDefault( vertices, primCount );
+		ConvertFrom( bvh );
+	}
+	BVH_SoA( const bvhvec4slice& vertices ) 
+	{ 
+		bvh.BuildDefault( vertices );
+		ConvertFrom( bvh );
+	}
 	~BVH_SoA() { AlignedFree( bvhNode ); }
 	void ConvertFrom( const BVH& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
 	// BVH data
 	BVHNode* bvhNode = 0;			// BVH node in 'structure of arrays' format.
-	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
-	uint32_t* triIdx = 0;			// primitive index array - pointer copied from original.
+	BVH bvh;						// BVH_SoA is created from BVH and uses its data.
 };
 
 class BVH_Verbose : public BVHBase
@@ -1019,6 +1039,13 @@ void BLASInstance::Update()
 
 // BVH implementation
 // ----------------------------------------------------------------------------
+
+BVH::~BVH()
+{
+	AlignedFree( bvhNode );
+	AlignedFree( triIdx );
+	AlignedFree( fragment );
+}
 
 void BVH::ConvertFrom( const BVH_Verbose& original )
 {
@@ -2319,8 +2346,6 @@ void BVH_SoA::ConvertFrom( const BVH& original )
 	}
 	memset( bvhNode, 0, sizeof( BVHNode ) * spaceNeeded );
 	CopyBasePropertiesFrom( original );
-	this->verts = original.verts;
-	this->triIdx = original.triIdx;
 	// recursively convert nodes
 	uint32_t newAlt2Node = 0, nodeIdx = 0, stack[128], stackPtr = 0;
 	while (1)
@@ -3440,6 +3465,8 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 int32_t BVH_SoA::Intersect( Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
+	const bvhvec4slice& verts = bvh.verts;
+	const uint32_t* triIdx = bvh.triIdx;
 	uint32_t stackPtr = 0, steps = 0;
 	const __m128 Ox4 = _mm_set1_ps( ray.O.x ), rDx4 = _mm_set1_ps( ray.rD.x );
 	const __m128 Oy4 = _mm_set1_ps( ray.O.y ), rDy4 = _mm_set1_ps( ray.rD.y );
@@ -3529,6 +3556,8 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 bool BVH_SoA::IsOccluded( const Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
+	const bvhvec4slice& verts = bvh.verts;
+	const uint32_t* triIdx = bvh.triIdx;
 	uint32_t stackPtr = 0;
 	const __m128 Ox4 = _mm_set1_ps( ray.O.x ), rDx4 = _mm_set1_ps( ray.rD.x );
 	const __m128 Oy4 = _mm_set1_ps( ray.O.y ), rDy4 = _mm_set1_ps( ray.rD.y );

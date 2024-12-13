@@ -11,8 +11,7 @@
 
 using namespace tinybvh;
 
-BVH bvh;
-BVH_SoA bvh2;
+BVH_SoA bvh;
 
 #ifdef LOADSCENE
 bvhvec4* triangles = 0;
@@ -73,14 +72,7 @@ void Init()
 #endif
 
 	// build a BVH over the scene
-#if defined(BVH_USEAVX)
-	bvh.BuildAVX( triangles, verts / 3 );
-#elif defined(BVH_USENEON)
-	bvh.BuildNEON( triangles, verts / 3 );
-#else
-	bvh.Build( triangles, verts / 3 );
-#endif
-	bvh2.ConvertFrom( bvh );
+	bvh = BVH_SoA( triangles, verts / 3 );
 
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
@@ -135,7 +127,7 @@ void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 	}
 
 	// trace primary rays
-	for (int i = 0; i < N; i++) depths[i] = bvh2.Intersect( rays[i] );
+	for (int i = 0; i < N; i++) depths[i] = bvh.Intersect( rays[i] );
 
 	// visualize result
 	const bvhvec3 L = normalize( bvhvec3( 1, 2, 3 ) );
