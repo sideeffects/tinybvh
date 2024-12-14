@@ -23,8 +23,8 @@
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
 #define TRAVERSE_4WAY
-#define TRAVERSE_2WAY_DBL
-// #define TRAVERSE_CWBVH
+// #define TRAVERSE_2WAY_DBL
+#define TRAVERSE_CWBVH
 #define TRAVERSE_BVH4
 #define TRAVERSE_BVH8
 #define TRAVERSE_2WAY_MT
@@ -642,10 +642,10 @@ int main()
 #ifdef TRAVERSE_CWBVH
 
 	// CWBVH - Not efficient on CPU.
-	if (!bvh8_cwbvh) 
+	if (!cwbvh) 
 	{
-		bvh8_cwbvh = new BVH8_CWBVH();
-		bvh8_cwbvh->Build( triangles, verts / 3 );
+		cwbvh = new BVH8_CWBVH();
+		cwbvh->Build( triangles, verts / 3 );
 	}
 	printf( "- BVH8/CWBVH  - primary: " );
 	traceTime = TestPrimaryRays( _CWBVH, smallBatch, Nsmall, 3 );
@@ -698,11 +698,10 @@ int main()
 #ifdef TRAVERSE_OPTIMIZED_ST
 
 	// ALT_SOA
-	if (!bvh_soa) 
-	{
-		bvh_soa = new BVH_SoA();
-		bvh_soa->Build( triangles, verts / 3 );
-	}
+	delete bvh_soa;
+	// Building a BVH_SoA over an optimized BVH: Careful, do not delete the
+	// passed BVH; we use some of its data in the BVH_SoA.
+	bvh_soa = new BVH_SoA( *bvh );
 	printf( "- ALT_SOA     - primary: " );
 	traceTime = TestPrimaryRays( _SOA, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -715,11 +714,12 @@ int main()
 #ifdef TRAVERSE_4WAY_OPTIMIZED
 
 	// BVH4_AFRA
-	if (!bvh4_cpu) 
-	{
-		bvh4_cpu = new BVH4_CPU();
-		bvh4_cpu->Build( triangles, verts / 3 );
-	}
+	delete bvh4;
+	delete bvh4_cpu;
+	// Building a BVH4_CPU over an optimized BVH: Careful, do not delete the
+	// passed BVH; we use some of its data in the BVH4_CPU.
+	bvh4 = new BVH4( *bvh );
+	bvh4_cpu = new BVH4_CPU( *bvh4 );
 	printf( "- BVH4_AFRA   - primary: " );
 	traceTime = TestPrimaryRays( _CPU4, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );

@@ -771,9 +771,8 @@ public:
 		uint32_t childCount, dummy1, dummy2, dummy3; // dummies are for alignment.
 		bool isLeaf() const { return triCount > 0; }
 	};
-	BVH4( BVH4&& src ) : bvh( src.bvh ), bvh4Node( src.bvh4Node ) {}
 	BVH4( BVHContext ctx = {} ) { context = ctx; }
-	BVH4( const BVH& original ) { ConvertFrom( original ); }
+	BVH4( const BVH& original ) { /* DEPRECATED */ bvh = original; ConvertFrom( bvh ); }
 	~BVH4() { AlignedFree( bvh4Node ); }
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
@@ -798,7 +797,7 @@ public:
 		bool isLeaf() const { return triCount > 0; }
 	};
 	BVH8( BVHContext ctx = {} ) { context = ctx; }
-	BVH8( const BVH& original ) { ConvertFrom( original ); }
+	BVH8( const BVH& original ) { /* DEPRECATED */ bvh = original; ConvertFrom( bvh ); }
 	~BVH8() { AlignedFree( bvh8Node ); }
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
@@ -836,7 +835,7 @@ public:
 		// as chars as well, as in CWBVH.
 	};
 	BVH4_GPU( BVHContext ctx = {} ) { context = ctx; }
-	BVH4_GPU( const BVH4& original ) { ConvertFrom( original ); }
+	BVH4_GPU( const BVH4& original ) { /* DEPRECATED */ bvh4 = original; ConvertFrom( bvh4 ); }
 	~BVH4_GPU() { AlignedFree( bvh4Data ); }
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
@@ -864,7 +863,7 @@ public:
 		uint32_t triCount[4];
 	};
 	BVH4_CPU( BVHContext ctx = {} ) { context = ctx; }
-	BVH4_CPU( const BVH4& original ) { /* DEPRECATED */ ConvertFrom( original ); }
+	BVH4_CPU( const BVH4& original ) { /* DEPRECATED */ bvh4 = original; ConvertFrom( bvh4 ); }
 	~BVH4_CPU() { AlignedFree( bvh4Node ); AlignedFree( bvh4Tris ); }
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
@@ -909,7 +908,7 @@ class BVH8_CWBVH : public BVHBase
 {
 public:
 	BVH8_CWBVH( BVHContext ctx = {} ) { context = ctx; }
-	BVH8_CWBVH( BVH8& original ) { ConvertFrom( original ); }
+	BVH8_CWBVH( BVH8& original ) { /* DEPRECATED */ bvh8 = original; ConvertFrom( bvh8 ); }
 	~BVH8_CWBVH() { AlignedFree( bvh8Data ); AlignedFree( bvh8Tris ); }
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
