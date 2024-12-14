@@ -21,11 +21,9 @@ using namespace tinybvh;
 // Application variables
 
 #if defined BVH_USEAVX || defined BVH_USENEON
-static BVH bvh_build;
-static BVH4 bvh4;
-static BVH4_CPU bvh_trace; // this is the one we will use for tracing
+static BVH4_CPU bvh;
 #else
-static BVH bvh_build, bvh_trace;
+static BVH bvh;
 #endif
 static bvhvec4* tris = 0;
 static int triCount = 0, frameIdx = 0, spp = 0;
@@ -100,13 +98,7 @@ void Init()
 	AddMesh( "./testdata/suzanne.bin", 0.2f, bvhvec3( -18, 0.95f, -16 ), 0x90ff90 );
 	AddMesh( "./testdata/head.bin", 0.5f, bvhvec3( 0, 3, 9 ) );
 	// build bvh
-	bvh_build.BuildAVX( tris, triCount );
-#if defined BVH_USEAVX || defined BVH_USENEON
-	bvh4.ConvertFrom( bvh_build );
-	bvh_trace.ConvertFrom( bvh4 );
-#else
-	bvh_trace = bvh;
-#endif
+	bvh.Build( tris, triCount );
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
 	if (!t.is_open()) return;
@@ -142,7 +134,7 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 {
 	// find primary intersection
-	bvh_trace.Intersect( ray );
+	bvh.Intersect( ray );
 	// shade
 	if (ray.hit.t == 1e30f) return bvhvec3( 0.6f, 0.7f, 1 ); // hit nothing
 	bvhvec3 I = ray.O + ray.hit.t * ray.D;
@@ -155,10 +147,10 @@ bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 	bvhvec3 direct = {}, indirect = {};
 	float NdotL = dot( N, L ), NLdotL = fabs( dot( L, bvhvec3( 0, 1, 0 ) ) );
 	if (NdotL > 0)
-		if (!bvh_trace.IsOccluded( Ray( I + L * 0.001f, L, dist ) ))
+		if (!bvh.IsOccluded( Ray( I + L * 0.001f, L, dist ) ))
 			direct = BRDF * NdotL * NLdotL * bvhvec3( 9, 9, 8 ) * 500 * (1.0f / (dist * dist));
 	// random bounce
-	if (depth < 4)
+	if (depth < 2)
 	{
 		bvhvec3 R = CosWeightedDiffReflection( N, seed );
 		float pdf = 1.0f / dot( N, R );

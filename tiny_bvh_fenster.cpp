@@ -11,7 +11,7 @@
 
 using namespace tinybvh;
 
-BVH_SoA bvh;
+BVH bvh;
 
 #ifdef LOADSCENE
 bvhvec4* triangles = 0;
@@ -72,7 +72,7 @@ void Init()
 #endif
 
 	// build a BVH over the scene
-	bvh = BVH_SoA( triangles, verts / 3 );
+	bvh.Build( triangles, verts / 3 );
 
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };

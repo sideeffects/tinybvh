@@ -15,7 +15,7 @@
 // tests to perform
 // #define BUILD_MIDPOINT
 #define BUILD_REFERENCE
-#define BUILD_DOUBLE
+// #define BUILD_DOUBLE
 #define BUILD_AVX
 // #define BUILD_NEON
 // #define BUILD_SBVH
@@ -581,7 +581,11 @@ int main()
 #ifdef TRAVERSE_ALT2WAY_ST
 
 	// GPU
-	if (!bvh_gpu) bvh_gpu = new BVH_GPU( *bvh );
+	if (!bvh_gpu) 
+	{
+		bvh_gpu = new BVH_GPU();
+		bvh_gpu->Build( triangles, verts / 3 );
+	}
 	printf( "- AILA_LAINE  - primary: " );
 	traceTime = TestPrimaryRays( _GPU2, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -594,7 +598,11 @@ int main()
 #if defined TRAVERSE_SOA2WAY_ST && defined BVH_USEAVX // BVH_SoA::IsOccluded is not available for NEON yet.
 
 	// SOA
-	if (!bvh_soa) bvh_soa = new BVH_SoA( *bvh );
+	if (!bvh_soa) 
+	{
+		bvh_soa = new BVH_SoA();
+		bvh_soa->Build( triangles, verts / 3 );
+	}
 	printf( "- ALT_SOA     - primary: " );
 	traceTime = TestPrimaryRays( _SOA, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -607,8 +615,11 @@ int main()
 #ifdef TRAVERSE_4WAY
 
 	// BVH4_CPU
-	if (!bvh4) bvh4 = new BVH4( *bvh );
-	if (!bvh4_cpu) bvh4_cpu = new BVH4_CPU( *bvh4 );
+	if (!bvh4_cpu) 
+	{
+		bvh4_cpu = new BVH4_CPU();
+		bvh4_cpu->Build( triangles, verts / 3 );
+	}
 	printf( "- BVH4_AFRA   - primary: " );
 	traceTime = TestPrimaryRays( _CPU4, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -631,8 +642,11 @@ int main()
 #ifdef TRAVERSE_CWBVH
 
 	// CWBVH - Not efficient on CPU.
-	if (!bvh8) bvh8 = new BVH8( *bvh );
-	if (!cwbvh) cwbvh = new BVH8_CWBVH( *bvh8 );
+	if (!bvh8_cwbvh) 
+	{
+		bvh8_cwbvh = new BVH8_CWBVH();
+		bvh8_cwbvh->Build( triangles, verts / 3 );
+	}
 	printf( "- BVH8/CWBVH  - primary: " );
 	traceTime = TestPrimaryRays( _CWBVH, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -643,7 +657,11 @@ int main()
 #ifdef TRAVERSE_BVH4
 
 	// Basic BVH4 - Basic implementation, not efficient on CPU.
-	if (!bvh4) bvh4 = new BVH4( *bvh );
+	if (!bvh4) 
+	{
+		bvh4 = new BVH4();
+		bvh4->Build( triangles, verts / 3 );
+	}
 	printf( "- BASIC_BVH4  - primary: " );
 	traceTime = TestPrimaryRays( _BVH4, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -654,7 +672,11 @@ int main()
 #ifdef TRAVERSE_BVH8
 
 	// Basic BVH8 - Basic implementation, not efficient on CPU.
-	if (!bvh8) bvh8 = new BVH8( *bvh );
+	if (!bvh8) 
+	{
+		bvh8 = new BVH8();
+		bvh8->Build( triangles, verts / 3 );
+	}
 	printf( "- BASIC_BVH8  - primary: " );
 	traceTime = TestPrimaryRays( _BVH8, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -676,7 +698,11 @@ int main()
 #ifdef TRAVERSE_OPTIMIZED_ST
 
 	// ALT_SOA
-	if (!bvh_soa) bvh_soa = new BVH_SoA( *bvh );
+	if (!bvh_soa) 
+	{
+		bvh_soa = new BVH_SoA();
+		bvh_soa->Build( triangles, verts / 3 );
+	}
 	printf( "- ALT_SOA     - primary: " );
 	traceTime = TestPrimaryRays( _SOA, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -689,8 +715,11 @@ int main()
 #ifdef TRAVERSE_4WAY_OPTIMIZED
 
 	// BVH4_AFRA
-	if (!bvh4) bvh4 = new BVH4( *bvh );
-	if (!bvh4_cpu) bvh4_cpu = new BVH4_CPU( *bvh4 );
+	if (!bvh4_cpu) 
+	{
+		bvh4_cpu = new BVH4_CPU();
+		bvh4_cpu->Build( triangles, verts / 3 );
+	}
 	printf( "- BVH4_AFRA   - primary: " );
 	traceTime = TestPrimaryRays( _CPU4, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -721,10 +750,14 @@ int main()
 
 	// trace the rays on GPU using OpenCL
 	printf( "- AILA_LAINE  - primary: " );
-	if (!bvh_gpu) bvh_gpu = new BVH_GPU( *bvh );
+	if (!bvh_gpu) 
+	{
+		bvh_gpu = new BVH_GPU();
+		bvh_gpu->Build( triangles, verts / 3 );
+	}
 	// create OpenCL buffers for the BVH data calculated by tiny_bvh.h
 	tinyocl::Buffer gpuNodes( bvh_gpu->usedNodes * sizeof( BVH_GPU::BVHNode ), bvh_gpu->bvhNode );
-	tinyocl::Buffer idxData( bvh_gpu->idxCount * sizeof( unsigned ), bvh_gpu->triIdx );
+	tinyocl::Buffer idxData( bvh_gpu->idxCount * sizeof( unsigned ), bvh_gpu->bvh.triIdx );
 	tinyocl::Buffer triData( bvh_gpu->triCount * 3 * sizeof( tinybvh::bvhvec4 ), triangles );
 	// synchronize the host-side data to the gpu side
 	gpuNodes.CopyToDevice();
@@ -763,8 +796,11 @@ int main()
 
 	// trace the rays on GPU using OpenCL
 	printf( "- BVH4_GPU    - primary: " );
-	if (!bvh4) bvh4 = new BVH4( *bvh );
-	if (!bvh4_gpu) bvh4_gpu = new BVH4_GPU( *bvh4 );
+	if (!bvh4_gpu) 
+	{
+		bvh4_gpu = new BVH4_GPU();
+		bvh4_gpu->Build( triangles, verts / 3 );
+	}
 	// create OpenCL buffers for the BVH data calculated by tiny_bvh.h
 	tinyocl::Buffer gpu4Nodes( bvh4_gpu->usedBlocks * sizeof( tinybvh::bvhvec4 ), bvh4_gpu->bvh4Data );
 	// synchronize the host-side data to the gpu side
@@ -804,8 +840,11 @@ int main()
 
 	// trace the rays on GPU using OpenCL
 	printf( "- BVH8/CWBVH  - primary: " );
-	if (!bvh8) bvh8 = new BVH8( *bvh );
-	if (!cwbvh) cwbvh = new BVH8_CWBVH( *bvh8 );
+	if (!cwbvh) 
+	{
+		cwbvh = new BVH8_CWBVH();
+		cwbvh->Build( triangles, verts / 3 );
+	}
 	// create OpenCL buffers for the BVH data calculated by tiny_bvh.h
 	tinyocl::Buffer cwbvhNodes( cwbvh->usedBlocks * sizeof( tinybvh::bvhvec4 ), cwbvh->bvh8Data );
 #ifdef CWBVH_COMPRESSED_TRIS
