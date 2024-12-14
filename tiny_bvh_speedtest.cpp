@@ -701,7 +701,8 @@ int main()
 	delete bvh_soa;
 	// Building a BVH_SoA over an optimized BVH: Careful, do not delete the
 	// passed BVH; we use some of its data in the BVH_SoA.
-	bvh_soa = new BVH_SoA( *bvh );
+	bvh_soa = new BVH_SoA();
+	bvh_soa->ConvertFrom( *bvh );
 	printf( "- ALT_SOA     - primary: " );
 	traceTime = TestPrimaryRays( _SOA, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
@@ -718,8 +719,10 @@ int main()
 	delete bvh4_cpu;
 	// Building a BVH4_CPU over an optimized BVH: Careful, do not delete the
 	// passed BVH; we use some of its data in the BVH4_CPU.
-	bvh4 = new BVH4( *bvh );
-	bvh4_cpu = new BVH4_CPU( *bvh4 );
+	bvh4 = new BVH4();
+	bvh4_cpu = new BVH4_CPU();
+	bvh4->ConvertFrom( *bvh );
+	bvh4_cpu->ConvertFrom( *bvh4 );
 	printf( "- BVH4_AFRA   - primary: " );
 	traceTime = TestPrimaryRays( _CPU4, smallBatch, Nsmall, 3 );
 	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
