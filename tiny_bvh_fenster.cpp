@@ -113,7 +113,7 @@ bool UpdateCamera(float delta_time_s, fenster& f)
 void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 {
 	char title[50];
-	sprintf_s(title, 49, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s);
+	sprintf(title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s);
 	fenster_update_title(&f, title);
 	// handle user input and update camera
 	bool moved = UpdateCamera(delta_time_s, f) || frameIdx++ == 0;
