@@ -13,6 +13,8 @@ using namespace tinybvh;
 
 BVH bvh;
 int frameIdx = 0;
+Ray* rays = 0;
+int* depths = 0;
 
 #ifdef LOADSCENE
 bvhvec4* triangles = 0;
@@ -82,6 +84,10 @@ void Init()
 	t.read( (char*)&eye, sizeof( eye ) );
 	t.read( (char*)&view, sizeof( view ) );
 	t.close();
+
+	// allocate buffers
+	rays = (Ray*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * 16 * sizeof( Ray ) );
+	depths = (int*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * sizeof( int ) );
 }
 
 bool UpdateCamera( float delta_time_s, fenster& f )
@@ -112,9 +118,6 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 
 void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 {
-	char title[50];
-	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
-	fenster_update_title( &f, title );
 	// handle user input and update camera
 	bool moved = UpdateCamera( delta_time_s, f ) || frameIdx++ == 0;
 
@@ -159,8 +162,11 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 			// buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
 		}
 	}
-	tinybvh::free64( rays );
-	tinybvh::free64( depths );
+
+	// print frame time / rate in window title
+	char title[50];
+	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
+	fenster_update_title( &f, title );
 }
 
 void Shutdown()
@@ -171,4 +177,8 @@ void Shutdown()
 	s.write( (char*)&eye, sizeof( eye ) );
 	s.write( (char*)&view, sizeof( view ) );
 	s.close();
+
+	// delete allocated buffers
+	tinybvh::free64( rays );
+	tinybvh::free64( depths );
 }

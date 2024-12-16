@@ -21,7 +21,7 @@ using namespace tinybvh;
 // Application variables
 
 #if defined BVH_USEAVX || defined BVH_USENEON
-static BVH4_CPU bvh;
+static BVH4 bvh;
 #else
 static BVH bvh;
 #endif
@@ -206,6 +206,10 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	for (uint32_t i = 0; i < threadCount; i++)
 		threads.emplace_back( &TraceWorkerThread, buf, scale, i );
 	for (auto& thread : threads) thread.join();
+	// print frame time / rate in window title
+	char title[50];
+	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
+	fenster_update_title( &f, title );
 }
 
 // Application Shutdown
