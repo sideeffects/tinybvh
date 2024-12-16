@@ -12,6 +12,7 @@
 using namespace tinybvh;
 
 BVH bvh;
+int frameIdx = 0;
 
 #ifdef LOADSCENE
 bvhvec4* triangles = 0;
@@ -83,28 +84,40 @@ void Init()
 	t.close();
 }
 
-void UpdateCamera(float delta_time_s, fenster& f)
+bool UpdateCamera(float delta_time_s, fenster& f)
 {
 	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) );
 	bvhvec3 up = 0.8f * cross( view, right );
 
 	// get camera controls.
-	if (f.keys['A']) eye += right * -1.0f * delta_time_s * 10;
-	if (f.keys['D']) eye += right * delta_time_s * 10;
-	if (f.keys['W']) eye += view * delta_time_s * 10;
-	if (f.keys['S']) eye += view * -1.0f * delta_time_s * 10;
-	if (f.keys['R']) eye += up * delta_time_s * 10;
-	if (f.keys['F']) eye += up * -1.0f * delta_time_s * 10;
+	bool moved = false;
+	if (f.keys['A']) eye += right * -1.0f * delta_time_s * 10, moved = true;
+	if (f.keys['D']) eye += right * delta_time_s * 10, moved = true;
+	if (f.keys['W']) eye += view * delta_time_s * 10, moved = true;
+	if (f.keys['S']) eye += view * -1.0f * delta_time_s * 10, moved = true;
+	if (f.keys['R']) eye += up * delta_time_s * 10, moved = true;
+	if (f.keys['F']) eye += up * -1.0f * delta_time_s * 10, moved = true;
+	if (f.keys[20]) view = normalize(view + right * -1.0f * delta_time_s), moved = true;
+	if (f.keys[19]) view = normalize(view + right * delta_time_s), moved = true;
+	if (f.keys[17]) view = normalize(view + up * -1.0f * delta_time_s), moved = true;
+	if (f.keys[18]) view = normalize(view + up * delta_time_s), moved = true;
 
 	// recalculate right, up
 	right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) );
 	up = 0.8f * cross( view, right );
 	bvhvec3 C = eye + 2 * view;
 	p1 = C - right + up, p2 = C + right + up, p3 = C - right - up;
+	return moved;
 }
 
 void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 {
+	char title[50];
+	sprintf(title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s);
+	fenster_update_title(&f, title);
+	// handle user input and update camera
+	bool moved = UpdateCamera(delta_time_s, f) || frameIdx++ == 0;
+
 	// handle user input and update camera
 	UpdateCamera(delta_time_s, f);
 
@@ -147,6 +160,7 @@ void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 		}
 	}
 	tinybvh::free64( rays );
+	tinybvh::free64(depths);
 }
 
 void Shutdown()

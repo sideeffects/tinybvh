@@ -396,6 +396,19 @@ public:
 
 #ifdef FENSTER_APP_IMPLEMENTATION
 
+
+void fenster_update_title(struct fenster* f, char* new_title) {
+#if defined (__APPLE__) 
+    id title = msg1(id, cls("NSString"), "stringWithUTF8String:", const char*,
+        new_title);
+    msg1(void, f->wnd, "setTitle:", id, title);
+#elif _WIN32
+    SetWindowTextA(f->hwnd, new_title);
+#else 
+    XStoreName(f->dpy, f->w, new_title);
+#endif
+}
+
 // application entry point and message loop implementation.
 int run()
 {
