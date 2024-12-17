@@ -358,7 +358,7 @@ void FatalError( const char* fmt, ... )
 	va_start( args, fmt );
 	vsnprintf( t, sizeof( t ) - 2, fmt, args );
 	va_end( args );
-#ifdef _MSC_VER
+#if 0
 	MessageBox( NULL, t, "Fatal error", MB_OK );
 #else
 	fprintf( stderr, t );
