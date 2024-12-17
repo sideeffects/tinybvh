@@ -163,10 +163,8 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		}
 	}
 
-	// print frame time / rate in window title
-	char title[50];
-	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
-	fenster_update_title( &f, title );
+	tinybvh::free64( rays );
+	tinybvh::free64(depths);
 }
 
 void Shutdown()
