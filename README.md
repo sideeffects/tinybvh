@@ -1,6 +1,3 @@
-# dev
-This is the **development branch** for tinybvh. Please send your PRs here.
-
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
@@ -73,15 +70,33 @@ The **performance measurement tool** can be compiled with:
 
 # Version 1.1.1
 
-Version 1.1.x introduces a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. Conversion now happens with a ````ConvertFrom```` method in each of those, or directly via the constructor. Example:
+Version 1.1.1 introduces a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. You can simply instantiate the desired layout; conversion (and data ownership) is then handled properly by the library. Examples:
 
 ````
 BVH bvh;
 bvh.Build( (bvhvec4*)myTriData, triangleCount );
-BVH_SoA bvh2( bvh ); // convert from BVH to BVH_SoA
 bvh.Intersect( ray );
-bvh2.Intersect( ray );
 ````
+
+````
+BVH4_CPU bvh;
+bvh.Build( (bvhvec4*)myTriData, triangleCount );
+bvh.Intersect( ray );
+````
+
+If you wish to use a specific builder (such as the spatial splits builder) or if you need to do custom operations on the BVH, such as post-build optimizing, you can still do the conversions manually. Example:
+
+````
+BVH bvh;
+bvh.Build( (bvhvec4*)myTriData, triangleCount );
+BVH_Verbose tmp;
+tmp.ConvertFrom( bvh );
+tmp.Optimize( 100000 );
+bvh.ConvertFrom( tmp );
+printf( "Optimized BVH SAH cost: %f\n", bvh.SAHCost() );
+````
+
+Note that in this case, data ownership and lifetime must be managed carefully. Specifically, layouts converted from other layouts use data from the original, so both must be kept alive.
 
 This version of the library includes the following functionality:
 * Binned SAH BVH builder
@@ -99,6 +114,7 @@ This version of the library includes the following functionality:
 * Support for WASM / EMSCRIPTEN, g++, clang, Visual Studio
 * Optional user-defined memory allocation, by [Thierry Cantenot](https://github.com/tcantenot)
 * Vertex array can now have a custom stride, by [David Peicho](https://github.com/DavidPeicho)
+* Clear data ownership and intuitive management via the new and simplified API, with lots of help from David Peicho
 * You can now also BYOVT ('bring your own vector types'), thanks [Tijmen Verhoef](https://github.com/nemjit001)
 * 'SpeedTest' tool that times and validates all (well, most) traversal kernels.
 
