@@ -351,7 +351,7 @@ int main()
 
 	// load and compile the OpenCL kernel code
 	// This also triggers OpenCL init and device identification.
-	tinyocl::Kernel ailalaine_kernel( "traverse.cl", "traverse_ailalaine" );
+	tinyocl::Kernel ailalaine_kernel( "traverse.cl", "batch_ailalaine" );
 	tinyocl::Kernel gpu4way_kernel( "traverse.cl", "traverse_gpu4way" );
 	tinyocl::Kernel cwbvh_kernel( "traverse.cl", "traverse_cwbvh" );
 	printf( "----------------------------------------------------------------\n" );
