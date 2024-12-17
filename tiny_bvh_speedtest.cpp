@@ -687,7 +687,11 @@ int main()
 #if defined TRAVERSE_OPTIMIZED_ST || defined TRAVERSE_4WAY_OPTIMIZED
 
 	printf( "Optimized BVH performance - Optimizing... " );
-	if (!bvh_verbose) bvh_verbose = new BVH_Verbose( *bvh );
+	if (!bvh_verbose) 
+	{
+		bvh_verbose = new BVH_Verbose();
+		bvh_verbose->ConvertFrom( *bvh );
+	}
 	t.reset();
 	bvh_verbose->Optimize( 1000000 ); // optimize the raw SBVH
 	bvh->ConvertFrom( *bvh_verbose );
