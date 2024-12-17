@@ -23,7 +23,7 @@ using namespace tinybvh;
 static BVH4_GPU bvh;
 static bvhvec4* tris = 0;
 static int triCount = 0, frameIdx = 0, spp = 0;
-static Kernel* reset, * generate, * extend, * shade, * traceShadows, * finalize;
+static Kernel* init, * generate, * extend, * shade, * traceShadows, * finalize;
 static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections;
 
 // View pyramid for a pinhole camera
@@ -50,7 +50,7 @@ void AddMesh( const char* file, float scale = 1, bvhvec3 pos = {}, int c = 0, in
 void Init()
 {
 	// create OpenCL kernels
-	reset = new Kernel( "wavefront.cl", "ResetCounters" );
+	init = new Kernel( "wavefront.cl", "SetRenderData" );
 	generate = new Kernel( "wavefront.cl", "Generate" );
 	extend = new Kernel( "wavefront.cl", "Extend" );
 	shade = new Kernel( "wavefront.cl", "Shade" );
@@ -64,7 +64,7 @@ void Init()
 	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	connections = new Buffer( N * sizeof( bvhvec4 ) * 3 );
 	// set kernel arguments
-	reset->SetArguments( N );
+	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, 0, 0, 0, 0 );
 	// load raw vertex data
 	AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
 	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0xaaaaff );
