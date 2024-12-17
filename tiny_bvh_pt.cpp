@@ -1,21 +1,37 @@
+// This example shows how to build a basic CPU path tracer using
+// tinybvh. Function Tick uses OpenMP to render tiles of pixels
+// in parallel. For each pixel, function Trace recursively evaluates 
+// light. The scene is here a single array of triangles, which
+// function AddMesh (repeatedly) adds to.
+
 #define FENSTER_APP_IMPLEMENTATION
 #define SCRWIDTH 800
 #define SCRHEIGHT 600
-#define TILESIZE 8
+#define TILESIZE 20
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
 #define TINYBVH_IMPLEMENTATION
 #include "tiny_bvh.h"
+#include <atomic>
 #include <fstream>
+#include <thread>
 
 using namespace tinybvh;
 
 // Application variables
+
+#if defined BVH_USEAVX || defined BVH_USENEON
+static BVH4 bvh;
+#else
 static BVH bvh;
+#endif
 static bvhvec4* tris = 0;
 static int triCount = 0, frameIdx = 0, spp = 0;
 static bvhvec3 accumulator[SCRWIDTH * SCRHEIGHT];
-static BVH::BVHLayout layout = BVH::WALD_32BYTE;
+static std::atomic<int> tileIdx( 0 );
+
+// Multi-therading
+static unsigned threadCount = std::thread::hardware_concurrency();
 
 // Setup view pyramid for a pinhole camera: 
 // eye, p1 (top-left), p2 (top-right) and p3 (bottom-left)
@@ -82,12 +98,7 @@ void Init()
 	AddMesh( "./testdata/suzanne.bin", 0.2f, bvhvec3( -18, 0.95f, -16 ), 0x90ff90 );
 	AddMesh( "./testdata/head.bin", 0.5f, bvhvec3( 0, 3, 9 ) );
 	// build bvh
-	bvh.BuildAVX( tris, triCount );
-#if defined BVH_USEAVX || defined BVH_USENEON
-	bvh.Convert( BVH::WALD_32BYTE, BVH::BASIC_BVH4 );
-	bvh.Convert( BVH::BASIC_BVH4, BVH::BVH4_AFRA );
-	layout = BVH::BVH4_AFRA;
-#endif
+	bvh.Build( tris, triCount );
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
 	if (!t.is_open()) return;
@@ -123,7 +134,7 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 {
 	// find primary intersection
-	bvh.Intersect( ray, layout );
+	bvh.Intersect( ray );
 	// shade
 	if (ray.hit.t == 1e30f) return bvhvec3( 0.6f, 0.7f, 1 ); // hit nothing
 	bvhvec3 I = ray.O + ray.hit.t * ray.D;
@@ -136,10 +147,10 @@ bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 	bvhvec3 direct = {}, indirect = {};
 	float NdotL = dot( N, L ), NLdotL = fabs( dot( L, bvhvec3( 0, 1, 0 ) ) );
 	if (NdotL > 0)
-		if (!bvh.IsOccluded( Ray( I + L * 0.001f, L, dist ), layout ) )
+		if (!bvh.IsOccluded( Ray( I + L * 0.001f, L, dist ) ))
 			direct = BRDF * NdotL * NLdotL * bvhvec3( 9, 9, 8 ) * 500 * (1.0f / (dist * dist));
 	// random bounce
-	if (depth < 4)
+	if (depth < 2)
 	{
 		bvhvec3 R = CosWeightedDiffReflection( N, seed );
 		float pdf = 1.0f / dot( N, R );
@@ -150,22 +161,12 @@ bvhvec3 Trace( Ray ray, unsigned& seed, unsigned depth = 0 )
 	return direct + indirect;
 }
 
-// Application Tick
-void Tick( float delta_time_s, fenster& f, uint32_t* buf )
+void TraceWorkerThread( uint32_t* buf, float scale, int threadIdx )
 {
-	// handle user input and update camera
-	if (UpdateCamera( delta_time_s, f ) || frameIdx++ == 0 )
-	{
-		memset( accumulator, 0, SCRWIDTH * SCRHEIGHT * sizeof( bvhvec3 ) );
-		spp = 1;
-	}
-
-	// render tiles
 	const int xtiles = SCRWIDTH / TILESIZE, ytiles = SCRHEIGHT / TILESIZE;
 	const int tiles = xtiles * ytiles;
-	const float scale = 1.0f / spp++;
-#pragma omp parallel for schedule(dynamic)
-	for (int tile = 0; tile < tiles; tile++)
+	int tile = threadIdx;
+	while (tile < tiles)
 	{
 		const int tx = tile % xtiles, ty = tile / xtiles;
 		unsigned seed = (tile + 17) * 171717 + frameIdx * 1023;
@@ -185,7 +186,30 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 			const int b = (int)tinybvh_min( 255.0f, sqrtf( E.z ) * 255.0f );
 			buf[pixelIdx] = b + (g << 8) + (r << 16);
 		}
+		tile = tileIdx++;
 	}
+}
+
+// Application Tick
+void Tick( float delta_time_s, fenster& f, uint32_t* buf )
+{
+	// handle user input and update camera
+	if (UpdateCamera( delta_time_s, f ) || frameIdx++ == 0)
+	{
+		memset( accumulator, 0, SCRWIDTH * SCRHEIGHT * sizeof( bvhvec3 ) );
+		spp = 1;
+	}
+	// render tiles
+	const float scale = 1.0f / spp++;
+	tileIdx = threadCount;
+	std::vector<std::thread> threads;
+	for (uint32_t i = 0; i < threadCount; i++)
+		threads.emplace_back( &TraceWorkerThread, buf, scale, i );
+	for (auto& thread : threads) thread.join();
+	// print frame time / rate in window title
+	char title[50];
+	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
+	fenster_update_title( &f, title );
 }
 
 // Application Shutdown

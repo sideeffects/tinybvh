@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\tiny_bvh_pt.cpp" />
+    <ClCompile Include="..\tiny_bvh_anim.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\tiny_bvh.h" />
@@ -27,8 +27,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{430FCECF-7685-40A7-A415-4A0DE487158F}</ProjectGuid>
-    <RootNamespace>tinybvhpt</RootNamespace>
+    <ProjectGuid>{2DC14EA1-D6E9-45F1-A6CC-6E0A0BAD8A9B}</ProjectGuid>
+    <RootNamespace>tinybvhanim</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />

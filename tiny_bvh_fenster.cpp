@@ -12,6 +12,9 @@
 using namespace tinybvh;
 
 BVH bvh;
+int frameIdx = 0;
+Ray* rays = 0;
+int* depths = 0;
 
 #ifdef LOADSCENE
 bvhvec4* triangles = 0;
@@ -72,13 +75,7 @@ void Init()
 #endif
 
 	// build a BVH over the scene
-#if defined(BVH_USEAVX)
-	bvh.BuildAVX( triangles, verts / 3 );
-#elif defined(BVH_USENEON)
-	bvh.BuildNEON( triangles, verts / 3 );
-#else
 	bvh.Build( triangles, verts / 3 );
-#endif
 
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
@@ -87,32 +84,45 @@ void Init()
 	t.read( (char*)&eye, sizeof( eye ) );
 	t.read( (char*)&view, sizeof( view ) );
 	t.close();
+
+	// allocate buffers
+	rays = (Ray*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * 16 * sizeof( Ray ) );
+	depths = (int*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * sizeof( int ) );
 }
 
-void UpdateCamera(float delta_time_s, fenster& f)
+bool UpdateCamera( float delta_time_s, fenster& f )
 {
 	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) );
 	bvhvec3 up = 0.8f * cross( view, right );
 
 	// get camera controls.
-	if (f.keys['A']) eye += right * -1.0f * delta_time_s * 10;
-	if (f.keys['D']) eye += right * delta_time_s * 10;
-	if (f.keys['W']) eye += view * delta_time_s * 10;
-	if (f.keys['S']) eye += view * -1.0f * delta_time_s * 10;
-	if (f.keys['R']) eye += up * delta_time_s * 10;
-	if (f.keys['F']) eye += up * -1.0f * delta_time_s * 10;
+	bool moved = false;
+	if (f.keys['A']) eye += right * -1.0f * delta_time_s * 10, moved = true;
+	if (f.keys['D']) eye += right * delta_time_s * 10, moved = true;
+	if (f.keys['W']) eye += view * delta_time_s * 10, moved = true;
+	if (f.keys['S']) eye += view * -1.0f * delta_time_s * 10, moved = true;
+	if (f.keys['R']) eye += up * delta_time_s * 10, moved = true;
+	if (f.keys['F']) eye += up * -1.0f * delta_time_s * 10, moved = true;
+	if (f.keys[20]) view = normalize( view + right * -1.0f * delta_time_s ), moved = true;
+	if (f.keys[19]) view = normalize( view + right * delta_time_s ), moved = true;
+	if (f.keys[17]) view = normalize( view + up * -1.0f * delta_time_s ), moved = true;
+	if (f.keys[18]) view = normalize( view + up * delta_time_s ), moved = true;
 
 	// recalculate right, up
 	right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) );
 	up = 0.8f * cross( view, right );
 	bvhvec3 C = eye + 2 * view;
 	p1 = C - right + up, p2 = C + right + up, p3 = C - right - up;
+	return moved;
 }
 
-void Tick(float delta_time_s, fenster & f, uint32_t* buf)
+void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 {
 	// handle user input and update camera
-	UpdateCamera(delta_time_s, f);
+	bool moved = UpdateCamera( delta_time_s, f ) || frameIdx++ == 0;
+
+	// handle user input and update camera
+	UpdateCamera( delta_time_s, f );
 
 	// clear the screen with a debug-friendly color
 	for (int i = 0; i < SCRWIDTH * SCRHEIGHT; i++) buf[i] = 0xff00ff;
@@ -121,8 +131,8 @@ void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 	// organized in 4x4 pixel tiles, 16 samples per pixel, so 256 rays per tile.
 	int N = 0;
 	Ray* rays = (Ray*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * 16 * sizeof( Ray ) );
-	int * depths = (int *)tinybvh::malloc64(SCRWIDTH * SCRHEIGHT * sizeof (int));
-	for (int ty = 0; ty < SCRHEIGHT; ty += 4) for (int tx = 0; tx < SCRWIDTH; tx += 4 )
+	int* depths = (int*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * sizeof( int ) );
+	for (int ty = 0; ty < SCRHEIGHT; ty += 4) for (int tx = 0; tx < SCRWIDTH; tx += 4)
 	{
 		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
 		{
@@ -152,6 +162,7 @@ void Tick(float delta_time_s, fenster & f, uint32_t* buf)
 			// buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
 		}
 	}
+
 	tinybvh::free64( rays );
 	tinybvh::free64(depths);
 }
@@ -164,4 +175,8 @@ void Shutdown()
 	s.write( (char*)&eye, sizeof( eye ) );
 	s.write( (char*)&view, sizeof( view ) );
 	s.close();
+
+	// delete allocated buffers
+	tinybvh::free64( rays );
+	tinybvh::free64( depths );
 }

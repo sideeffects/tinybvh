@@ -1,5 +1,5 @@
 # tinybvh
-Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). The library has no dependencies. 
+Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
 # tinyocl
 Single-header OpenCL library, which helps you select and initialize a device. It also loads, compiles and runs kernels, with several convenient features:
@@ -60,15 +60,26 @@ The cross-platform fenster-based single-source **bitmap renderer** can be compil
 
 ```g++ -std=c++20 -mavx -O3 -framework Cocoa tiny_bvh_fenster.cpp -o tiny_bvh_fenster``` (on macOS)
 
-The multi-threaded **ambient occlusion** demo can be compiled with
+The multi-threaded **path tracing** demo can be compiled with
 
-````g++ -std=c++20 -mavx -mwindows -fopenmp -O3 tiny_bvh_pt.cpp -o tiny_bvh_pt```` (on windows)
+````g++ -std=c++20 -mavx -mwindows -O3 tiny_bvh_pt.cpp -o tiny_bvh_pt```` (on windows)
 
-The **performance measurement tool** uses OpenMP and can be compiled with:
+The **performance measurement tool** can be compiled with:
 
-````g++ -std=c++20 -mavx -Ofast -fopenmp tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
+````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.0.6
+# Version 1.1.1
+
+Version 1.1.x introduces a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. Conversion now happens with a ````ConvertFrom```` method in each of those, or directly via the constructor. Example:
+
+````
+BVH bvh;
+bvh.Build( (bvhvec4*)myTriData, triangleCount );
+BVH_SoA bvh2( bvh ); // convert from BVH to BVH_SoA
+bvh.Intersect( ray );
+bvh2.Intersect( ray );
+````
+
 This version of the library includes the following functionality:
 * Binned SAH BVH builder
 * Fast binned SAH BVH builder using AVX intrinsics
@@ -84,16 +95,25 @@ This version of the library includes the following functionality:
 * OpenCL traversal: Aila & Laine, 4-way quantized, CWBVH
 * Support for WASM / EMSCRIPTEN, g++, clang, Visual Studio
 * Optional user-defined memory allocation, by [Thierry Cantenot](https://github.com/tcantenot)
+* Vertex array can now have a custom stride, by [David Peicho](https://github.com/DavidPeicho)
+* You can now also BYOVT ('bring your own vector types'), thanks [Tijmen Verhoef](https://github.com/nemjit001)
 * 'SpeedTest' tool that times and validates all (well, most) traversal kernels.
 
 The current version of the library is rapidly gaining functionality. Please expect changes to the interface.
 
 Plans, ordered by priority:
 
+* NEW: We now also use the "Issues" list for this!
 * TLAS/BLAS traversal with BLAS transforms
+  * Support more than two levels
 * Documentation:
   * Wiki
   * Article on architecture and intended use
+* Bridge to rt hw / layouts:
+  * Produce a BVH for Intel rt hw (mind the quads)
+  * Produce a BVH for AMD rt hw
+  * Use inline asm on AMD for aabb/tri intersect
+  * Support templated N-wide BVH
 * Example renderers:
   * CPU WHitted-style ray tracer
   * CPU and GPU path tracer
@@ -105,8 +125,6 @@ Plans, ordered by priority:
   * Reverse-engineer Embree & PhysX
   * Implement Fuetterling et al.'s 2017 paper
   
-These features have already been completed but need polishing and adapting to the interface, once it is settled. CWBVH GPU traversal combined with an optimized SBVH provides state-of-the-art **#RTXOff** performance; expect _billions of rays per second_.
-
 # tinybvh in the Wild
 A list of projects using tinybvh:
 * [unity-tinybvh](https://github.com/andr3wmac/unity-tinybvh): An example implementation for tinybvh in Unity and a foundation for building compute based raytracing solutions, by Andrew MacIntyre.
