@@ -2294,6 +2294,7 @@ void BVH_SoA::Build( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH_SoA::Build( const bvhvec4slice& vertices ) 
 { 
+	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildDefault( vertices );
 	ConvertFrom( bvh );
 }
@@ -2356,6 +2357,7 @@ void BVH4::Build( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH4::Build( const bvhvec4slice& vertices )
 {
+	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildDefault( vertices );
 	ConvertFrom( bvh );
 }
@@ -2451,6 +2453,7 @@ void BVH4_CPU::Build( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH4_CPU::Build( const bvhvec4slice& vertices ) 
 { 
+	bvh4.context = context; // properly propagate context to fix issue #66.
 	bvh4.Build( vertices );
 	ConvertFrom( bvh4 );
 }
@@ -2548,6 +2551,7 @@ void BVH4_GPU::Build( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH4_GPU::Build( const bvhvec4slice& vertices ) 
 { 
+	bvh4.context = context; // properly propagate context to fix issue #66.
 	bvh4.Build( vertices );
 	ConvertFrom( bvh4 );
 }
@@ -2792,6 +2796,7 @@ void BVH8::Build( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH8::Build( const bvhvec4slice& vertices ) 
 { 
+	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildDefault( vertices );
 	ConvertFrom( bvh );
 }
@@ -2866,7 +2871,6 @@ void BVH8::ConvertFrom( const BVH& original )
 void BVH8::SplitBVH8Leaf( const uint32_t nodeIdx, const uint32_t maxPrims )
 {
 	float fragMinFix = frag_min_flipped ? -1.0f : 1.0f;
-	const bvhvec4slice& verts = bvh.verts;
 	const uint32_t* triIdx = bvh.triIdx;
 	const Fragment* fragment = bvh.fragment;
 	BVHNode& node = bvh8Node[nodeIdx];
@@ -2932,6 +2936,7 @@ void BVH8_CWBVH::Build( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH8_CWBVH::Build( const bvhvec4slice& vertices ) 
 { 
+	bvh8.context = context; // properly propagate context to fix issue #66.
 	bvh8.Build( vertices );
 	ConvertFrom( bvh8 );
 }
