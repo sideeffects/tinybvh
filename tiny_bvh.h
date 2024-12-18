@@ -4217,25 +4217,6 @@ void BVH::BuildNEON( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH::BuildNEON( const bvhvec4slice& vertices )
 {
-	// some constants
-	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
-	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR );
-	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
-	for (uint32_t i = 0; i < 3 * BVHBINS; i++) binboxOrig[i] = max8; // binbox initialization template
-	// reset node pool
-	verts = vertices; // note: we're not copying this data; don't delete.
-	triCount = idxCount = primCount;
-	uint32_t newNodePtr = 2;
-	struct FragSSE { __m128 bmin4, bmax4; };
-	FragSSE* frag4 = (FragSSE*)fragment;
-	__m256* frag8 = (__m256*)fragment;
-	const __m128* verts4 = (__m128*)verts.data; // that's why it must be 16-byte aligned.
-	// assign all triangles to the root node
-	BVHNode& root = bvhNode[0];
-	root.leftFirst = 0, root.triCount = triCount;
-
-
-
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
 	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildNEON( .. ), stride must be multiple of 16." );
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
