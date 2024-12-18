@@ -11,12 +11,11 @@ struct RenderData
 	float4 eye, C, p0, p1, p2;
 	uint frameIdx, dummy1, dummy2, dummy3;
 	// BVH data
-	global struct BVHNodeAlt* altNode;
-	global unsigned* idx;
-	global float4* verts;
+	global float4* cwbvhNodes;
+	global float4* cwbvhTris;
 };
 
-__global int pathCount, shadowRays;
+__global volatile int extendTasks, shadeTasks, connectTasks;
 __global struct RenderData rd;
 
 // PathState: path throughput, current extension ray, pixel index
@@ -41,9 +40,8 @@ void kernel SetRenderData(
 	int primaryRayCount,
 	float4 eye, float4 p0, float4 p1, float4 p2,
 	unsigned frameIdx,
-	global struct BVHNodeAlt* altNode,
-	global unsigned* idx,
-	global float4* verts
+	global float4* cwbvhNodes,
+	global float4* cwbvhTris
 )
 {
 	if (get_global_id( 0 ) != 0) return;
@@ -52,12 +50,19 @@ void kernel SetRenderData(
 	rd.p0 = p0, rd.p1 = p1, rd.p2 = p2;
 	rd.frameIdx = frameIdx;
 	// set BVH pointers
-	rd.altNode = altNode;
-	rd.idx = idx;
-	rd.verts = verts;
+	rd.cwbvhNodes = cwbvhNodes;
+	rd.cwbvhTris = cwbvhTris;
 	// initialize atomic counters
-	pathCount = primaryRayCount;
-	shadowRays = 0;
+	extendTasks = primaryRayCount;
+	shadeTasks = primaryRayCount;
+	connectTasks = 0;
+}
+
+// clear accumulator
+void kernel Clear( global float4* accumulator )
+{
+	const uint pixelIdx = get_global_id( 0 );
+	accumulator[pixelIdx] = (float4)( 0 );
 }
 
 // primary ray generation
@@ -76,19 +81,33 @@ void kernel Generate( global struct PathState* raysOut  )
 // extend: trace the generated rays to find the nearest intersection point.
 void kernel Extend( global struct PathState* raysIn )
 {
-	// obtain task
-	const int pathId = atomic_dec( &pathCount ) - 1;
-	if (pathId < 0) return;
-	const float4 O4 = raysIn[pathId].O;
-	const float4 D4 = raysIn[pathId].D;
-	const float3 rD = (float3)( 1.0f / D4.x, 1.0f / D4.y, 1.0f / D4.z );
-	raysIn[pathId].hit = traverse_ailalaine( rd.altNode, rd.idx, rd.verts, O4.xyz, D4.xyz, rD, 1e30f );
+	while (1)
+	{
+		// obtain task
+		const int pathId = atomic_dec( &extendTasks ) - 1;
+		if (pathId < 0) break;
+		const float4 O4 = raysIn[pathId].O;
+		const float4 D4 = raysIn[pathId].D;
+		const float3 rD = (float3)( 1.0f / D4.x, 1.0f / D4.y, 1.0f / D4.z );
+		raysIn[pathId].hit = traverse_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, 1e30f );
+	}
 }
 
 // shade: process intersection results; this evaluates the BRDF and creates extension
 // rays and shadow rays.
 void kernel Shade( global float4* accumulator, global struct PathState* raysIn, global struct PathState* raysOut, global struct Potential* shadowOut )
 {
+	while (1)
+	{
+		// obntain task
+		const int pathId = atomic_dec( &shadeTasks ) - 1;
+		if (pathId < 0) break;
+		float4 data1 = raysIn[pathId].O;
+		float4 data2 = raysIn[pathId].D;
+		float4 data3 = raysIn[pathId].hit;
+		uint pixelIdx = as_uint( data1.w );
+		accumulator[pixelIdx] += (float4)(data3.x * 0.01f );
+	}
 }
 
 // connect: trace shadow rays and deposit their potential contribution to the pixels
@@ -96,13 +115,13 @@ void kernel Shade( global float4* accumulator, global struct PathState* raysIn, 
 void kernel Connect( global float4* accumulator, global struct Potential* shadowIn )
 {
 	// obtain task
-	const int rayId = atomic_dec( &shadowRays ) - 1;
+	const int rayId = atomic_dec( &connectTasks ) - 1;
 	if (rayId < 0) return;
 	const float4 T4 = shadowIn[rayId].T;
 	const float4 O4 = shadowIn[rayId].O;
 	const float4 D4 = shadowIn[rayId].D;
 	const float3 rD = (float3)( 1.0f / D4.x, 1.0f / D4.y, 1.0f / D4.z );
-	bool occluded = isoccluded_ailalaine( rd.altNode, rd.idx, rd.verts, O4.xyz, D4.xyz, rD, D4.w );
+	bool occluded = false; // isoccluded_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, D4.w );
 	if (occluded) return;
 	unsigned pixelIdx = as_uint( O4.w );
 	accumulator[pixelIdx] += T4;

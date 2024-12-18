@@ -20,10 +20,10 @@ using namespace tinybvh;
 
 // Application variables
 
-static BVH4_GPU bvh;
+static BVH8_CWBVH bvh;
 static bvhvec4* tris = 0;
 static int triCount = 0, frameIdx = 0, spp = 0;
-static Kernel* init, * generate, * extend, * shade, * traceShadows, * finalize;
+static Kernel* init, * clear, * generate, * extend, * shade, * traceShadows, * finalize;
 static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections;
 
 // View pyramid for a pinhole camera
@@ -46,11 +46,15 @@ void AddMesh( const char* file, float scale = 1, bvhvec3 pos = {}, int c = 0, in
 		*(bvhvec3*)b = *(bvhvec3*)b * scale + pos, b[3] = c ? c : b[3], b += 4;
 }
 
+Buffer* cwbvhNodes = 0;
+Buffer* cwbvhTris = 0;
+
 // Application init
 void Init()
 {
 	// create OpenCL kernels
 	init = new Kernel( "wavefront.cl", "SetRenderData" );
+	clear = new Kernel( "wavefront.cl", "Clear" );
 	generate = new Kernel( "wavefront.cl", "Generate" );
 	extend = new Kernel( "wavefront.cl", "Extend" );
 	shade = new Kernel( "wavefront.cl", "Shade" );
@@ -63,13 +67,21 @@ void Init()
 	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	connections = new Buffer( N * sizeof( bvhvec4 ) * 3 );
-	// set kernel arguments
-	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, 0, 0, 0, 0 );
 	// load raw vertex data
 	AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
 	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0xaaaaff );
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
 	bvh.Build( tris, triCount );
+	// create gpu buffers
+	cwbvhNodes = new Buffer( bvh.usedBlocks * sizeof( bvhvec4 ), bvh.bvh8Data );
+	cwbvhTris = new Buffer( bvh.idxCount * 3 * sizeof( bvhvec4 ), bvh.bvh8Tris );
+	cwbvhNodes->CopyToDevice();
+	cwbvhTris->CopyToDevice();
+	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
+	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
+	connections = new Buffer( N * sizeof( bvhvec4 ) * 3 );
+	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
+	pixels = new Buffer( N * sizeof( uint32_t ) );
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera_gpu.bin", t.binary | t.in };
 	if (!t.is_open()) return;
@@ -103,13 +115,34 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 {
 	// handle user input and update camera
+	int N = SCRWIDTH * SCRHEIGHT;
 	if (UpdateCamera( delta_time_s, f ) || frameIdx++ == 0)
 	{
-		// memset( accumulator, 0, SCRWIDTH * SCRHEIGHT * sizeof( bvhvec3 ) );
+		clear->SetArguments( accumulator );
+		clear->Run( N );
 		spp = 1;
 	}
-	// render on the GPU
-	// ..
+	// wavefront step 0: render on the GPU
+	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, 0, cwbvhNodes, cwbvhTris );
+	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
+	// wavefront step 1: generate primary rays
+	generate->SetArguments( raysOut );
+	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
+	// wavefront step 2: extend paths
+	swap( raysOut, raysIn );
+	extend->SetArguments( raysIn );
+	extend->Run( 16384 /* todo: 64 * SM count */ );
+	// wavefront step 3: shade intersection results
+	shade->SetArguments( accumulator, raysIn, raysOut, connections );
+	shade->Run( 16384 /* todo: 64 * SM count */ );
+	// wavefront step 4: connect shadow rays
+	traceShadows->SetArguments( accumulator, connections );
+	traceShadows->Run( 1024 );
+	// wavefront step 4: finalize to pixel buffer
+	finalize->SetArguments( accumulator, 1.0f / (float)spp++, pixels );
+	finalize->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
+	pixels->CopyFromDevice();
+	memcpy( buf, pixels->GetHostPtr(), N * sizeof( uint32_t ) );
 	// print frame time / rate in window title
 	char title[50];
 	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
