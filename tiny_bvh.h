@@ -22,36 +22,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-// 2024
-// Dec 09: version 1.1.0 : API overhaul
-// Dec 07: version 1.0.6 : Introduction of slices.
-// Dec 05: version 1.0.5 : Bug fixes, path tracing example.
-// Dec 02: version 1.0.1 : Shadow ray validation, double precision.
-// Nov 28: version 1.0.0 : Validation in speedtest, faster tri test.
-// Nov 25: version 0.9.8 : FATAL_ERROR_IF interface.
-// Nov 22: version 0.9.7 : Bug fix release.
-// Nov 21: version 0.9.6 : Interface for IsOccluded and batches.
-// Nov 20: version 0.9.5 : CWBVH traversal on GPU.
-// Nov 19: version 0.9.2 : 4-way traversal on GPU.
-// Nov 18: version 0.9.1 : Added custom alloc/free (tcantenot).
-// Mov 16: version 0.9.0 : (external) OpenCL in speedtest.
-// Nov 15: version 0.8.3 : Incremental update / bugfixes.
-// Nov 14: version 0.8.0 : ARM/NEON support.
-// Nov 13: version 0.7.5 : Support for WASM with EMSCRIPTEN.
-// Nov 12: version 0.7.0 : CWBVH construction and traversal.
-// Nov 11: version 0.5.1 : SBVH builder, BVH4_GPU traversal.
-// Nov 10: version 0.4.2 : BVH4/8, gpu-friendly BVH4.
-// Nov 09: version 0.4.0 : Layouts, BVH optimizer.
-// Nov 08: version 0.3.0 : BuildAVX in g++.
-// Oct 30: version 0.1.0 : Initial release.
-// Oct 29: version 0.0.1 : Establishing interface.
-//
-
 // How to use:
 //
 // Use this in *one* .c or .cpp
 //   #define TINYBVH_IMPLEMENTATION
 //   #include "tiny_bvh.h"
+// Instantiate a BVH and build it for a list of triangles:
+//   BVH bvh;
+//   bvh.Build( (bvhvec4*)myVerts, numTriangles );
+//   Ray ray( bvhvec3( 0, 0, 0 ), bvhvec3( 0, 0, 1 ), 1e30f );
+//   bvh.Intersect( ray );
+// After this, intersection information is in ray.hit.
 
 // tinybvh can use custom vector types by defining TINYBVH_USE_CUSTOM_VECTOR_TYPES once before inclusion.
 // To define custom vector types create a tinybvh namespace with the appropriate using directives, e.g.:
@@ -918,8 +899,8 @@ public:
 	// BVH8 data
 	bvhvec4* bvh8Data = 0;			// nodes in CWBVH format.
 	bvhvec4* bvh8Tris = 0;			// triangle data for CWBVH nodes.
-	uint32_t allocatedBlocks;		// node data is stored in blocks of 16 byte.
-	uint32_t usedBlocks;			// actually used blocks.
+	uint32_t allocatedBlocks = 0;	// node data is stored in blocks of 16 byte.
+	uint32_t usedBlocks = 0;		// actually used blocks.
 	BVH8 bvh8;						// BVH8_CWBVH is created from BVH8 and uses its data.
 };
 

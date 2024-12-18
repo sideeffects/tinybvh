@@ -20,17 +20,17 @@
 // #define BUILD_NEON
 // #define BUILD_SBVH
 #define TRAVERSE_2WAY_ST
-#define TRAVERSE_ALT2WAY_ST
-#define TRAVERSE_SOA2WAY_ST
-#define TRAVERSE_4WAY
+// #define TRAVERSE_ALT2WAY_ST
+// #define TRAVERSE_SOA2WAY_ST
+// #define TRAVERSE_4WAY
 // #define TRAVERSE_2WAY_DBL
 #define TRAVERSE_CWBVH
-#define TRAVERSE_BVH4
-#define TRAVERSE_BVH8
-#define TRAVERSE_2WAY_MT
-#define TRAVERSE_2WAY_MT_PACKET
-#define TRAVERSE_OPTIMIZED_ST
-#define TRAVERSE_4WAY_OPTIMIZED
+// #define TRAVERSE_BVH4
+// #define TRAVERSE_BVH8
+// #define TRAVERSE_2WAY_MT
+// #define TRAVERSE_2WAY_MT_PACKET
+// #define TRAVERSE_OPTIMIZED_ST
+// #define TRAVERSE_4WAY_OPTIMIZED
 // #define EMBREE_BUILD // win64-only for now.
 // #define EMBREE_TRAVERSE // win64-only for now.
 
@@ -995,6 +995,18 @@ int main()
 	tinybvh::free64( rayhits );
 
 #endif
+
+	// verify memory management
+	delete bvh;
+	delete bvh_verbose;
+	delete bvh_double;
+	delete bvh_soa;
+	delete bvh_gpu;
+	delete bvh4;
+	delete bvh4_cpu;
+	delete bvh4_gpu;
+	delete bvh8;
+	delete cwbvh;
 
 	printf( "all done." );
 	return 0;
