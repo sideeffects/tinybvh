@@ -15,22 +15,22 @@
 // tests to perform
 // #define BUILD_MIDPOINT
 #define BUILD_REFERENCE
-// #define BUILD_DOUBLE
+#define BUILD_DOUBLE
 #define BUILD_AVX
 // #define BUILD_NEON
-// #define BUILD_SBVH
+#define BUILD_SBVH
 #define TRAVERSE_2WAY_ST
-// #define TRAVERSE_ALT2WAY_ST
-// #define TRAVERSE_SOA2WAY_ST
-// #define TRAVERSE_4WAY
-// #define TRAVERSE_2WAY_DBL
+#define TRAVERSE_ALT2WAY_ST
+#define TRAVERSE_SOA2WAY_ST
+#define TRAVERSE_4WAY
+#define TRAVERSE_2WAY_DBL
 #define TRAVERSE_CWBVH
-// #define TRAVERSE_BVH4
-// #define TRAVERSE_BVH8
-// #define TRAVERSE_2WAY_MT
-// #define TRAVERSE_2WAY_MT_PACKET
-// #define TRAVERSE_OPTIMIZED_ST
-// #define TRAVERSE_4WAY_OPTIMIZED
+#define TRAVERSE_BVH4
+#define TRAVERSE_BVH8
+#define TRAVERSE_2WAY_MT
+#define TRAVERSE_2WAY_MT_PACKET
+#define TRAVERSE_OPTIMIZED_ST
+#define TRAVERSE_4WAY_OPTIMIZED
 // #define EMBREE_BUILD // win64-only for now.
 // #define EMBREE_TRAVERSE // win64-only for now.
 

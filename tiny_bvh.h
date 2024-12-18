@@ -644,7 +644,7 @@ public:
 	bvhdbl3* verts = 0;				// pointer to input primitive array, double-precision, 3x24 bytes per tri.
 	Fragment* fragment = 0;			// input primitive bounding boxes, double-precision.
 	BVHNode* bvhNode = 0;			// BVH node, double precision format.
-	uint64_t* triIdx;				// primitive index array for double-precision bvh.
+	uint64_t* triIdx = 0;			// primitive index array for double-precision bvh.
 	BuildFlags buildFlag = NONE;	// hint to the builder: currently, NONE or FULLSPLIT.
 };
 
@@ -666,7 +666,7 @@ public:
 	};
 	BVH_GPU( BVHContext ctx = {} ) { context = ctx; }
 	BVH_GPU( const BVH& original ) { /* DEPRICATED */ ConvertFrom( original ); }
-	~BVH_GPU() { AlignedFree( bvhNode ); }
+	~BVH_GPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
@@ -675,6 +675,7 @@ public:
 	// BVH data
 	BVHNode* bvhNode = 0;			// BVH node in Aila & Laine format.
 	BVH bvh;						// BVH4 is created from BVH and uses its data.
+	bool ownBVH = true;				// False when ConvertFrom receives an external bvh.
 };
 
 class BVH_SoA : public BVHBase
@@ -690,7 +691,7 @@ public:
 	};
 	BVH_SoA( BVHContext ctx = {} ) { context = ctx; }
 	BVH_SoA( const BVH& original ) { /* DEPRICATED */ ConvertFrom( original ); }
-	~BVH_SoA() { AlignedFree( bvhNode ); }
+	~BVH_SoA();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
@@ -699,6 +700,7 @@ public:
 	// BVH data
 	BVHNode* bvhNode = 0;			// BVH node in 'structure of arrays' format.
 	BVH bvh;						// BVH_SoA is created from BVH and uses its data.
+	bool ownBVH = true;				// False when ConvertFrom receives an external bvh.
 };
 
 class BVH_Verbose : public BVHBase
@@ -754,7 +756,7 @@ public:
 	};
 	BVH4( BVHContext ctx = {} ) { context = ctx; }
 	BVH4( const BVH& original ) { /* DEPRECATED */ ConvertFrom( original ); }
-	~BVH4() { AlignedFree( bvh4Node ); }
+	~BVH4();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
@@ -763,6 +765,7 @@ public:
 	// BVH data
 	BVHNode* bvh4Node = 0;			// BVH node for 4-wide BVH.
 	BVH bvh;						// BVH4 is created from BVH and uses its data.
+	bool ownBVH = true;				// False when ConvertFrom receives an external bvh.
 };
 
 class BVH8 : public BVHBase
@@ -779,7 +782,7 @@ public:
 	};
 	BVH8( BVHContext ctx = {} ) { context = ctx; }
 	BVH8( const BVH& original ) { /* DEPRECATED */ ConvertFrom( original ); }
-	~BVH8() { AlignedFree( bvh8Node ); }
+	~BVH8();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
@@ -791,6 +794,7 @@ public:
 public:
 	BVHNode* bvh8Node = 0;			// BVH node for 8-wide BVH.
 	BVH bvh;						// BVH8 is created from BVH and uses its data.
+	bool ownBVH = true;				// False when ConvertFrom receives an external bvh.
 };
 
 class BVH4_GPU : public BVHBase
@@ -817,7 +821,7 @@ public:
 	};
 	BVH4_GPU( BVHContext ctx = {} ) { context = ctx; }
 	BVH4_GPU( const BVH4& original ) { /* DEPRECATED */ ConvertFrom( bvh4 ); }
-	~BVH4_GPU() { AlignedFree( bvh4Data ); }
+	~BVH4_GPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH4& original );
@@ -828,6 +832,7 @@ public:
 	uint32_t allocatedBlocks = 0;	// node data and triangles are stored in 16-byte blocks.
 	uint32_t usedBlocks = 0;		// actually used storage.
 	BVH4 bvh4;						// BVH4_CPU is created from BVH4 and uses its data.
+	bool ownBVH4 = true;			// False when ConvertFrom receives an external bvh.
 };
 
 class BVH4_CPU : public BVHBase
@@ -845,7 +850,7 @@ public:
 	};
 	BVH4_CPU( BVHContext ctx = {} ) { context = ctx; }
 	BVH4_CPU( const BVH4& original ) { /* DEPRECATED */ ConvertFrom( bvh4 ); }
-	~BVH4_CPU() { AlignedFree( bvh4Node ); AlignedFree( bvh4Tris ); }
+	~BVH4_CPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH4& original );
@@ -855,6 +860,7 @@ public:
 	BVHNode* bvh4Node = 0;			// 128-byte 4-wide BVH node for efficient CPU rendering.
 	bvhvec4* bvh4Tris = 0;			// triangle data for BVHNode4Alt2 nodes.
 	BVH4 bvh4;						// BVH4_CPU is created from BVH4 and uses its data.
+	bool ownBVH4 = true;			// False when ConvertFrom receives an external bvh4.
 };
 
 class BVH4_WiVe : public BVHBase
@@ -890,7 +896,7 @@ class BVH8_CWBVH : public BVHBase
 public:
 	BVH8_CWBVH( BVHContext ctx = {} ) { context = ctx; }
 	BVH8_CWBVH( BVH8& original ) { /* DEPRECATED */ ConvertFrom( bvh8 ); }
-	~BVH8_CWBVH() { AlignedFree( bvh8Data ); AlignedFree( bvh8Tris ); }
+	~BVH8_CWBVH();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( BVH8& original ); // NOTE: Not const; this may change some nodes in the original.
@@ -902,6 +908,7 @@ public:
 	uint32_t allocatedBlocks = 0;	// node data is stored in blocks of 16 byte.
 	uint32_t usedBlocks = 0;		// actually used blocks.
 	BVH8 bvh8;						// BVH8_CWBVH is created from BVH8 and uses its data.
+	bool ownBVH8 = true;			// False when ConvertFrom receives an external bvh8.
 };
 
 // BLASInstance: A TLAS is built over BLAS instances, where a single BLAS can be
@@ -2167,6 +2174,12 @@ void BVH_Verbose::MergeLeafs()
 // BVH_GPU implementation
 // ----------------------------------------------------------------------------
 
+BVH_GPU::~BVH_GPU() 
+{
+	if (!ownBVH) bvh = BVH(); // clear out pointers we don't own.
+	AlignedFree( bvhNode ); 
+}
+
 void BVH_GPU::Build( const bvhvec4* vertices, const uint32_t primCount ) 
 { 
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) ); 
@@ -2180,6 +2193,7 @@ void BVH_GPU::Build( const bvhvec4slice& vertices )
 void BVH_GPU::ConvertFrom( const BVH& original )
 {
 	// get a copy of the original bvh
+	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor. 
 	bvh = original; 
 	// allocate space
 	const uint32_t spaceNeeded = original.usedNodes;
@@ -2269,6 +2283,12 @@ int32_t BVH_GPU::Intersect( Ray& ray ) const
 // BVH_SoA implementation
 // ----------------------------------------------------------------------------
 
+BVH_SoA::~BVH_SoA() 
+{
+	if (!ownBVH) bvh = BVH(); // clear out pointers we don't own.
+	AlignedFree( bvhNode ); 
+}
+
 void BVH_SoA::Build( const bvhvec4* vertices, const uint32_t primCount ) 
 { 
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) ); 
@@ -2283,6 +2303,7 @@ void BVH_SoA::Build( const bvhvec4slice& vertices )
 void BVH_SoA::ConvertFrom( const BVH& original )
 {
 	// get a copy of the original bvh
+	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor. 
 	bvh = original; 
 	// allocate space
 	const uint32_t spaceNeeded = bvh.usedNodes;
@@ -2332,6 +2353,12 @@ void BVH_SoA::ConvertFrom( const BVH& original )
 // BVH4 implementation
 // ----------------------------------------------------------------------------
 
+BVH4::~BVH4() 
+{
+	if (!ownBVH) bvh = BVH(); // clear out pointers we don't own.
+	AlignedFree( bvh4Node ); 
+}
+
 void BVH4::Build( const bvhvec4* vertices, const uint32_t primCount )
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) ); 
@@ -2346,6 +2373,7 @@ void BVH4::Build( const bvhvec4slice& vertices )
 void BVH4::ConvertFrom( const BVH& original )
 {
 	// get a copy of the original bvh
+	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor. 
 	bvh = original; 
 	// allocate space
 	const uint32_t spaceNeeded = original.usedNodes;
@@ -2428,6 +2456,13 @@ int32_t BVH4::Intersect( Ray& ray ) const
 // BVH4_CPU implementation
 // ----------------------------------------------------------------------------
 
+BVH4_CPU::~BVH4_CPU() 
+{
+	if (!ownBVH4) bvh4 = BVH4(); // clear out pointers we don't own.
+	AlignedFree( bvh4Node ); 
+	AlignedFree( bvh4Tris );
+}
+
 void BVH4_CPU::Build( const bvhvec4* vertices, const uint32_t primCount ) 
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) ); 
@@ -2442,6 +2477,7 @@ void BVH4_CPU::Build( const bvhvec4slice& vertices )
 void BVH4_CPU::ConvertFrom( const BVH4& original )
 {
 	// get a copy of the original bvh4
+	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor. 
 	bvh4 = original; 
 	// Convert a 4-wide BVH to a format suitable for CPU traversal.
 	// See Faster Incoherent Ray Traversal Using 8-Wide AVX InstructionsLayout,
@@ -2526,6 +2562,12 @@ void BVH4_CPU::ConvertFrom( const BVH4& original )
 // BVH4_GPU implementation
 // ----------------------------------------------------------------------------
 
+BVH4_GPU::~BVH4_GPU() 
+{
+	if (!ownBVH4) bvh4 = BVH4(); // clear out pointers we don't own.
+	AlignedFree( bvh4Data ); 
+}
+
 void BVH4_GPU::Build( const bvhvec4* vertices, const uint32_t primCount ) 
 { 
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) ); 
@@ -2540,6 +2582,7 @@ void BVH4_GPU::Build( const bvhvec4slice& vertices )
 void BVH4_GPU::ConvertFrom( const BVH4& original )
 {
 	// get a copy of the original bvh4
+	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor. 
 	bvh4 = original;
 	// Convert a 4-wide BVH to a format suitable for GPU traversal. Layout:
 	// offs 0:   aabbMin (12 bytes), 4x quantized child xmin (4 bytes)
@@ -2771,6 +2814,12 @@ int32_t BVH4_GPU::Intersect( Ray& ray ) const
 // BVH8 implementation
 // ----------------------------------------------------------------------------
 
+BVH8::~BVH8() 
+{
+	if (!ownBVH) bvh = BVH(); // clear out pointers we don't own.
+	AlignedFree( bvh8Node );
+}
+
 void BVH8::Build( const bvhvec4* vertices, const uint32_t primCount ) 
 { 
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) ); 
@@ -2785,6 +2834,7 @@ void BVH8::Build( const bvhvec4slice& vertices )
 void BVH8::ConvertFrom( const BVH& original )
 {
 	// get a copy of the original
+	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor. 
 	bvh = original; 
 	// allocate space
 	// Note: The safe upper bound here is usedNodes when converting an existing
@@ -2911,6 +2961,13 @@ int32_t BVH8::Intersect( Ray& ray ) const
 // BVH8_CWBVH implementation
 // ----------------------------------------------------------------------------
 
+BVH8_CWBVH::~BVH8_CWBVH() 
+{
+	if (!ownBVH8) bvh8 = BVH8(); // clear out pointers we don't own.
+	AlignedFree( bvh8Data );
+	AlignedFree( bvh8Tris );
+}
+
 void BVH8_CWBVH::Build( const bvhvec4* vertices, const uint32_t primCount ) 
 { 
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) ); 
@@ -2925,6 +2982,7 @@ void BVH8_CWBVH::Build( const bvhvec4slice& vertices )
 void BVH8_CWBVH::ConvertFrom( BVH8& original )
 {
 	// get a copy of the original bvh8
+	if (&original != &bvh8) ownBVH8 = false; // bvh isn't ours; don't delete in destructor. 
 	bvh8 = original; 
 	// Convert a BVH8 to the format specified in: "Efficient Incoherent Ray
 	// Traversal on GPUs Through Compressed Wide BVHs", Ylitie et al. 2017.
