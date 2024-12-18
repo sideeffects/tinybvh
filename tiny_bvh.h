@@ -4217,6 +4217,25 @@ void BVH::BuildNEON( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH::BuildNEON( const bvhvec4slice& vertices )
 {
+	// some constants
+	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
+	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR );
+	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+	for (uint32_t i = 0; i < 3 * BVHBINS; i++) binboxOrig[i] = max8; // binbox initialization template
+	// reset node pool
+	verts = vertices; // note: we're not copying this data; don't delete.
+	triCount = idxCount = primCount;
+	uint32_t newNodePtr = 2;
+	struct FragSSE { __m128 bmin4, bmax4; };
+	FragSSE* frag4 = (FragSSE*)fragment;
+	__m256* frag8 = (__m256*)fragment;
+	const __m128* verts4 = (__m128*)verts.data; // that's why it must be 16-byte aligned.
+	// assign all triangles to the root node
+	BVHNode& root = bvhNode[0];
+	root.leftFirst = 0, root.triCount = triCount;
+
+
+
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
 	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildNEON( .. ), stride must be multiple of 16." );
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
@@ -4291,7 +4310,10 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 			float32x4x2_t r0, r1, r2, f = frag8[fi];
 			int32x4_t bi4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vsubq_f32( frag4[fi].bmax4, frag4[fi].bmin4 ), nmin4 ), rpd4 ), half4 ) ) );
 			memcpy( binbox, binboxOrig, sizeof( binbox ) );
-			uint32_t i0 = ILANE( bi4, 0 ), i1 = ILANE( bi4, 1 ), i2 = ILANE( bi4, 2 ), * ti = triIdx + node.leftFirst + 1;
+			uint32_t i0 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 0 ), 0, 7 ));
+			uint32_t i1 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 1 ), 0, 7 ));
+			uint32_t i2 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 2 ), 0, 7 ));
+			uint32_t* ti = triIdx + node.leftFirst + 1;
 			for (uint32_t i = 0; i < node.triCount - 1; i++)
 			{
 				uint32_t fid = *ti++;
@@ -4303,11 +4325,10 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 				r1 = vmaxq_f32x2( b1, f );
 				r2 = vmaxq_f32x2( b2, f );
 				const int32x4_t b4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vsubq_f32( fmax, fmin ), nmin4 ), rpd4 ), half4 ) ) );
-
 				f = frag8[fid], count[0][i0]++, count[1][i1]++, count[2][i2]++;
-				binbox[i0] = r0, i0 = ILANE( b4, 0 );
-				binbox[BVHBINS + i1] = r1, i1 = ILANE( b4, 1 );
-				binbox[2 * BVHBINS + i2] = r2, i2 = ILANE( b4, 2 );
+				binbox[i0] = r0, i0 = (uint32_t)(tinybvh_clamp( ILANE( b4, 0 ), 0, 7 ));
+				binbox[BVHBINS + i1] = r1, i1 = (uint32_t)(tinybvh_clamp( ILANE( b4, 1 ), 0, 7 ));
+				binbox[2 * BVHBINS + i2] = r2, i2 = (uint32_t)(tinybvh_clamp( ILANE( b4, 2 ), 0, 7 ));
 			}
 			// final business for final fragment
 			const float32x4x2_t b0 = binbox[i0], b1 = binbox[BVHBINS + i1], b2 = binbox[2 * BVHBINS + i2];
