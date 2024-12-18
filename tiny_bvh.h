@@ -4298,6 +4298,9 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 			for (uint32_t i = 0; i < node.triCount - 1; i++)
 			{
 				uint32_t fid = *ti++;
+			#if 1
+				if (fid > triCount) fid = triCount - 1; // TODO: shouldn't be needed...
+			#endif
 				const float32x4x2_t b0 = binbox[i0];
 				const float32x4x2_t b1 = binbox[BVHBINS + i1];
 				const float32x4x2_t b2 = binbox[2 * BVHBINS + i2];
