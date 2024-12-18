@@ -15,15 +15,15 @@
 // tests to perform
 // #define BUILD_MIDPOINT
 #define BUILD_REFERENCE
-// #define BUILD_DOUBLE
+#define BUILD_DOUBLE
 #define BUILD_AVX
 // #define BUILD_NEON
-// #define BUILD_SBVH
+#define BUILD_SBVH
 #define TRAVERSE_2WAY_ST
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
 #define TRAVERSE_4WAY
-// #define TRAVERSE_2WAY_DBL
+#define TRAVERSE_2WAY_DBL
 #define TRAVERSE_CWBVH
 #define TRAVERSE_BVH4
 #define TRAVERSE_BVH8
@@ -351,9 +351,9 @@ int main()
 
 	// load and compile the OpenCL kernel code
 	// This also triggers OpenCL init and device identification.
-	tinyocl::Kernel ailalaine_kernel( "traverse.cl", "traverse_ailalaine" );
-	tinyocl::Kernel gpu4way_kernel( "traverse.cl", "traverse_gpu4way" );
-	tinyocl::Kernel cwbvh_kernel( "traverse.cl", "traverse_cwbvh" );
+	tinyocl::Kernel ailalaine_kernel( "traverse.cl", "batch_ailalaine" );
+	tinyocl::Kernel gpu4way_kernel( "traverse.cl", "batch_gpu4way" );
+	tinyocl::Kernel cwbvh_kernel( "traverse.cl", "batch_cwbvh" );
 	printf( "----------------------------------------------------------------\n" );
 
 #endif
@@ -687,7 +687,11 @@ int main()
 #if defined TRAVERSE_OPTIMIZED_ST || defined TRAVERSE_4WAY_OPTIMIZED
 
 	printf( "Optimized BVH performance - Optimizing... " );
-	if (!bvh_verbose) bvh_verbose = new BVH_Verbose( *bvh );
+	if (!bvh_verbose) 
+	{
+		bvh_verbose = new BVH_Verbose();
+		bvh_verbose->ConvertFrom( *bvh );
+	}
 	t.reset();
 	bvh_verbose->Optimize( 1000000 ); // optimize the raw SBVH
 	bvh->ConvertFrom( *bvh_verbose );
@@ -991,6 +995,18 @@ int main()
 	tinybvh::free64( rayhits );
 
 #endif
+
+	// verify memory management
+	delete bvh;
+	delete bvh_verbose;
+	delete bvh_double;
+	delete bvh_soa;
+	delete bvh_gpu;
+	delete bvh4;
+	delete bvh4_cpu;
+	delete bvh4_gpu;
+	delete bvh8;
+	delete cwbvh;
 
 	printf( "all done." );
 	return 0;
