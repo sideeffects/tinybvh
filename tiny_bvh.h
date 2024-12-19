@@ -404,19 +404,15 @@ inline float32x4_t SIMD_SETRVEC( float x, float y, float z, float w )
 	ALIGNED( 64 ) float data[4] = { x, y, z, w };
 	return vld1q_f32( data );
 }
-
 inline uint32x4_t SIMD_SETRVECU( uint32_t x, uint32_t y, uint32_t z, uint32_t w )
 {
 	ALIGNED( 64 ) uint32_t data[4] = { x, y, z, w };
 	return vld1q_u32( data );
 }
-
 #else
 typedef bvhvec4 SIMDVEC4;
 #define SIMD_SETVEC(a,b,c,d) bvhvec4( d, c, b, a )
 #define SIMD_SETRVEC(a,b,c,d) bvhvec4( a, b, c, d )
-#endif
-
 #endif
 
 // error handling
@@ -567,7 +563,8 @@ public:
 	#if defined(BVH_USEAVX)
 		BuildAVX( vertices );
 	#elif defined(BVH_USENEON)
-		BuildNEON( vertices );
+		Build( vertices );
+		// BuildNEON( vertices ); // TODO: currently not working correctly.
 	#else
 		Build( vertices );
 	#endif
@@ -968,6 +965,8 @@ static uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 #endif
 #endif
 }
+
+#endif
 
 #ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
