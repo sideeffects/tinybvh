@@ -23,8 +23,9 @@ using namespace tinybvh;
 static BVH8_CWBVH bvh;
 static bvhvec4* tris = 0;
 static int triCount = 0, frameIdx = 0, spp = 0;
-static Kernel* init, * clear, * generate, * extend, * shade, * traceShadows, * finalize;
-static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections;
+static Kernel* init, * clear, * generate, * extend, * shade;
+static Kernel* updateCounters1, * updateCounters2, * traceShadows, * finalize;
+static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triData;
 
 // View pyramid for a pinhole camera
 struct RenderData
@@ -58,6 +59,8 @@ void Init()
 	generate = new Kernel( "wavefront.cl", "Generate" );
 	extend = new Kernel( "wavefront.cl", "Extend" );
 	shade = new Kernel( "wavefront.cl", "Shade" );
+	updateCounters1 = new Kernel( "wavefront.cl", "UpdateCounters1" );
+	updateCounters2 = new Kernel( "wavefront.cl", "UpdateCounters2" );
 	traceShadows = new Kernel( "wavefront.cl", "Connect" );
 	finalize = new Kernel( "wavefront.cl", "Finalize" );
 	// create OpenCL buffers
@@ -82,6 +85,8 @@ void Init()
 	connections = new Buffer( N * sizeof( bvhvec4 ) * 3 );
 	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
 	pixels = new Buffer( N * sizeof( uint32_t ) );
+	triData = new Buffer( triCount * 3 * sizeof( bvhvec4 ), tris );
+	triData->CopyToDevice();
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera_gpu.bin", t.binary | t.in };
 	if (!t.is_open()) return;
@@ -123,22 +128,22 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		spp = 1;
 	}
 	// wavefront step 0: render on the GPU
-	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, 0, cwbvhNodes, cwbvhTris );
+	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, frameIdx, cwbvhNodes, cwbvhTris );
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
-	// wavefront step 1: generate primary rays
 	generate->SetArguments( raysOut );
 	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
-	// wavefront step 2: extend paths
-	swap( raysOut, raysIn );
-	extend->SetArguments( raysIn );
-	extend->Run( 16384 /* todo: 64 * SM count */ );
-	// wavefront step 3: shade intersection results
-	shade->SetArguments( accumulator, raysIn, raysOut, connections );
-	shade->Run( 16384 /* todo: 64 * SM count */ );
-	// wavefront step 4: connect shadow rays
+	for (int i = 0; i < 4; i++)
+	{
+		swap( raysOut, raysIn );
+		extend->SetArguments( raysIn );
+		extend->Run( N /* todo: 64 * SM count */ );
+		updateCounters1->Run( 1 );
+		shade->SetArguments( accumulator, raysIn, raysOut, connections, triData );
+		shade->Run( N /* todo: 64 * SM count */ );
+		updateCounters2->Run( 1 );
+	}
 	traceShadows->SetArguments( accumulator, connections );
 	traceShadows->Run( 1024 );
-	// wavefront step 4: finalize to pixel buffer
 	finalize->SetArguments( accumulator, 1.0f / (float)spp++, pixels );
 	finalize->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
 	pixels->CopyFromDevice();
@@ -153,6 +158,6 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 void Shutdown()
 {
 	// save camera position / direction to file
-	std::fstream s = std::fstream{ "camera.bin", s.binary | s.out };
+	std::fstream s = std::fstream{ "camera_gpu.bin", s.binary | s.out };
 	s.write( (char*)&rd, sizeof( rd ) );
 }
