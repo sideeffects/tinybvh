@@ -12,7 +12,7 @@ Single-header OpenCL library, which helps you select and initialize a device. It
 * Vendor and architecture detection and propagation to #defines in OpenCL code
 * ..And many other things.
 
-![Rendered with tinybvh](images/test.png)
+![Output of the sample wavefront path tracer](images/wavefront.png)
 
 To use tinyocl, just include ````tiny_ocl.h````; this will automatically cause linking with ````OpenCL.lib```` in the 'external' folder, which in turn passes on work to vendor-specific driver code. But all that is not your problem!
 
@@ -158,3 +158,5 @@ Questions, remarks? Contact me at bikker.j@gmail.com or on twitter: @j_bikker, o
 
 # License
 This library is made available under the MIT license, which starts as follows: "Permission is hereby granted, free of charge, .. , to deal in the Software **without restriction**". Enjoy.
+
+![Rendered with tinybvh](images/test.png)
