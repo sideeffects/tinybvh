@@ -1,4 +1,4 @@
-// gpu-side path tracing (wavefront)
+// basic gpu-side path tracing (wavefront)
 
 #pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
 
@@ -69,12 +69,9 @@ struct Potential
 };
 
 // atomic counter management - prepare for primary ray wavefront
-void kernel SetRenderData( 
-	int primaryRayCount,
-	float4 eye, float4 p0, float4 p1, float4 p2,
-	uint frameIdx,
-	global float4* cwbvhNodes,
-	global float4* cwbvhTris
+void kernel SetRenderData( int primaryRayCount,
+	float4 eye, float4 p0, float4 p1, float4 p2, uint frameIdx,
+	global float4* cwbvhNodes, global float4* cwbvhTris
 )
 {
 	if (get_global_id( 0 ) != 0) return;
@@ -128,19 +125,18 @@ void kernel Extend( global struct PathState* raysIn )
 	}
 }
 
-// syncing counters: at this point, we need to reset the extendTasks counter.
+// syncing counters: at this point, we need to reset the extendTasks and connectTasks counters.
 void kernel UpdateCounters1()
 {
 	if (get_global_id( 0 ) != 0) return;
 	extendTasks = 0;
+	connectTasks = 0;
 }
 
 // shade: process intersection results; this evaluates the BRDF and creates 
 // extension rays and shadow rays.
-void kernel Shade( 
-	global float4* accumulator, 
-	global struct PathState* raysIn, 
-	global struct PathState* raysOut, 
+void kernel Shade( global float4* accumulator, 
+	global struct PathState* raysIn, global struct PathState* raysOut, 
 	global struct Potential* shadowOut,
 	global float4* verts
 )
@@ -152,44 +148,60 @@ void kernel Shade(
 		const int pathId = atomic_dec( &shadeTasks ) - 1;
 		if (pathId < 0) break;
 		// fetch path data
-		float4 data0 = raysIn[pathId].T;	// xyz = rgb, postponed pdf in w
-		float4 data1 = raysIn[pathId].O;	// pixel index in O.w
-		float4 data2 = raysIn[pathId].D;	// t in D.w
-		float4 data3 = raysIn[pathId].hit;	// dist, u, v, prim
+		float4 T4 = raysIn[pathId].T;	// xyz = rgb, postponed pdf in w
+		float4 O4 = raysIn[pathId].O;	// pixel index in O.w
+		float4 D4 = raysIn[pathId].D;	// t in D.w
+		float4 hit = raysIn[pathId].hit;	// dist, u, v, prim
 		// prepare for shading
-		uint depth = as_uint( data1.w ) & 15;
-		uint pixelIdx = as_uint( data1.w ) >> 4;
-		uint seed = WangHash( as_uint( data1.w ) + rd.frameIdx * 17117);
+		uint depth = as_uint( O4.w ) & 15;
+		uint pixelIdx = as_uint( O4.w ) >> 4;
+		uint seed = WangHash( as_uint( O4.w ) + rd.frameIdx * 17117);
+		float3 T = T4.xyz;
+		float t = hit.x;
 		// end path on sky
-		if (data3.x == 1e30f)
+		if (t == 1e30f)
 		{
 			float3 skyColor = (float3)( 0.7f, 0.7f, 1.2f );
-			accumulator[pixelIdx] += (float4)( data0.xyz * skyColor, 1 );
+			accumulator[pixelIdx] += (float4)( T * skyColor, 1 );
 			continue;
 		}
 		// fetch geometry at intersection point
-		uint vertIdx = as_uint( data3.w ) * 3;
+		uint vertIdx = as_uint( hit.w ) * 3;
 		float4 v0 = verts[vertIdx];
+		uint mat = as_uint( v0.w ) >> 24;
+		// end path on light
+		float3 lightColor = (float3)( 10 );
+		if (mat == 1)
+		{
+			if (depth == 0) accumulator[pixelIdx] += (float4)( T * lightColor, 1 );
+			continue;
+		}
 		float3 vert0 = v0.xyz, vert1 = verts[vertIdx + 1].xyz, vert2 = verts[vertIdx + 2].xyz;
 		float3 N = normalize( cross( vert1 - vert0, vert2 - vert0 ) );
-		float3 D = data2.xyz;
+		float3 D = D4.xyz;
 		if (dot( N, D ) > 0) N *= -1;
-		float3 T = data0.xyz;
-		float3 O = data1.xyz;
-		float t = data3.x;
-		float3 I = O + t * D;
-		// bounce
-		if (depth < 4)
+		float3 I = O4.xyz + t * D;
+		// direct illumination: next event estimation
+		float3 P = (float3)( RandomFloat( &seed ) * 9 - 4.5f, 30, RandomFloat( &seed ) * 5 - 3.5f );
+		float3 L = P - I;
+		float NdotL = dot( N, L );
+		if (NdotL > 0)
+		{
+			uint newShadowIdx = atomic_inc( &connectTasks );
+			float dist2 = dot( L, L ), dist = sqrt( dist2 );
+			L *= 1.0f / dist;
+			float NLdotL = fabs( L.y ); // actually, fabs( dot( L, LN ) )
+			shadowOut[newShadowIdx].T = (float4)( lightColor * T * NdotL * NLdotL * (1.0f / dist2), 0 );
+			shadowOut[newShadowIdx].O = (float4)( I + L * 0.001f, as_float( pixelIdx ) );
+			shadowOut[newShadowIdx].D = (float4)( L, dist - 0.002f );
+		}
+		// indirect illumination: diffuse bounce
+		if (depth < 2)
 		{
 			uint newRayIdx = atomic_inc( &extendTasks );
 			float3 BRDF = (float3)(1) /* just white for now */ * INVPI;
-		#if 0
-			float3 R = DiffuseReflection( N, &seed );
-			float PDF = INV2PI;
-		#else
 			float3 R = CosWeightedDiffReflection( N, &seed );
 			float PDF = dot( N, R ) * INVPI;
-		#endif
 			T *= dot( N, R ) * BRDF * (1.0f / PDF);
 			raysOut[newRayIdx].T = (float4)( T, 1 );
 			raysOut[newRayIdx].O = (float4)( I + R * 0.001f, as_float( (pixelIdx << 4) + depth + 1 ) );
@@ -209,17 +221,22 @@ void kernel UpdateCounters2()
 // if not occluded.
 void kernel Connect( global float4* accumulator, global struct Potential* shadowIn )
 {
-	// obtain task
-	const int rayId = atomic_dec( &connectTasks ) - 1;
-	if (rayId < 0) return;
-	const float4 T4 = shadowIn[rayId].T;
-	const float4 O4 = shadowIn[rayId].O;
-	const float4 D4 = shadowIn[rayId].D;
-	const float3 rD = (float3)( 1.0f / D4.x, 1.0f / D4.y, 1.0f / D4.z );
-	bool occluded = false; // isoccluded_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, D4.w );
-	if (occluded) return;
-	uint pixelIdx = as_uint( O4.w );
-	accumulator[pixelIdx] += T4;
+	while (1)
+	{
+		// obtain task
+		if (connectTasks < 1) break;
+		const int rayId = atomic_dec( &connectTasks ) - 1;
+		if (rayId < 0) break;
+		const float4 T4 = shadowIn[rayId].T;
+		const float4 O4 = shadowIn[rayId].O;
+		const float4 D4 = shadowIn[rayId].D;
+		const float3 rD = (float3)( 1.0f / D4.x, 1.0f / D4.y, 1.0f / D4.z );
+		if (!isoccluded_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, D4.w ))
+		{
+			uint pixelIdx = as_uint( O4.w );
+			accumulator[pixelIdx] += T4;
+		}
+	}
 }
 
 // finalize: convert the accumulated values into final pixel values.

@@ -30,9 +30,7 @@ static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triD
 // View pyramid for a pinhole camera
 struct RenderData
 {
-	bvhvec4 eye = bvhvec4( 0, 30, 0, 0 );
-	bvhvec4 view = bvhvec4( -1, 0, 0, 0 );
-	bvhvec4 C, p0, p1, p2;
+	bvhvec4 eye = bvhvec4( 0, 30, 0, 0 ), view = bvhvec4( -1, 0, 0, 0 ), C, p0, p1, p2;
 	uint32_t frameIdx, dummy1, dummy2, dummy3;
 } rd;
 
@@ -45,6 +43,15 @@ void AddMesh( const char* file, float scale = 1, bvhvec3 pos = {}, int c = 0, in
 	tris = data, s.read( (char*)tris + triCount * 48, N * 48 ), triCount += N;
 	for (int* b = (int*)tris + (triCount - N) * 12, i = 0; i < N * 3; i++)
 		*(bvhvec3*)b = *(bvhvec3*)b * scale + pos, b[3] = c ? c : b[3], b += 4;
+}
+void AddQuad( const bvhvec3 pos, const float w, const float d, int c )
+{
+	bvhvec4* data = (bvhvec4*)tinybvh::malloc64( (triCount + 2) * 48 );
+	if (tris) memcpy( data + 6, tris, triCount * 48 ), tinybvh::free64( tris );
+	data[0] = bvhvec3( -w, 0, -d ), data[1] = bvhvec3( w, 0, -d );
+	data[2] = bvhvec3( w, 0, d ), data[3] = bvhvec3( -w, 0, -d ), tris = data;
+	data[4] = bvhvec3( w, 0, d ), data[5] = bvhvec3( -w, 0, d ), triCount += 2;
+	for( int i = 0; i < 6; i++ ) data[i] = 0.5f * data[i] + pos, data[i].w = *(float*)&c; 
 }
 
 Buffer* cwbvhNodes = 0;
@@ -73,6 +80,7 @@ void Init()
 	// load raw vertex data
 	AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
 	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0xaaaaff );
+	AddQuad( bvhvec3( 0, 30, -1 ), 9, 5, 0x1ffffff ); 
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
 	bvh.Build( tris, triCount );
 	// create gpu buffers
@@ -99,12 +107,9 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) ), up = 0.8f * cross( rd.view, right );
 	// get camera controls.
 	bool moved = false;
-	if (f.keys['A']) rd.eye += right * -1.0f * delta_time_s * 10, moved = true;
-	if (f.keys['D']) rd.eye += right * delta_time_s * 10, moved = true;
-	if (f.keys['W']) rd.eye += rd.view * delta_time_s * 10, moved = true;
-	if (f.keys['S']) rd.eye += rd.view * -1.0f * delta_time_s * 10, moved = true;
-	if (f.keys['R']) rd.eye += up * delta_time_s * 20, moved = true;
-	if (f.keys['F']) rd.eye += up * -1.0f * delta_time_s * 20, moved = true;
+	if (f.keys['A'] || f.keys['D']) rd.eye += right * delta_time_s * (f.keys['D'] ? 10 : -10), moved = true;
+	if (f.keys['W'] || f.keys['S']) rd.eye += rd.view * delta_time_s * (f.keys['W'] ? 10 : -10), moved = true;
+	if (f.keys['R'] || f.keys['F']) rd.eye += up * delta_time_s * (f.keys['R'] ? 20 : -20), moved = true;
 	if (f.keys[20]) rd.view = normalize( rd.view + right * -1.0f * delta_time_s ), moved = true;
 	if (f.keys[19]) rd.view = normalize( rd.view + right * delta_time_s ), moved = true;
 	if (f.keys[17]) rd.view = normalize( rd.view + up * -1.0f * delta_time_s ), moved = true;
@@ -132,7 +137,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
 	generate->SetArguments( raysOut );
 	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < 2; i++)
 	{
 		swap( raysOut, raysIn );
 		extend->SetArguments( raysIn );
