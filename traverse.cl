@@ -362,40 +362,52 @@ float4 traverse_gpu4way( const global float4* alt4Node, const float3 O, const fl
 		if (dst4.y < dst4.z) dst4 = dst4.xzyw, data3 = data3.xzyw;
 		// process results, starting with farthest child, so nearest ends on top of stack
 		unsigned nextNode = 0;
-		if (dst4.x < 1e30f) if ((data3.x >> 31) == 0) nextNode = data3.x; else
+		if (dst4.x < 1e30f) 
 		{
-			const unsigned triCount = (data3.x >> 16) & 0x7fff;
-			for( int i = 0; i < triCount; i++ ) IntersectTri( (data3.x & 0xffff) + offset + i * STRIDE, &O, &D, &hit, alt4Node );
+			if ((data3.x >> 31) == 0) nextNode = data3.x; else
+			{
+				const unsigned triCount = (data3.x >> 16) & 0x7fff;
+				for( int i = 0; i < triCount; i++ ) IntersectTri( (data3.x & 0xffff) + offset + i * STRIDE, &O, &D, &hit, alt4Node );
+			}
 		}
-		if (dst4.y < 1e30f) if (data3.y >> 31)
+		if (dst4.y < 1e30f) 
 		{
-			const unsigned triCount = (data3.y >> 16) & 0x7fff;
-			for( int i = 0; i < triCount; i++ ) IntersectTri( (data3.y & 0xffff) + offset + i * STRIDE, &O, &D, &hit, alt4Node );
+			if (data3.y >> 31)
+			{
+				const unsigned triCount = (data3.y >> 16) & 0x7fff;
+				for( int i = 0; i < triCount; i++ ) IntersectTri( (data3.y & 0xffff) + offset + i * STRIDE, &O, &D, &hit, alt4Node );
+			}
+			else
+			{
+				if (nextNode) stack[stackPtr++] = nextNode;
+				nextNode = data3.y;
+			}
 		}
-		else
+		if (dst4.z < 1e30f) 
 		{
-			if (nextNode) stack[stackPtr++] = nextNode;
-			nextNode = data3.y;
+			if (data3.z >> 31) 
+			{
+				const unsigned triCount = (data3.z >> 16) & 0x7fff;
+				for( int i = 0; i < triCount; i++ ) IntersectTri( (data3.z & 0xffff) + offset + i * STRIDE, &O, &D, &hit, alt4Node );
+			}
+			else
+			{
+				if (nextNode) stack[stackPtr++] = nextNode;
+				nextNode = data3.z;
+			}
 		}
-		if (dst4.z < 1e30f) if (data3.z >> 31) 
+		if (dst4.w < 1e30f) 
 		{
-			const unsigned triCount = (data3.z >> 16) & 0x7fff;
-			for( int i = 0; i < triCount; i++ ) IntersectTri( (data3.z & 0xffff) + offset + i * STRIDE, &O, &D, &hit, alt4Node );
-		}
-		else
-		{
-			if (nextNode) stack[stackPtr++] = nextNode;
-			nextNode = data3.z;
-		}
-		if (dst4.w < 1e30f) if (data3.w >> 31) 
-		{
-			const unsigned triCount = (data3.w >> 16) & 0x7fff;
-			for( int i = 0; i < triCount; i++ ) IntersectTri( (data3.w & 0xffff) + offset + i * STRIDE, &O, &D, &hit, alt4Node );
-		}
-		else
-		{
-			if (nextNode) stack[stackPtr++] = nextNode;
-			nextNode = data3.w;
+			if (data3.w >> 31) 
+			{
+				const unsigned triCount = (data3.w >> 16) & 0x7fff;
+				for( int i = 0; i < triCount; i++ ) IntersectTri( (data3.w & 0xffff) + offset + i * STRIDE, &O, &D, &hit, alt4Node );
+			}
+			else
+			{
+				if (nextNode) stack[stackPtr++] = nextNode;
+				nextNode = data3.w;
+			}
 		}
 		// continue with nearest node or first node on the stack
 		if (nextNode) offset = nextNode; else
@@ -448,44 +460,56 @@ bool isoccluded_gpu4way( const global float4* alt4Node, const float3 O, const fl
 		if (dst4.y < dst4.z) dst4 = dst4.xzyw, data3 = data3.xzyw;
 		// process results, starting with farthest child, so nearest ends on top of stack
 		unsigned nextNode = 0;
-		if (dst4.x < 1e30f) if ((data3.x >> 31) == 0) nextNode = data3.x; else
+		if (dst4.x < 1e30f) 
 		{
-			const unsigned triCount = (data3.x >> 16) & 0x7fff;
-			for( int i = 0; i < triCount; i++ ) 
-				if (TriOccluded( (data3.x & 0xffff) + offset + i * STRIDE, &O, &D, tmax, alt4Node )) return true;
+			if ((data3.x >> 31) == 0) nextNode = data3.x; else
+			{
+				const unsigned triCount = (data3.x >> 16) & 0x7fff;
+				for( int i = 0; i < triCount; i++ ) 
+					if (TriOccluded( (data3.x & 0xffff) + offset + i * STRIDE, &O, &D, tmax, alt4Node )) return true;
+			}
 		}
-		if (dst4.y < 1e30f) if (data3.y >> 31)
+		if (dst4.y < 1e30f) 
 		{
-			const unsigned triCount = (data3.y >> 16) & 0x7fff;
-			for( int i = 0; i < triCount; i++ ) 
-				if (TriOccluded( (data3.y & 0xffff) + offset + i * STRIDE, &O, &D, tmax, alt4Node )) return true;
+			if (data3.y >> 31)
+			{
+				const unsigned triCount = (data3.y >> 16) & 0x7fff;
+				for( int i = 0; i < triCount; i++ ) 
+					if (TriOccluded( (data3.y & 0xffff) + offset + i * STRIDE, &O, &D, tmax, alt4Node )) return true;
+			}
+			else
+			{
+				if (nextNode) stack[stackPtr++] = nextNode;
+				nextNode = data3.y;
+			}
 		}
-		else
+		if (dst4.z < 1e30f) 
 		{
-			if (nextNode) stack[stackPtr++] = nextNode;
-			nextNode = data3.y;
+			if (data3.z >> 31) 
+			{
+				const unsigned triCount = (data3.z >> 16) & 0x7fff;
+				for( int i = 0; i < triCount; i++ ) 
+					if (TriOccluded( (data3.z & 0xffff) + offset + i * STRIDE, &O, &D, tmax, alt4Node )) return true;
+			}
+			else
+			{
+				if (nextNode) stack[stackPtr++] = nextNode;
+				nextNode = data3.z;
+			}
 		}
-		if (dst4.z < 1e30f) if (data3.z >> 31) 
+		if (dst4.w < 1e30f) 
 		{
-			const unsigned triCount = (data3.z >> 16) & 0x7fff;
-			for( int i = 0; i < triCount; i++ ) 
-				if (TriOccluded( (data3.z & 0xffff) + offset + i * STRIDE, &O, &D, tmax, alt4Node )) return true;
-		}
-		else
-		{
-			if (nextNode) stack[stackPtr++] = nextNode;
-			nextNode = data3.z;
-		}
-		if (dst4.w < 1e30f) if (data3.w >> 31) 
-		{
-			const unsigned triCount = (data3.w >> 16) & 0x7fff;
-			for( int i = 0; i < triCount; i++ ) 
-				if (TriOccluded( (data3.w & 0xffff) + offset + i * STRIDE, &O, &D, tmax, alt4Node )) return true;
-		}
-		else
-		{
-			if (nextNode) stack[stackPtr++] = nextNode;
-			nextNode = data3.w;
+			if (data3.w >> 31) 
+			{
+				const unsigned triCount = (data3.w >> 16) & 0x7fff;
+				for( int i = 0; i < triCount; i++ ) 
+					if (TriOccluded( (data3.w & 0xffff) + offset + i * STRIDE, &O, &D, tmax, alt4Node )) return true;
+			}
+			else
+			{
+				if (nextNode) stack[stackPtr++] = nextNode;
+				nextNode = data3.w;
+			}
 		}
 		// continue with nearest node or first node on the stack
 		if (nextNode) offset = nextNode; else

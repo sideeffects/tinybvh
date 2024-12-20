@@ -15,7 +15,7 @@ struct RenderData
 {
 	// camera setup
 	float4 eye, C, p0, p1, p2;
-	uint frameIdx, dummy1, dummy2, dummy3;
+	uint frameIdx, width, height, dummy3;
 	// BVH data
 	global float4* cwbvhNodes;
 	global float4* cwbvhTris;
@@ -25,11 +25,19 @@ struct RenderData
 __global volatile int extendTasks, shadeTasks, connectTasks;
 __global struct RenderData rd;
 
-
 // Xor32 RNG
 uint WangHash( uint s ) { s = (s ^ 61) ^ (s >> 16), s *= 9, s = s ^ (s >> 4), s *= 0x27d4eb2d; return s ^ (s >> 15); }
 uint RandomUInt( uint* seed ) { *seed ^= *seed << 13, * seed ^= *seed >> 17, * seed ^= *seed << 5; return *seed; }
 float RandomFloat( uint* seed ) { return RandomUInt( seed ) * 2.3283064365387e-10f; }
+
+// Blue noise interface for fixed 128x128x8 dataset.
+float2 Noise( const uint x, const uint y, const uint page /* 0..7 */ )
+{
+	const uint ix = x & 127, iy = y & 127;
+	const uint v2 = rd.blueNoise[(page << 14) + (iy << 7) + ix];
+	const uint r = v2 >> 16, g = (v2 >> 8) & 255;
+	return (float2)( (float)r * 0.00392f, (float)g * 0.00392f );
+}
 
 // Color conversion
 float3 rgb32_to_vec3( uint c )
@@ -52,14 +60,11 @@ float3 DiffuseReflection( float3 N, uint* seed )
 }
 
 // CosWeightedDiffReflection: Cosine-weighted random bounce in the hemisphere
-float3 CosWeightedDiffReflection( const float3 N, uint* seed )
+float3 CosWeightedDiffReflection( const float3 N, const float r0, const float r1 )
 {
-	float3 R;
-	do
-	{
-		R = (float3)(RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1);
-	} while (dot( R, R ) > 1);
-	return fast_normalize( N + fast_normalize( R ) );
+	const float r = sqrt( 1 - r1 * r1 ), phi = 4 * PI * r0;
+	const float3 R = (float3)( cos( phi ) * r, sin( phi ) * r, r1);
+	return fast_normalize( N + R );
 }
 
 // PathState: path throughput, current extension ray, pixel index
@@ -81,7 +86,8 @@ struct Potential
 
 // atomic counter management - prepare for primary ray wavefront
 void kernel SetRenderData( int primaryRayCount,
-	float4 eye, float4 p0, float4 p1, float4 p2, uint frameIdx,
+	float4 eye, float4 p0, float4 p1, float4 p2, 
+	uint frameIdx, uint width, uint height,
 	global float4* cwbvhNodes, global float4* cwbvhTris,
 	global uint* blueNoise
 )
@@ -91,6 +97,8 @@ void kernel SetRenderData( int primaryRayCount,
 	rd.eye = eye;
 	rd.p0 = p0, rd.p1 = p1, rd.p2 = p2;
 	rd.frameIdx = frameIdx;
+	rd.width = width;
+	rd.height = height;
 	// set BVH pointers
 	rd.cwbvhNodes = cwbvhNodes;
 	rd.cwbvhTris = cwbvhTris;
@@ -151,7 +159,7 @@ void kernel UpdateCounters1()
 void kernel Shade( global float4* accumulator,
 	global struct PathState* raysIn, global struct PathState* raysOut,
 	global struct Potential* shadowOut,
-	global float4* verts
+	global float4* verts, uint sampleIdx
 )
 {
 	while (1)
@@ -206,7 +214,20 @@ void kernel Shade( global float4* accumulator,
 			continue;
 		}
 		// direct illumination: next event estimation
-		float3 P = (float3)(RandomFloat( &seed ) * 9 - 4.5f, 30, RandomFloat( &seed ) * 5 - 3.5f);
+		float r0, r1, r2, r3;
+		if (depth == 0 && sampleIdx < 4)
+		{
+			float2 noise0 = Noise( pixelIdx % rd.height, pixelIdx / rd.height, sampleIdx * 2 );
+			float2 noise1 = Noise( pixelIdx % rd.height, pixelIdx / rd.height, sampleIdx * 2 + 1 );
+			r0 = noise0.x, r1 = noise0.y;
+			r2 = noise0.x, r3 = noise0.y;
+		}
+		else
+		{
+			r0 = RandomFloat( &seed ), r1 = RandomFloat( &seed );
+			r2 = RandomFloat( &seed ), r3 = RandomFloat( &seed );
+		}
+		float3 P = (float3)(r0 * 9.0f - 4.5f, 30, r1 * 5.0f - 3.5f);
 		float3 L = P - I;
 		float NdotL = dot( N, L );
 		float3 BRDF = diff * INVPI; // lambert BRDF: albedo / pi
@@ -224,7 +245,7 @@ void kernel Shade( global float4* accumulator,
 		if (depth < 3)
 		{
 			uint newRayIdx = atomic_inc( &extendTasks );
-			float3 R = CosWeightedDiffReflection( N, &seed );
+			float3 R = CosWeightedDiffReflection( N, r2, r3 );
 			float PDF = dot( N, R ) * INVPI;
 			T *= dot( N, R ) * BRDF * native_recip( PDF );
 			raysOut[newRayIdx].T = (float4)(T, 1);

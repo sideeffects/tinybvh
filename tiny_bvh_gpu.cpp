@@ -28,7 +28,7 @@ static Kernel* updateCounters1, * updateCounters2, * traceShadows, * finalize;
 static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triData;
 static Buffer* cwbvhNodes = 0, * cwbvhTris = 0, *noise = 0;
 static size_t computeUnits;
-static uint32_t* blueNoise;
+static uint32_t* blueNoise = new uint32_t[128 * 128 * 8];
 
 // View pyramid for a pinhole camera
 struct RenderData
@@ -60,8 +60,8 @@ void AddQuad( const bvhvec3 pos, const float w, const float d, int c )
 // Blue noise from file
 void LoadBlueNoise()
 {
-	std::fstream s{ "blue_noise_128x128x8_2d.raw", s.binary | s.in }; 
-	s.read( (char*)blueNoise, 128 * 128 * 4 );
+	std::fstream s{ "./testdata/blue_noise_128x128x8_2d.raw", s.binary | s.in }; 
+	s.read( (char*)blueNoise, 128 * 128 * 8 * 4 );
 }
 
 // Application init
@@ -88,6 +88,7 @@ void Init()
 	connections = new Buffer( N * 3 * sizeof( bvhvec4 ) * 3 );
 	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
 	pixels = new Buffer( N * sizeof( uint32_t ) );
+	LoadBlueNoise();
 	noise = new Buffer( 128 * 128 * 8 * sizeof( uint32_t ), blueNoise );
 	noise->CopyToDevice();
 	// load raw vertex data
@@ -141,7 +142,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		spp = 1;
 	}
 	// wavefront step 0: render on the GPU
-	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, frameIdx, cwbvhNodes, cwbvhTris, noise );
+	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, frameIdx, SCRWIDTH, SCRHEIGHT, cwbvhNodes, cwbvhTris, noise );
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
 	generate->SetArguments( raysOut, spp * 19191 );
 	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
@@ -151,7 +152,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		extend->SetArguments( raysIn );
 		extend->Run( computeUnits * 64 * 16, 64 );
 		updateCounters1->Run( 1 );
-		shade->SetArguments( accumulator, raysIn, raysOut, connections, triData );
+		shade->SetArguments( accumulator, raysIn, raysOut, connections, triData, spp - 1 );
 		shade->Run( computeUnits * 64 * 16, 64 );
 		updateCounters2->Run( 1 );
 	}
