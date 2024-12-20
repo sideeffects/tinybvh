@@ -133,7 +133,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	// wavefront step 0: render on the GPU
 	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, frameIdx, cwbvhNodes, cwbvhTris );
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
-	generate->SetArguments( raysOut, frameIdx * 19191 );
+	generate->SetArguments( raysOut, spp * 19191 );
 	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
 	for (int i = 0; i < 2; i++)
 	{

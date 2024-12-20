@@ -170,7 +170,7 @@ void kernel Shade( global float4* accumulator,
 		float4 v0 = verts[vertIdx];
 		uint mat = as_uint( v0.w ) >> 24;
 		// end path on light
-		float3 lightColor = (float3)( 10 );
+		float3 lightColor = (float3)( 20 );
 		if (mat == 1)
 		{
 			if (depth == 0) accumulator[pixelIdx] += (float4)( T * lightColor, 1 );
@@ -185,13 +185,15 @@ void kernel Shade( global float4* accumulator,
 		float3 P = (float3)( RandomFloat( &seed ) * 9 - 4.5f, 30, RandomFloat( &seed ) * 5 - 3.5f );
 		float3 L = P - I;
 		float NdotL = dot( N, L );
+		float3 diff = (float3)(1); // material color; simply white for now
+		float3 BRDF = diff * INVPI; // lambert BRDF: albedo / pi
 		if (NdotL > 0)
 		{
 			uint newShadowIdx = atomic_inc( &connectTasks );
 			float dist2 = dot( L, L ), dist = sqrt( dist2 );
 			L *= 1.0f / dist;
 			float NLdotL = fabs( L.y ); // actually, fabs( dot( L, LN ) )
-			shadowOut[newShadowIdx].T = (float4)( lightColor * T * NdotL * NLdotL * (1.0f / dist2), 0 );
+			shadowOut[newShadowIdx].T = (float4)( lightColor * BRDF * T * NdotL * NLdotL * (1.0f / dist2), 0 );
 			shadowOut[newShadowIdx].O = (float4)( I + L * 0.001f, as_float( pixelIdx ) );
 			shadowOut[newShadowIdx].D = (float4)( L, dist - 0.002f );
 		}
@@ -199,7 +201,6 @@ void kernel Shade( global float4* accumulator,
 		if (depth < 2)
 		{
 			uint newRayIdx = atomic_inc( &extendTasks );
-			float3 BRDF = (float3)(1) /* just white for now */ * INVPI;
 			float3 R = CosWeightedDiffReflection( N, &seed );
 			float PDF = dot( N, R ) * INVPI;
 			T *= dot( N, R ) * BRDF * (1.0f / PDF);
