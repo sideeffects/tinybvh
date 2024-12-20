@@ -303,6 +303,7 @@ public:
 	static bool InitCL();
 	static void CheckCLStarted();
 	static void KillCL();
+	static cl_device_id GetDeviceID() { return device; }
 private:
 	// data members
 	char* sourceFile = 0;
@@ -946,6 +947,10 @@ bool Kernel::InitCL()
 	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_NAME, 1024, &device_string, NULL );
 	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_VERSION, 1024, &device_platform, NULL );
 	printf( "Device # %u, %s (%s)\n", deviceUsed, device_string, device_platform );
+	// print compute unit count
+	size_t computeUnits;
+	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof( size_t ), &computeUnits, NULL );
+	printf( "Compute units / SM count: %iKB\n", (int)computeUnits );
 	// print local memory size
 	size_t localMem;
 	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_LOCAL_MEM_SIZE, sizeof( size_t ), &localMem, NULL );

@@ -26,6 +26,8 @@ static int triCount = 0, frameIdx = 0, spp = 0;
 static Kernel* init, * clear, * generate, * extend, * shade;
 static Kernel* updateCounters1, * updateCounters2, * traceShadows, * finalize;
 static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triData;
+static Buffer* cwbvhNodes = 0, * cwbvhTris = 0;
+static size_t computeUnits;
 
 // View pyramid for a pinhole camera
 struct RenderData
@@ -51,11 +53,8 @@ void AddQuad( const bvhvec3 pos, const float w, const float d, int c )
 	data[0] = bvhvec3( -w, 0, -d ), data[1] = bvhvec3( w, 0, -d );
 	data[2] = bvhvec3( w, 0, d ), data[3] = bvhvec3( -w, 0, -d ), tris = data;
 	data[4] = bvhvec3( w, 0, d ), data[5] = bvhvec3( -w, 0, d ), triCount += 2;
-	for( int i = 0; i < 6; i++ ) data[i] = 0.5f * data[i] + pos, data[i].w = *(float*)&c; 
+	for (int i = 0; i < 6; i++) data[i] = 0.5f * data[i] + pos, data[i].w = *(float*)&c;
 }
-
-Buffer* cwbvhNodes = 0;
-Buffer* cwbvhTris = 0;
 
 // Application init
 void Init()
@@ -70,29 +69,28 @@ void Init()
 	updateCounters2 = new Kernel( "wavefront.cl", "UpdateCounters2" );
 	traceShadows = new Kernel( "wavefront.cl", "Connect" );
 	finalize = new Kernel( "wavefront.cl", "Finalize" );
-	// create OpenCL buffers
+	// we need the 'compute unit' or 'SM' count for wavefront rendering; ask OpenCL for it.
+	clGetDeviceInfo( init->GetDeviceID(), CL_DEVICE_MAX_COMPUTE_UNITS, sizeof( size_t ), &computeUnits, NULL );
+	// create OpenCL buffers for wavefront path tracing
 	int N = SCRWIDTH * SCRHEIGHT;
 	pixels = new Buffer( N * sizeof( uint32_t ) );
 	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
 	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
-	connections = new Buffer( N * sizeof( bvhvec4 ) * 3 );
+	connections = new Buffer( N * 2 * sizeof( bvhvec4 ) * 3 );
+	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
+	pixels = new Buffer( N * sizeof( uint32_t ) );
 	// load raw vertex data
 	AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
 	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0xaaaaff );
-	AddQuad( bvhvec3( 0, 30, -1 ), 9, 5, 0x1ffffff ); 
+	AddQuad( bvhvec3( 0, 30, -1 ), 9, 5, 0x1ffffff ); // hard-coded light source
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
 	bvh.Build( tris, triCount );
-	// create gpu buffers
+	// create OpenCL buffers for BVH data
 	cwbvhNodes = new Buffer( bvh.usedBlocks * sizeof( bvhvec4 ), bvh.bvh8Data );
 	cwbvhTris = new Buffer( bvh.idxCount * 3 * sizeof( bvhvec4 ), bvh.bvh8Tris );
 	cwbvhNodes->CopyToDevice();
 	cwbvhTris->CopyToDevice();
-	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
-	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
-	connections = new Buffer( N * sizeof( bvhvec4 ) * 3 );
-	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
-	pixels = new Buffer( N * sizeof( uint32_t ) );
 	triData = new Buffer( triCount * 3 * sizeof( bvhvec4 ), tris );
 	triData->CopyToDevice();
 	// load camera position / direction from file
@@ -135,20 +133,20 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	// wavefront step 0: render on the GPU
 	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, frameIdx, cwbvhNodes, cwbvhTris );
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
-	generate->SetArguments( raysOut );
+	generate->SetArguments( raysOut, frameIdx * 19191 );
 	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
 	for (int i = 0; i < 2; i++)
 	{
 		swap( raysOut, raysIn );
 		extend->SetArguments( raysIn );
-		extend->Run( N /* todo: 64 * SM count */ );
+		extend->Run( computeUnits * 64 * 16, 64 );
 		updateCounters1->Run( 1 );
 		shade->SetArguments( accumulator, raysIn, raysOut, connections, triData );
-		shade->Run( N /* todo: 64 * SM count */ );
+		shade->Run( computeUnits * 64 * 16, 64 );
 		updateCounters2->Run( 1 );
 	}
 	traceShadows->SetArguments( accumulator, connections );
-	traceShadows->Run( 1024 );
+	traceShadows->Run( computeUnits * 64 * 8, 64 );
 	finalize->SetArguments( accumulator, 1.0f / (float)spp++, pixels );
 	finalize->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
 	pixels->CopyFromDevice();

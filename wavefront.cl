@@ -96,12 +96,13 @@ void kernel Clear( global float4* accumulator )
 }
 
 // primary ray generation
-void kernel Generate( global struct PathState* raysOut  )
+void kernel Generate( global struct PathState* raysOut, uint frameSeed  )
 {
 	const uint x = get_global_id( 0 ), y = get_global_id( 1 );
 	const uint id = x + y * get_global_size( 0 );
-	const float u = (float)x / (float)get_global_size( 0 );
-	const float v = (float)y / (float)get_global_size( 1 );
+	uint seed = WangHash( id * 13131 + frameSeed );
+	const float u = ((float)x + RandomFloat( &seed )) / (float)get_global_size( 0 );
+	const float v = ((float)y + RandomFloat( &seed )) / (float)get_global_size( 1 );
 	const float4 P = rd.p0 + u * (rd.p1 - rd.p0) + v * (rd.p2 - rd.p0);
 	raysOut[id].T = (float4)( 1, 1, 1, 1 /* pdf */ );
 	raysOut[id].O = (float4)( rd.eye.xyz, as_float( id << 4 /* low bits: depth */ ) );
@@ -130,7 +131,6 @@ void kernel UpdateCounters1()
 {
 	if (get_global_id( 0 ) != 0) return;
 	extendTasks = 0;
-	connectTasks = 0;
 }
 
 // shade: process intersection results; this evaluates the BRDF and creates 
