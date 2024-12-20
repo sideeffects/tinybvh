@@ -46,7 +46,7 @@ float3 DiffuseReflection( float3 N, uint* seed )
 	{
 		R = (float3)( RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1 );
 	} while (dot( R, R ) > 1);
-	return normalize( dot( R, N ) > 0 ? R : -R );
+	return fast_normalize( dot( R, N ) > 0 ? R : -R );
 }
 
 // CosWeightedDiffReflection: Cosine-weighted random bounce in the hemisphere
@@ -57,7 +57,7 @@ float3 CosWeightedDiffReflection( const float3 N, uint* seed )
 	{
 		R = (float3)( RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1 );
 	} while (dot( R, R ) > 1);
-	return normalize( N + normalize( R ) );
+	return fast_normalize( N + fast_normalize( R ) );
 }
 
 // PathState: path throughput, current extension ray, pixel index
@@ -115,7 +115,7 @@ void kernel Generate( global struct PathState* raysOut, uint frameSeed  )
 	const float4 P = rd.p0 + u * (rd.p1 - rd.p0) + v * (rd.p2 - rd.p0);
 	raysOut[id].T = (float4)( 1, 1, 1, -1 /* pdf, or -1 for specular vertex */ );
 	raysOut[id].O = (float4)( rd.eye.xyz, as_float( id << 4 /* low bits: depth */ ) );
-	raysOut[id].D = (float4)( normalize( P.xyz - rd.eye.xyz ), 1e30f );
+	raysOut[id].D = (float4)( fast_normalize( P.xyz - rd.eye.xyz ), 1e30f );
 	raysOut[id].hit = (float4)( 1e30f, 0, 0, as_float( 0 ) );
 }
 
@@ -130,7 +130,7 @@ void kernel Extend( global struct PathState* raysIn )
 		if (pathId < 0) break;
 		const float4 O4 = raysIn[pathId].O;
 		const float4 D4 = raysIn[pathId].D;
-		const float3 rD = (float3)( 1.0f / D4.x, 1.0f / D4.y, 1.0f / D4.z );
+		const float3 rD = native_recip( D4.xyz ); 
 		raysIn[pathId].hit = traverse_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, 1e30f );
 	}
 }
@@ -186,7 +186,7 @@ void kernel Shade( global float4* accumulator,
 			continue;
 		}
 		float3 vert0 = v0.xyz, vert1 = verts[vertIdx + 1].xyz, vert2 = verts[vertIdx + 2].xyz;
-		float3 N = normalize( cross( vert1 - vert0, vert2 - vert0 ) );
+		float3 N = fast_normalize( cross( vert1 - vert0, vert2 - vert0 ) );
 		float3 D = D4.xyz;
 		if (dot( N, D ) > 0) N *= -1;
 		float3 I = O4.xyz + t * D;
@@ -210,9 +210,9 @@ void kernel Shade( global float4* accumulator,
 		{
 			uint newShadowIdx = atomic_inc( &connectTasks );
 			float dist2 = dot( L, L ), dist = sqrt( dist2 );
-			L *= 1.0f / dist;
+			L *= native_recip(dist);
 			float NLdotL = fabs( L.y ); // actually, fabs( dot( L, LN ) )
-			shadowOut[newShadowIdx].T = (float4)( lightColor * BRDF * T * NdotL * NLdotL * (1.0f / dist2), 0 );
+			shadowOut[newShadowIdx].T = (float4)( lightColor * BRDF * T * NdotL * NLdotL * native_recip( dist2 ), 0 );
 			shadowOut[newShadowIdx].O = (float4)( I + L * 0.001f, as_float( pixelIdx ) );
 			shadowOut[newShadowIdx].D = (float4)( L, dist - 0.002f );
 		}
@@ -222,7 +222,7 @@ void kernel Shade( global float4* accumulator,
 			uint newRayIdx = atomic_inc( &extendTasks );
 			float3 R = CosWeightedDiffReflection( N, &seed );
 			float PDF = dot( N, R ) * INVPI;
-			T *= dot( N, R ) * BRDF * (1.0f / PDF);
+			T *= dot( N, R ) * BRDF * native_recip( PDF );
 			raysOut[newRayIdx].T = (float4)( T, 1 );
 			raysOut[newRayIdx].O = (float4)( I + R * 0.001f, as_float( (pixelIdx << 4) + depth + 1 ) );
 			raysOut[newRayIdx].D = (float4)( R, 1e30f );
@@ -250,7 +250,7 @@ void kernel Connect( global float4* accumulator, global struct Potential* shadow
 		const float4 T4 = shadowIn[rayId].T;
 		const float4 O4 = shadowIn[rayId].O;
 		const float4 D4 = shadowIn[rayId].D;
-		const float3 rD = (float3)( 1.0f / D4.x, 1.0f / D4.y, 1.0f / D4.z );
+		const float3 rD = native_recip( D4.xyz ); 
 		if (!isoccluded_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, D4.w ))
 		{
 			uint pixelIdx = as_uint( O4.w );
@@ -268,8 +268,6 @@ void kernel Finalize( global float4* accumulator, const float scale, global uint
 	const uint x = get_global_id( 0 ), y = get_global_id( 1 );
 	const uint pixelIdx = x + y * get_global_size( 0 );
 	const float4 p = accumulator[pixelIdx] * scale;
-	const int r = (int)(255.0f * min( 1.0f, sqrt( p.x ) ));
-	const int g = (int)(255.0f * min( 1.0f, sqrt( p.y ) ));
-	const int b = (int)(255.0f * min( 1.0f, sqrt( p.z ) ));
-	pixels[pixelIdx] = (r << 16) + (g << 8) + b;
+	int3 rgb = convert_int3( min( sqrt( p.xyz ) , (float3)( 1.0f, 1.0f, 1.0f ) ) * 255.0f ) ;
+	pixels[pixelIdx] = (rgb.x << 16) + (rgb.y << 8) + rgb.z;
 }
