@@ -77,12 +77,12 @@ void Init()
 	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
 	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
-	connections = new Buffer( N * 2 * sizeof( bvhvec4 ) * 3 );
+	connections = new Buffer( N * 3 * sizeof( bvhvec4 ) * 3 );
 	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
 	pixels = new Buffer( N * sizeof( uint32_t ) );
 	// load raw vertex data
 	AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
-	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0xaaaaff );
+	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0x2ffff88 );
 	AddQuad( bvhvec3( 0, 30, -1 ), 9, 5, 0x1ffffff ); // hard-coded light source
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
 	bvh.Build( tris, triCount );
@@ -104,19 +104,19 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 {
 	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) ), up = 0.8f * cross( rd.view, right );
 	// get camera controls.
-	bool moved = false;
-	if (f.keys['A'] || f.keys['D']) rd.eye += right * delta_time_s * (f.keys['D'] ? 10 : -10), moved = true;
-	if (f.keys['W'] || f.keys['S']) rd.eye += rd.view * delta_time_s * (f.keys['W'] ? 10 : -10), moved = true;
-	if (f.keys['R'] || f.keys['F']) rd.eye += up * delta_time_s * (f.keys['R'] ? 20 : -20), moved = true;
-	if (f.keys[20]) rd.view = normalize( rd.view + right * -1.0f * delta_time_s ), moved = true;
-	if (f.keys[19]) rd.view = normalize( rd.view + right * delta_time_s ), moved = true;
-	if (f.keys[17]) rd.view = normalize( rd.view + up * -1.0f * delta_time_s ), moved = true;
-	if (f.keys[18]) rd.view = normalize( rd.view + up * delta_time_s ), moved = true;
+	float moved = 0, spd = 10.0f * delta_time_s;
+	if (f.keys['A'] || f.keys['D']) rd.eye += right * (f.keys['D'] ? spd : -spd), moved = 1;
+	if (f.keys['W'] || f.keys['S']) rd.eye += rd.view * (f.keys['W'] ? spd : -spd), moved = 1;
+	if (f.keys['R'] || f.keys['F']) rd.eye += up * 2.0f * (f.keys['R'] ? spd : -spd), moved = 1;
+	if (f.keys[20]) rd.view = normalize( rd.view + right * -0.1f * spd ), moved = 1;
+	if (f.keys[19]) rd.view = normalize( rd.view + right * 0.1f * spd ), moved = 1;
+	if (f.keys[17]) rd.view = normalize( rd.view + up * -0.1f * spd ), moved = 1;
+	if (f.keys[18]) rd.view = normalize( rd.view + up * 0.1f * spd ), moved = 1;
 	// recalculate right, up
 	right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) ), up = 0.8f * cross( rd.view, right );
 	bvhvec3 C = rd.eye + 1.2f * rd.view;
 	rd.p0 = C - right + up, rd.p1 = C + right + up, rd.p2 = C - right - up;
-	return moved;
+	return moved > 0;
 }
 
 // Application Tick
@@ -135,7 +135,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
 	generate->SetArguments( raysOut, spp * 19191 );
 	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < 3; i++)
 	{
 		swap( raysOut, raysIn );
 		extend->SetArguments( raysIn );

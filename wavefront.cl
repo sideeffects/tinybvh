@@ -29,6 +29,15 @@ uint WangHash( uint s ) { s = (s ^ 61) ^ (s >> 16), s *= 9, s = s ^ (s >> 4), s 
 uint RandomUInt( uint* seed ) { *seed ^= *seed << 13, *seed ^= *seed >> 17, *seed ^= *seed << 5; return *seed; }
 float RandomFloat( uint* seed ) { return RandomUInt( seed ) * 2.3283064365387e-10f; }
 
+// Color conversion
+float3 rgb32_to_vec3( uint c )
+{
+	return (float3)( (float)((c >> 16) & 255), (float)((c >> 8) & 255), (float)(c & 255)) * 0.00392f;
+}
+
+// Specular reflection
+float3 Reflect( const float3 D, const float3 N ) { return D - 2.0f * N * dot( N,D ); }
+
 // DiffuseReflection: Uniform random bounce in the hemisphere
 float3 DiffuseReflection( float3 N, uint* seed )
 {
@@ -104,7 +113,7 @@ void kernel Generate( global struct PathState* raysOut, uint frameSeed  )
 	const float u = ((float)x + RandomFloat( &seed )) / (float)get_global_size( 0 );
 	const float v = ((float)y + RandomFloat( &seed )) / (float)get_global_size( 1 );
 	const float4 P = rd.p0 + u * (rd.p1 - rd.p0) + v * (rd.p2 - rd.p0);
-	raysOut[id].T = (float4)( 1, 1, 1, 1 /* pdf */ );
+	raysOut[id].T = (float4)( 1, 1, 1, -1 /* pdf, or -1 for specular vertex */ );
 	raysOut[id].O = (float4)( rd.eye.xyz, as_float( id << 4 /* low bits: depth */ ) );
 	raysOut[id].D = (float4)( normalize( P.xyz - rd.eye.xyz ), 1e30f );
 	raysOut[id].hit = (float4)( 1e30f, 0, 0, as_float( 0 ) );
@@ -171,9 +180,9 @@ void kernel Shade( global float4* accumulator,
 		uint mat = as_uint( v0.w ) >> 24;
 		// end path on light
 		float3 lightColor = (float3)( 20 );
-		if (mat == 1)
+		if (mat == 1 /* light source */)
 		{
-			if (depth == 0) accumulator[pixelIdx] += (float4)( T * lightColor, 1 );
+			if (T4.w == -1) accumulator[pixelIdx] += (float4)( T * lightColor, 1 );
 			continue;
 		}
 		float3 vert0 = v0.xyz, vert1 = verts[vertIdx + 1].xyz, vert2 = verts[vertIdx + 2].xyz;
@@ -181,11 +190,21 @@ void kernel Shade( global float4* accumulator,
 		float3 D = D4.xyz;
 		if (dot( N, D ) > 0) N *= -1;
 		float3 I = O4.xyz + t * D;
+		float3 diff = rgb32_to_vec3( as_uint( v0.w ) ); // material color
+		// handle pure specular BRDF
+		if (mat == 2)
+		{
+			uint newRayIdx = atomic_inc( &extendTasks );
+			float3 R = Reflect( D, N );
+			raysOut[newRayIdx].T = (float4)( T * diff, -1 /* mark vertex as specular */ );
+			raysOut[newRayIdx].O = (float4)( I + R * 0.001f, as_float( (pixelIdx << 4) + depth + 1 ) );
+			raysOut[newRayIdx].D = (float4)( R, 1e30f );			
+			continue;
+		}
 		// direct illumination: next event estimation
 		float3 P = (float3)( RandomFloat( &seed ) * 9 - 4.5f, 30, RandomFloat( &seed ) * 5 - 3.5f );
 		float3 L = P - I;
 		float NdotL = dot( N, L );
-		float3 diff = (float3)(1); // material color; simply white for now
 		float3 BRDF = diff * INVPI; // lambert BRDF: albedo / pi
 		if (NdotL > 0)
 		{
@@ -198,7 +217,7 @@ void kernel Shade( global float4* accumulator,
 			shadowOut[newShadowIdx].D = (float4)( L, dist - 0.002f );
 		}
 		// indirect illumination: diffuse bounce
-		if (depth < 2)
+		if (depth < 3)
 		{
 			uint newRayIdx = atomic_inc( &extendTasks );
 			float3 R = CosWeightedDiffReflection( N, &seed );
