@@ -26,8 +26,9 @@ static int triCount = 0, frameIdx = 0, spp = 0;
 static Kernel* init, * clear, * generate, * extend, * shade;
 static Kernel* updateCounters1, * updateCounters2, * traceShadows, * finalize;
 static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triData;
-static Buffer* cwbvhNodes = 0, * cwbvhTris = 0;
+static Buffer* cwbvhNodes = 0, * cwbvhTris = 0, *noise = 0;
 static size_t computeUnits;
+static uint32_t* blueNoise;
 
 // View pyramid for a pinhole camera
 struct RenderData
@@ -56,6 +57,13 @@ void AddQuad( const bvhvec3 pos, const float w, const float d, int c )
 	for (int i = 0; i < 6; i++) data[i] = 0.5f * data[i] + pos, data[i].w = *(float*)&c;
 }
 
+// Blue noise from file
+void LoadBlueNoise()
+{
+	std::fstream s{ "blue_noise_128x128x8_2d.raw", s.binary | s.in }; 
+	s.read( (char*)blueNoise, 128 * 128 * 4 );
+}
+
 // Application init
 void Init()
 {
@@ -80,6 +88,8 @@ void Init()
 	connections = new Buffer( N * 3 * sizeof( bvhvec4 ) * 3 );
 	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
 	pixels = new Buffer( N * sizeof( uint32_t ) );
+	noise = new Buffer( 128 * 128 * 8 * sizeof( uint32_t ), blueNoise );
+	noise->CopyToDevice();
 	// load raw vertex data
 	AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
 	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0x2ffff88 );
@@ -131,7 +141,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		spp = 1;
 	}
 	// wavefront step 0: render on the GPU
-	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, frameIdx, cwbvhNodes, cwbvhTris );
+	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, frameIdx, cwbvhNodes, cwbvhTris, noise );
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
 	generate->SetArguments( raysOut, spp * 19191 );
 	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
