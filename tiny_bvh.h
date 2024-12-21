@@ -894,6 +894,8 @@ public:
 	BVH8_CWBVH( BVHContext ctx = {} ) { context = ctx; }
 	BVH8_CWBVH( BVH8& original ) { /* DEPRECATED */ ConvertFrom( bvh8 ); }
 	~BVH8_CWBVH();
+	void Save( const char* fileName );
+	bool Load( const char* fileName );
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( BVH8& original ); // NOTE: Not const; this may change some nodes in the original.
@@ -937,6 +939,7 @@ public:
 #ifdef _MSC_VER
 #include <intrin.h>			// for __lzcnt
 #endif
+#include <fstream>			// fstream
 
 // We need quite a bit of type reinterpretation, so we'll 
 // turn off the gcc warning here until the end of the file.
@@ -2965,6 +2968,30 @@ BVH8_CWBVH::~BVH8_CWBVH()
 	if (!ownBVH8) bvh8 = BVH8(); // clear out pointers we don't own.
 	AlignedFree( bvh8Data );
 	AlignedFree( bvh8Tris );
+}
+
+void BVH8_CWBVH::Save( const char* fileName )
+{
+	std::fstream s{ fileName, s.binary | s.out };
+	s.write( (char*)this, sizeof( BVH8_CWBVH ) );
+	s.write( (char*)bvh8Data, usedBlocks * 16 );
+	s.write( (char*)bvh8Tris, bvh8.idxCount * 4 * 16 );
+}
+
+bool BVH8_CWBVH::Load( const char* fileName )
+{
+	std::fstream s{ fileName, s.binary | s.in };
+	if (!s) return false;
+	BVHContext tmp = context;
+	s.read( (char*)this, sizeof( BVH8_CWBVH ) );
+	context = tmp; // can't load context; function pointers will differ.
+	bvh8Data = (bvhvec4*)AlignedAlloc( usedBlocks * 16 );
+	bvh8Tris = (bvhvec4*)AlignedAlloc( bvh8.idxCount * 4 * 16 );
+	allocatedBlocks = usedBlocks;
+	s.read( (char*)bvh8Data, usedBlocks * 16 );
+	s.read( (char*)bvh8Tris, bvh8.idxCount * 4 * 16 );
+	bvh8 = BVH8();
+	return true;
 }
 
 void BVH8_CWBVH::Build( const bvhvec4* vertices, const uint32_t primCount ) 
