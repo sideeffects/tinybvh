@@ -25,7 +25,6 @@ struct RenderData
 __global volatile int extendTasks, shadeTasks, connectTasks;
 __global struct RenderData rd;
 
-
 // Xor32 RNG
 uint WangHash( uint s ) { s = (s ^ 61) ^ (s >> 16), s *= 9, s = s ^ (s >> 4), s *= 0x27d4eb2d; return s ^ (s >> 15); }
 uint RandomUInt( uint* seed ) { *seed ^= *seed << 13, * seed ^= *seed >> 17, * seed ^= *seed << 5; return *seed; }
@@ -63,10 +62,12 @@ float3 CosWeightedDiffReflection( const float3 N, uint* seed )
 }
 
 // PathState: path throughput, current extension ray, pixel index
+#define PATH_LAST_SPECULAR 1
+#define PATH_VIA_DIFFUSE 2
 struct PathState
 {
-	float4 T; // xyz = rgb, postponed pdf in w
-	float4 O; // pixel index and path depth in O.w
+	float4 T; // xyz = rgb, postponed MIS pdf in w
+	float4 O; // O.w: 24-bit pixel index, 4-bit path depth, 4-bit path flags
 	float4 D; // t in D.w
 	float4 hit;
 };
@@ -117,8 +118,8 @@ void kernel Generate( global struct PathState* raysOut, uint frameSeed )
 	const float u = ((float)x + RandomFloat( &seed )) / (float)get_global_size( 0 );
 	const float v = ((float)y + RandomFloat( &seed )) / (float)get_global_size( 1 );
 	const float4 P = rd.p0 + u * (rd.p1 - rd.p0) + v * (rd.p2 - rd.p0);
-	raysOut[id].T = (float4)(1, 1, 1, -1 /* pdf, or -1 for specular vertex */);
-	raysOut[id].O = (float4)(rd.eye.xyz, as_float( id << 4 /* low bits: depth */ ));
+	raysOut[id].T = (float4)(1, 1, 1, 1 );
+	raysOut[id].O = (float4)(rd.eye.xyz, as_float( (id << 8) + PATH_LAST_SPECULAR ));
 	raysOut[id].D = (float4)(fast_normalize( P.xyz - rd.eye.xyz ), 1e30f);
 	raysOut[id].hit = (float4)(1e30f, 0, 0, as_float( 0 ));
 }
@@ -161,13 +162,14 @@ void kernel Shade( global float4* accumulator,
 		const int pathId = atomic_dec( &shadeTasks ) - 1;
 		if (pathId < 0) break;
 		// fetch path data
-		float4 T4 = raysIn[pathId].T;	// xyz = rgb, postponed pdf in w
-		float4 O4 = raysIn[pathId].O;	// pixel index in O.w
-		float4 D4 = raysIn[pathId].D;	// t in D.w
+		float4 T4 = raysIn[pathId].T;		// xyz = rgb, postponed pdf in w
+		float4 O4 = raysIn[pathId].O;		// pixel index in O.w
+		float4 D4 = raysIn[pathId].D;		// t in D.w
 		float4 hit = raysIn[pathId].hit;	// dist, u, v, prim
 		// prepare for shading
-		uint depth = as_uint( O4.w ) & 15;
-		uint pixelIdx = as_uint( O4.w ) >> 4;
+		uint pathState = as_uint( O4.w );
+		uint pixelIdx = pathState >> 8;
+		uint depth = (pathState >> 4) & 15;
 		uint seed = WangHash( as_uint( O4.w ) + rd.frameIdx * 17117 );
 		float3 T = T4.xyz;
 		float t = hit.x;
@@ -186,7 +188,7 @@ void kernel Shade( global float4* accumulator,
 		float3 lightColor = (float3)(20);
 		if (mat == 1 /* light source */)
 		{
-			if (T4.w == -1) accumulator[pixelIdx] += (float4)(T * lightColor, 1);
+			if (pathState & PATH_LAST_SPECULAR) accumulator[pixelIdx] += (float4)(T * lightColor, 1);
 			continue;
 		}
 		float3 vert0 = v0.xyz, vert1 = verts[vertIdx + 1].xyz, vert2 = verts[vertIdx + 2].xyz;
@@ -201,7 +203,7 @@ void kernel Shade( global float4* accumulator,
 			uint newRayIdx = atomic_inc( &extendTasks );
 			float3 R = Reflect( D, N );
 			raysOut[newRayIdx].T = (float4)(T * diff, -1 /* mark vertex as specular */);
-			raysOut[newRayIdx].O = (float4)(I + R * EPSILON, as_float( (pixelIdx << 4) + depth + 1 ));
+			raysOut[newRayIdx].O = (float4)(I + R * EPSILON, as_float( (pixelIdx << 8) + ((depth + 1) << 4) + PATH_LAST_SPECULAR ));
 			raysOut[newRayIdx].D = (float4)(R, 1e30f);
 			continue;
 		}
@@ -221,14 +223,14 @@ void kernel Shade( global float4* accumulator,
 			shadowOut[newShadowIdx].D = (float4)(L, dist - 2 * EPSILON);
 		}
 		// indirect illumination: diffuse bounce
-		if (depth < 3)
+		if (depth < 3 && (pathState & PATH_VIA_DIFFUSE) == 0 )
 		{
 			uint newRayIdx = atomic_inc( &extendTasks );
 			float3 R = CosWeightedDiffReflection( N, &seed );
 			float PDF = dot( N, R ) * INVPI;
 			T *= dot( N, R ) * BRDF * native_recip( PDF );
 			raysOut[newRayIdx].T = (float4)(T, 1);
-			raysOut[newRayIdx].O = (float4)(I + R * EPSILON, as_float( (pixelIdx << 4) + depth + 1 ));
+			raysOut[newRayIdx].O = (float4)(I + R * EPSILON, as_float( (pixelIdx << 8) + ((depth + 1) << 4) + PATH_VIA_DIFFUSE ));
 			raysOut[newRayIdx].D = (float4)(R, 1e30f);
 		}
 	}

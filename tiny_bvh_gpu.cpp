@@ -26,7 +26,7 @@ static int triCount = 0, frameIdx = 0, spp = 0;
 static Kernel* init, * clear, * generate, * extend, * shade;
 static Kernel* updateCounters1, * updateCounters2, * traceShadows, * finalize;
 static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triData;
-static Buffer* cwbvhNodes = 0, * cwbvhTris = 0, *noise = 0;
+static Buffer* cwbvhNodes = 0, * cwbvhTris = 0, * noise = 0;
 static size_t computeUnits;
 static uint32_t* blueNoise;
 
@@ -60,7 +60,7 @@ void AddQuad( const bvhvec3 pos, const float w, const float d, int c )
 // Blue noise from file
 void LoadBlueNoise()
 {
-	std::fstream s{ "blue_noise_128x128x8_2d.raw", s.binary | s.in }; 
+	std::fstream s{ "blue_noise_128x128x8_2d.raw", s.binary | s.in };
 	s.read( (char*)blueNoise, 128 * 128 * 4 );
 }
 
