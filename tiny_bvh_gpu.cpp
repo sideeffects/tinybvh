@@ -26,7 +26,7 @@ static int triCount = 0, frameIdx = 0, spp = 0;
 static Kernel* init, * clear, * generate, * extend, * shade;
 static Kernel* updateCounters1, * updateCounters2, * traceShadows, * finalize;
 static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triData;
-static Buffer* cwbvhNodes = 0, * cwbvhTris = 0, *noise = 0;
+static Buffer* cwbvhNodes = 0, * cwbvhTris = 0, * noise = 0;
 static size_t computeUnits;
 static uint32_t* blueNoise = new uint32_t[128 * 128 * 8];
 
