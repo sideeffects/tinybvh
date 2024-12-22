@@ -3,14 +3,15 @@
 #pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
 
 #include "traverse.cl"
+#include "tools.cl"
 
-#define PI			3.14159265358979323846264f
-#define INVPI		0.31830988618379067153777f
-#define INV2PI		0.15915494309189533576888f
-#define TWOPI		6.28318530717958647692528f
-#define EPSILON		0.0001f // for a 100^3 world
+#define PATH_LAST_SPECULAR	1	// previous vertex was camera or mirror
+#define PATH_VIA_DIFFUSE	2	// path has at least one diffuse vertex
 
-// struct for rendering parameters - keep in sync with CPU side.
+#define MATERIAL_LIGHT		1	// material emits light - end of path
+#define MATERIAL_SPECULAR	2	// material is pure specular
+
+// struct for rendering parameters
 struct RenderData
 {
 	// camera setup
@@ -21,14 +22,10 @@ struct RenderData
 	global float4* cwbvhTris;
 	global uint* blueNoise;
 };
+const float3 lightColor = (float3)(20,20,18);
 
 __global volatile int extendTasks, shadeTasks, connectTasks;
 __global struct RenderData rd;
-
-// Xor32 RNG
-uint WangHash( uint s ) { s = (s ^ 61) ^ (s >> 16), s *= 9, s = s ^ (s >> 4), s *= 0x27d4eb2d; return s ^ (s >> 15); }
-uint RandomUInt( uint* seed ) { *seed ^= *seed << 13, * seed ^= *seed >> 17, * seed ^= *seed << 5; return *seed; }
-float RandomFloat( uint* seed ) { return RandomUInt( seed ) * 2.3283064365387e-10f; }
 
 // Blue noise interface for fixed 128x128x8 dataset.
 float2 Noise( const uint x, const uint y, const uint page /* 0..7 */ )
@@ -39,37 +36,7 @@ float2 Noise( const uint x, const uint y, const uint page /* 0..7 */ )
 	return (float2)( (float)r * 0.00392f, (float)g * 0.00392f );
 }
 
-// Color conversion
-float3 rgb32_to_vec3( uint c )
-{
-	return (float3)((float)((c >> 16) & 255), (float)((c >> 8) & 255), (float)(c & 255)) * 0.00392f;
-}
-
-// Specular reflection
-float3 Reflect( const float3 D, const float3 N ) { return D - 2.0f * N * dot( N, D ); }
-
-// DiffuseReflection: Uniform random bounce in the hemisphere
-float3 DiffuseReflection( float3 N, uint* seed )
-{
-	float3 R;
-	do
-	{
-		R = (float3)(RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1, RandomFloat( seed ) * 2 - 1);
-	} while (dot( R, R ) > 1);
-	return fast_normalize( dot( R, N ) > 0 ? R : -R );
-}
-
-// CosWeightedDiffReflection: Cosine-weighted random bounce in the hemisphere
-float3 CosWeightedDiffReflection( const float3 N, const float r0, const float r1 )
-{
-	const float r = sqrt( 1 - r1 * r1 ), phi = 4 * PI * r0;
-	const float3 R = (float3)( cos( phi ) * r, sin( phi ) * r, r1);
-	return fast_normalize( N + R );
-}
-
 // PathState: path throughput, current extension ray, pixel index
-#define PATH_LAST_SPECULAR 1
-#define PATH_VIA_DIFFUSE 2
 struct PathState
 {
 	float4 T; // xyz = rgb, postponed MIS pdf in w
@@ -90,24 +57,20 @@ struct Potential
 void kernel SetRenderData( int primaryRayCount,
 	float4 eye, float4 p0, float4 p1, float4 p2, 
 	uint frameIdx, uint width, uint height,
-	global float4* cwbvhNodes, global float4* cwbvhTris,
-	global uint* blueNoise
+	global float4* cwbvhNodes, global float4* cwbvhTris, global uint* blueNoise
 )
 {
 	if (get_global_id( 0 ) != 0) return;
 	// set camera parameters
-	rd.eye = eye;
-	rd.p0 = p0, rd.p1 = p1, rd.p2 = p2;
+	rd.eye = eye, rd.p0 = p0, rd.p1 = p1, rd.p2 = p2;
 	rd.frameIdx = frameIdx;
-	rd.width = width;
-	rd.height = height;
+	rd.width = width, rd.height = height;
 	// set BVH pointers
 	rd.cwbvhNodes = cwbvhNodes;
 	rd.cwbvhTris = cwbvhTris;
 	rd.blueNoise = blueNoise;
 	// initialize atomic counters
-	extendTasks = primaryRayCount;
-	shadeTasks = primaryRayCount;
+	extendTasks = shadeTasks = primaryRayCount;
 	connectTasks = 0;
 }
 
@@ -136,12 +99,15 @@ void kernel Generate( global struct PathState* raysOut, uint frameSeed )
 // extend: trace the generated rays to find the nearest intersection point.
 void kernel Extend( global struct PathState* raysIn )
 {
+	// we use a worker thread system here, where a fixed number of threads 'fight for food'
+	// by decreasing an atomic counter. This way, the counter can stay on the GPU, saving
+	// expensive transfers: The host doesn't need to know the exact amount of tasks.
 	while (1)
 	{
 		// obtain task
 		if (extendTasks < 1) break;
 		const int pathId = atomic_dec( &extendTasks ) - 1;
-		if (pathId < 0) break;
+		if (pathId < 0) break; // someone else could have decreased it before us.
 		const float4 O4 = raysIn[pathId].O;
 		const float4 D4 = raysIn[pathId].D;
 		const float3 rD = native_recip( D4.xyz );
@@ -150,18 +116,13 @@ void kernel Extend( global struct PathState* raysIn )
 }
 
 // syncing counters: at this point, we need to reset the extendTasks and connectTasks counters.
-void kernel UpdateCounters1()
-{
-	if (get_global_id( 0 ) != 0) return;
-	extendTasks = 0;
-}
+void kernel UpdateCounters1() { if (get_global_id( 0 ) == 0) extendTasks = 0; }
 
 // shade: process intersection results; this evaluates the BRDF and creates 
 // extension rays and shadow rays.
 void kernel Shade( global float4* accumulator,
 	global struct PathState* raysIn, global struct PathState* raysOut,
-	global struct Potential* shadowOut,
-	global float4* verts, uint sampleIdx
+	global struct Potential* shadowOut, global float4* verts, uint sampleIdx
 )
 {
 	while (1)
@@ -192,47 +153,32 @@ void kernel Shade( global float4* accumulator,
 		// fetch geometry at intersection point
 		uint vertIdx = as_uint( hit.w ) * 3;
 		float4 v0 = verts[vertIdx];
-		uint mat = as_uint( v0.w ) >> 24;
-		// end path on light
-		float3 lightColor = (float3)(20);
+		uint materialType = as_uint( v0.w ) >> 24;
 		float hemiPDF = T4.w;
 		float3 D = D4.xyz;
-		if (mat == 1 /* light source */)
+		// end path on light
+		if (materialType == MATERIAL_LIGHT)
 		{
-			float3 potential;
+			float MISweight;
 			if (pathState & PATH_LAST_SPECULAR)
 			{
-				potential = T * lightColor;
+				// we came via a mirror; there is no alternative technique.
+				MISweight = 1;
 			}
 			else
 			{
-				float lightDistance = D4.w;
-				float lightArea = 9 * 5;
-				float NLdotL = fabs( D.y ); // actually: fabs( dot( D, NL ) );
+				// two techniques could have taken us here; apply MIS.
+				float lightDistance = D4.w, lightArea = 9 * 5, NLdotL = fabs( D.y ); // actually: dot( D, NL ).
 				float solidAngle = min( TWOPI, lightArea * (1.0f / (lightDistance * lightDistance)) * NLdotL );
 				float lightPDF = 1 / solidAngle;
-				potential = T * (1 / (lightPDF + hemiPDF)) * lightColor;
+				MISweight = 1 / (lightPDF + hemiPDF);
 			}
-			accumulator[pixelIdx] += (float4)(potential, 1);
+			accumulator[pixelIdx] += (float4)(T * MISweight * lightColor, 1);
 			continue;
 		}
+		// apply postponed hemisphere PDF
 		T *= 1.0f / hemiPDF;
-		float3 vert0 = v0.xyz, vert1 = verts[vertIdx + 1].xyz, vert2 = verts[vertIdx + 2].xyz;
-		float3 materialColor = rgb32_to_vec3( as_uint( v0.w ) ); // material color
-		float3 N = fast_normalize( cross( vert1 - vert0, vert2 - vert0 ) );
-		if (dot( N, D ) > 0) N *= -1;
-		float3 I = O4.xyz + t * D;
-		// handle pure specular BRDF
-		if (mat == 2)
-		{
-			uint newRayIdx = atomic_inc( &extendTasks );
-			float3 R = Reflect( D, N );
-			raysOut[newRayIdx].T = (float4)(T * materialColor, 1);
-			raysOut[newRayIdx].O = (float4)(I + R * EPSILON, as_float( (pixelIdx << 8) + ((depth + 1) << 4) + PATH_LAST_SPECULAR ));
-			raysOut[newRayIdx].D = (float4)(R, 1e30f);
-			continue;
-		}
-		// direct illumination: next event estimation
+		// generate four random numbers
 		float r0, r1, r2, r3;
 		if (depth == 0 && sampleIdx < 4)
 		{
@@ -246,22 +192,41 @@ void kernel Shade( global float4* accumulator,
 			r0 = RandomFloat( &seed ), r1 = RandomFloat( &seed );
 			r2 = RandomFloat( &seed ), r3 = RandomFloat( &seed );
 		}
-		float3 P = (float3)(r0 * 9.0f - 4.5f, 30, r1 * 5.0f - 3.5f);
-		float3 L = P - I;
-		float NdotL = dot( N, L );
+		// prepare data for bounce
+		float3 vert0 = v0.xyz, vert1 = verts[vertIdx + 1].xyz, vert2 = verts[vertIdx + 2].xyz;
+		float3 I = O4.xyz + t * D;
+		float3 N = fast_normalize( cross( vert1 - vert0, vert2 - vert0 ) );
+		if (dot( N, D ) > 0) N *= -1;
+		float3 materialColor = rgb32_to_vec3( as_uint( v0.w ) );
 		float3 BRDF = materialColor * INVPI; // lambert BRDF: albedo / pi
-		if (NdotL > 0)
+		// direct illumination: next event estimation
+		if (materialType != MATERIAL_SPECULAR)
 		{
-			uint newShadowIdx = atomic_inc( &connectTasks );
-			float dist2 = dot( L, L ), dist = sqrt( dist2 );
-			L *= native_recip( dist );
-			float NLdotL = fabs( L.y ); // actually, fabs( dot( L, LN ) )
-			shadowOut[newShadowIdx].T = (float4)(lightColor * BRDF * T * NdotL * NLdotL * native_recip( dist2 ), 0);
-			shadowOut[newShadowIdx].O = (float4)(I + L * EPSILON, as_float( pixelIdx ));
-			shadowOut[newShadowIdx].D = (float4)(L, dist - 2 * EPSILON);
+			float3 P = (float3)(r0 * 9.0f - 4.5f, 30, r1 * 5.0f - 3.5f);
+			float3 L = P - I;
+			float NdotL = dot( N, L );
+			if (NdotL > 0)
+			{
+				uint newShadowIdx = atomic_inc( &connectTasks );
+				float dist2 = dot( L, L ), dist = sqrt( dist2 );
+				L *= native_recip( dist );
+				float NLdotL = fabs( L.y ); // actually, fabs( dot( L, LN ) )
+				shadowOut[newShadowIdx].T = (float4)(lightColor * BRDF * T * NdotL * NLdotL * native_recip( dist2 ), 0);
+				shadowOut[newShadowIdx].O = (float4)(I + L * EPSILON, as_float( pixelIdx ));
+				shadowOut[newShadowIdx].D = (float4)(L, dist - 2 * EPSILON);
+			}
 		}
-		// indirect illumination: diffuse bounce
-		if (depth < 3 && (pathState & PATH_VIA_DIFFUSE) == 0 )
+		// handle pure specular BRDF
+		if (depth >= 3) continue;
+		if (materialType == MATERIAL_SPECULAR)
+		{
+			uint newRayIdx = atomic_inc( &extendTasks );
+			float3 R = Reflect( D, N );
+			raysOut[newRayIdx].T = (float4)(T * materialColor, 1);
+			raysOut[newRayIdx].O = (float4)(I + R * EPSILON, as_float( (pixelIdx << 8) + ((depth + 1) << 4) + PATH_LAST_SPECULAR ));
+			raysOut[newRayIdx].D = (float4)(R, 1e30f);
+		}
+		else /* materialType == MATERIAL_DIFFUSE */ if ((pathState & PATH_VIA_DIFFUSE) == 0 )
 		{
 			uint newRayIdx = atomic_inc( &extendTasks );
 			float3 R = CosWeightedDiffReflection( N, r2, r3 );
@@ -291,15 +256,10 @@ void kernel Connect( global float4* accumulator, global struct Potential* shadow
 		if (connectTasks < 1) break;
 		const int rayId = atomic_dec( &connectTasks ) - 1;
 		if (rayId < 0) break;
-		const float4 T4 = shadowIn[rayId].T;
-		const float4 O4 = shadowIn[rayId].O;
-		const float4 D4 = shadowIn[rayId].D;
+		const float4 T4 = shadowIn[rayId].T, O4 = shadowIn[rayId].O, D4 = shadowIn[rayId].D;
 		const float3 rD = native_recip( D4.xyz );
-		if (!isoccluded_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, D4.w ))
-		{
-			uint pixelIdx = as_uint( O4.w );
-			accumulator[pixelIdx] += T4;
-		}
+		if (isoccluded_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, D4.w )) continue;
+		accumulator[as_uint( O4.w )] += T4;
 	}
 }
 

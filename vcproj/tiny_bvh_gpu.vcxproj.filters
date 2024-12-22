@@ -5,9 +5,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\tiny_bvh.h" />
+    <ClInclude Include="..\tiny_ocl.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\traverse.cl" />
     <None Include="..\wavefront.cl" />
+    <None Include="..\tools.cl" />
   </ItemGroup>
 </Project>
