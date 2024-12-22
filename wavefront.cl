@@ -195,23 +195,39 @@ void kernel Shade( global float4* accumulator,
 		uint mat = as_uint( v0.w ) >> 24;
 		// end path on light
 		float3 lightColor = (float3)(20);
+		float hemiPDF = T4.w;
+		float3 D = D4.xyz;
 		if (mat == 1 /* light source */)
 		{
-			if (pathState & PATH_LAST_SPECULAR) accumulator[pixelIdx] += (float4)(T * lightColor, 1);
+			float3 potential;
+			if (pathState & PATH_LAST_SPECULAR)
+			{
+				potential = T * lightColor;
+			}
+			else
+			{
+				float lightDistance = D4.w;
+				float lightArea = 9 * 5;
+				float NLdotL = fabs( D.y ); // actually: fabs( dot( D, NL ) );
+				float solidAngle = min( TWOPI, lightArea * (1.0f / (lightDistance * lightDistance)) * NLdotL );
+				float lightPDF = 1 / solidAngle;
+				potential = T * (1 / (lightPDF + hemiPDF)) * lightColor;
+			}
+			accumulator[pixelIdx] += (float4)(potential, 1);
 			continue;
 		}
+		T *= 1.0f / hemiPDF;
 		float3 vert0 = v0.xyz, vert1 = verts[vertIdx + 1].xyz, vert2 = verts[vertIdx + 2].xyz;
+		float3 materialColor = rgb32_to_vec3( as_uint( v0.w ) ); // material color
 		float3 N = fast_normalize( cross( vert1 - vert0, vert2 - vert0 ) );
-		float3 D = D4.xyz;
 		if (dot( N, D ) > 0) N *= -1;
 		float3 I = O4.xyz + t * D;
-		float3 diff = rgb32_to_vec3( as_uint( v0.w ) ); // material color
 		// handle pure specular BRDF
 		if (mat == 2)
 		{
 			uint newRayIdx = atomic_inc( &extendTasks );
 			float3 R = Reflect( D, N );
-			raysOut[newRayIdx].T = (float4)(T * diff, -1 /* mark vertex as specular */);
+			raysOut[newRayIdx].T = (float4)(T * materialColor, 1);
 			raysOut[newRayIdx].O = (float4)(I + R * EPSILON, as_float( (pixelIdx << 8) + ((depth + 1) << 4) + PATH_LAST_SPECULAR ));
 			raysOut[newRayIdx].D = (float4)(R, 1e30f);
 			continue;
@@ -233,7 +249,7 @@ void kernel Shade( global float4* accumulator,
 		float3 P = (float3)(r0 * 9.0f - 4.5f, 30, r1 * 5.0f - 3.5f);
 		float3 L = P - I;
 		float NdotL = dot( N, L );
-		float3 BRDF = diff * INVPI; // lambert BRDF: albedo / pi
+		float3 BRDF = materialColor * INVPI; // lambert BRDF: albedo / pi
 		if (NdotL > 0)
 		{
 			uint newShadowIdx = atomic_inc( &connectTasks );
@@ -250,8 +266,8 @@ void kernel Shade( global float4* accumulator,
 			uint newRayIdx = atomic_inc( &extendTasks );
 			float3 R = CosWeightedDiffReflection( N, r2, r3 );
 			float PDF = dot( N, R ) * INVPI;
-			T *= dot( N, R ) * BRDF * native_recip( PDF );
-			raysOut[newRayIdx].T = (float4)(T, 1);
+			T *= dot( N, R ) * BRDF;
+			raysOut[newRayIdx].T = (float4)(T, PDF /* for MIS, we postpone the pdf until after light sampling */ );
 			raysOut[newRayIdx].O = (float4)(I + R * EPSILON, as_float( (pixelIdx << 8) + ((depth + 1) << 4) + PATH_VIA_DIFFUSE ));
 			raysOut[newRayIdx].D = (float4)(R, 1e30f);
 		}

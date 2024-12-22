@@ -3,7 +3,7 @@
 
 #define FENSTER_APP_IMPLEMENTATION
 #define SCRWIDTH 1280
-#define SCRHEIGHT 800
+#define SCRHEIGHT 720
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
 // This application uses tinybvh - And this file will include the implementation.
