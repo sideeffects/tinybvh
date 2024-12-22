@@ -127,7 +127,7 @@ void kernel Shade( global float4* accumulator,
 {
 	while (1)
 	{
-		// obtain task
+		// obtain task - see note on worker threads in Extend
 		if (shadeTasks < 1) break;
 		const int pathId = atomic_dec( &shadeTasks ) - 1;
 		if (pathId < 0) break;
@@ -252,7 +252,7 @@ void kernel Connect( global float4* accumulator, global struct Potential* shadow
 {
 	while (1)
 	{
-		// obtain task
+		// obtain task - see note on worker threads in Extend
 		if (connectTasks < 1) break;
 		const int rayId = atomic_dec( &connectTasks ) - 1;
 		if (rayId < 0) break;
