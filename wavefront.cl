@@ -22,7 +22,7 @@ struct RenderData
 	global float4* cwbvhTris;
 	global uint* blueNoise;
 };
-const float3 lightColor = (float3)(20,20,18);
+const float3 lightColor = (float3)(1.7f,1.7f,1.5f);
 
 __global volatile int extendTasks, shadeTasks, connectTasks;
 __global struct RenderData rd;
@@ -154,7 +154,7 @@ void kernel Shade( global float4* accumulator,
 		uint vertIdx = as_uint( hit.w ) * 3;
 		float4 v0 = verts[vertIdx];
 		uint materialType = as_uint( v0.w ) >> 24;
-		float hemiPDF = T4.w;
+		float brdfPDF = T4.w;
 		float3 D = D4.xyz;
 		// end path on light
 		if (materialType == MATERIAL_LIGHT)
@@ -171,13 +171,13 @@ void kernel Shade( global float4* accumulator,
 				float lightDistance = D4.w, lightArea = 9 * 5, NLdotL = fabs( D.y ); // actually: dot( D, NL ).
 				float solidAngle = min( TWOPI, lightArea * (1.0f / (lightDistance * lightDistance)) * NLdotL );
 				float lightPDF = 1 / solidAngle;
-				MISweight = 1 / (lightPDF + hemiPDF);
+				MISweight = 1 / (lightPDF + brdfPDF);
 			}
 			accumulator[pixelIdx] += (float4)(T * MISweight * lightColor, 1);
 			continue;
 		}
 		// apply postponed hemisphere PDF
-		T *= 1.0f / hemiPDF;
+		T *= 1.0f / brdfPDF;
 		// generate four random numbers
 		float r0, r1, r2, r3;
 		if (depth == 0 && sampleIdx < 4)
@@ -211,7 +211,14 @@ void kernel Shade( global float4* accumulator,
 				float dist2 = dot( L, L ), dist = sqrt( dist2 );
 				L *= native_recip( dist );
 				float NLdotL = fabs( L.y ); // actually, fabs( dot( L, LN ) )
-				shadowOut[newShadowIdx].T = (float4)(lightColor * BRDF * T * NdotL * NLdotL * native_recip( dist2 ), 0);
+				float solidAngle = min( TWOPI, 9 * 5 * NLdotL / dist2 );
+				float lightPDF = 1.0f / solidAngle;
+				// calculate the pdf for the alternative technique: brdf sampling
+				float brdfPDF = dot( L, N ) * INVPI;
+				// use MIS pdf to calculate potential direct light contribution
+				float MISPDF = lightPDF + brdfPDF;
+				float3 contribution = T * lightColor * BRDF * (NdotL / MISPDF);
+				shadowOut[newShadowIdx].T = (float4)(contribution, 0);
 				shadowOut[newShadowIdx].O = (float4)(I + L * EPSILON, as_float( pixelIdx ));
 				shadowOut[newShadowIdx].D = (float4)(L, dist - 2 * EPSILON);
 			}
