@@ -110,7 +110,7 @@ This version of the library includes the following functionality:
 * Double-precision binned SAH BVH builder
 * Spatial Splits ([SBVH](https://www.nvidia.in/docs/IO/77714/sbvh.pdf), Stich et al., 2009) builder
 * 'Compressed Wide BVH' (CWBVH) data structure
-* BVH optimizer: reduces SAH cost and improves ray tracing performance ([Bittner et al., 2013](https://www.nvidia.in/docs/IO/77714/sbvh.pdf))
+* BVH optimizer: reduces SAH cost and improves ray tracing performance ([Bittner et al., 2013]([https://www.nvidia.in/docs/IO/77714/sbvh.pdf](https://dspace.cvut.cz/bitstream/handle/10467/15603/2013-Fast-Insertion-Based-Optimization-of-Bounding-Volume-Hierarchies.pdf)))
 * Collapse to 4-wide and 8-wide BVH
 * Conversion of 4-wide BVH to GPU-friendly 64-byte quantized format
 * Single-ray and packet traversal
