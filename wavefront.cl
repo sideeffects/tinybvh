@@ -11,27 +11,20 @@
 #define MATERIAL_LIGHT		1	// material emits light - end of path
 #define MATERIAL_SPECULAR	2	// material is pure specular
 
-// struct for rendering parameters
-struct RenderData
-{
-	// camera setup
-	float4 eye, C, p0, p1, p2;
-	uint frameIdx, width, height, dummy3;
-	// BVH data
-	global float4* cwbvhNodes;
-	global float4* cwbvhTris;
-	global uint* blueNoise;
-};
-const float3 lightColor = (float3)(1.7f,1.7f,1.5f);
-
-__global volatile int extendTasks, shadeTasks, connectTasks;
-__global struct RenderData rd;
+// rendering parameters
+float4 eye, C, p0, p1, p2;
+uint frameIdx, width, height, dummy3;
+global float4* cwbvhNodes;
+global float4* cwbvhTris;
+global uint* blueNoise;
+global volatile int extendTasks, shadeTasks, connectTasks; // atomic counters
+const float3 lightColor = (float3)(15,15,14);
 
 // Blue noise interface for fixed 128x128x8 dataset.
 float2 Noise( const uint x, const uint y, const uint page /* 0..7 */ )
 {
 	const uint ix = x & 127, iy = y & 127;
-	const uint v2 = rd.blueNoise[(page << 14) + (iy << 7) + ix];
+	const uint v2 = blueNoise[(page << 14) + (iy << 7) + ix];
 	const uint r = v2 >> 16, g = (v2 >> 8) & 255;
 	return (float2)( (float)r * 0.00392f, (float)g * 0.00392f );
 }
@@ -54,23 +47,21 @@ struct Potential
 };
 
 // atomic counter management - prepare for primary ray wavefront
-void kernel SetRenderData( int primaryRayCount,
-	float4 eye, float4 p0, float4 p1, float4 p2, 
-	uint frameIdx, uint width, uint height,
-	global float4* cwbvhNodes, global float4* cwbvhTris, global uint* blueNoise
+void kernel SetRenderData( int _primaryRayCount,
+	float4 _eye, float4 _p0, float4 _p1, float4 _p2, uint _frameIdx, uint _width, uint _height,
+	global float4* _cwbvhNodes, global float4* _cwbvhTris, global uint* _blueNoise
 )
 {
 	if (get_global_id( 0 ) != 0) return;
 	// set camera parameters
-	rd.eye = eye, rd.p0 = p0, rd.p1 = p1, rd.p2 = p2;
-	rd.frameIdx = frameIdx;
-	rd.width = width, rd.height = height;
+	eye = _eye, p0 = _p0, p1 = _p1, p2 = _p2;
+	frameIdx = _frameIdx, width = _width, height = _height;
 	// set BVH pointers
-	rd.cwbvhNodes = cwbvhNodes;
-	rd.cwbvhTris = cwbvhTris;
-	rd.blueNoise = blueNoise;
+	cwbvhNodes = _cwbvhNodes;
+	cwbvhTris = _cwbvhTris;
+	blueNoise = _blueNoise;
 	// initialize atomic counters
-	extendTasks = shadeTasks = primaryRayCount;
+	extendTasks = shadeTasks = _primaryRayCount;
 	connectTasks = 0;
 }
 
@@ -89,10 +80,10 @@ void kernel Generate( global struct PathState* raysOut, uint frameSeed )
 	uint seed = WangHash( id * 13131 + frameSeed );
 	const float u = ((float)x + RandomFloat( &seed )) / (float)get_global_size( 0 );
 	const float v = ((float)y + RandomFloat( &seed )) / (float)get_global_size( 1 );
-	const float4 P = rd.p0 + u * (rd.p1 - rd.p0) + v * (rd.p2 - rd.p0);
+	const float4 P = p0 + u * (p1 - p0) + v * (p2 - p0);
 	raysOut[id].T = (float4)(1, 1, 1, 1 );
-	raysOut[id].O = (float4)(rd.eye.xyz, as_float( (id << 8) + PATH_LAST_SPECULAR ));
-	raysOut[id].D = (float4)(fast_normalize( P.xyz - rd.eye.xyz ), 1e30f);
+	raysOut[id].O = (float4)(eye.xyz, as_float( (id << 8) + PATH_LAST_SPECULAR ));
+	raysOut[id].D = (float4)(fast_normalize( P.xyz - eye.xyz ), 1e30f);
 	raysOut[id].hit = (float4)(1e30f, 0, 0, as_float( 0 ));
 }
 
@@ -111,8 +102,15 @@ void kernel Extend( global struct PathState* raysIn )
 		const float4 O4 = raysIn[pathId].O;
 		const float4 D4 = raysIn[pathId].D;
 		const float3 rD = native_recip( D4.xyz );
-		raysIn[pathId].hit = traverse_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, 1e30f );
+		raysIn[pathId].hit = traverse_cwbvh( cwbvhNodes, cwbvhTris, O4.xyz, D4.xyz, rD, 1e30f );
 	}
+}
+
+// lightpdf: approximate probability density of hemisphere directions towards light.
+float LightPDF( const float distance, const float3 D )  
+{
+	float solidAngle = min( TWOPI, 9 * 5 * (1.0f / (distance * distance)) * fabs( D.y ) /* NLdotL */ );
+	return 1 / solidAngle;
 }
 
 // syncing counters: at this point, we need to reset the extendTasks and connectTasks counters.
@@ -122,8 +120,7 @@ void kernel UpdateCounters1() { if (get_global_id( 0 ) == 0) extendTasks = 0; }
 // extension rays and shadow rays.
 void kernel Shade( global float4* accumulator,
 	global struct PathState* raysIn, global struct PathState* raysOut,
-	global struct Potential* shadowOut, global float4* verts, uint sampleIdx
-)
+	global struct Potential* shadowOut, global float4* verts, uint sampleIdx )
 {
 	while (1)
 	{
@@ -140,7 +137,7 @@ void kernel Shade( global float4* accumulator,
 		uint pathState = as_uint( O4.w );
 		uint pixelIdx = pathState >> 8;
 		uint depth = (pathState >> 4) & 15;
-		uint seed = WangHash( as_uint( O4.w ) + rd.frameIdx * 17117 );
+		uint seed = WangHash( as_uint( O4.w ) + frameIdx * 17117 );
 		float3 T = T4.xyz;
 		float t = hit.x;
 		// end path on sky
@@ -168,9 +165,7 @@ void kernel Shade( global float4* accumulator,
 			else
 			{
 				// two techniques could have taken us here; apply MIS.
-				float lightDistance = D4.w, lightArea = 9 * 5, NLdotL = fabs( D.y ); // actually: dot( D, NL ).
-				float solidAngle = min( TWOPI, lightArea * (1.0f / (lightDistance * lightDistance)) * NLdotL );
-				float lightPDF = 1 / solidAngle;
+				float lightPDF = LightPDF( D4.w, D );
 				MISweight = 1 / (lightPDF + brdfPDF);
 			}
 			accumulator[pixelIdx] += (float4)(T * MISweight * lightColor, 1);
@@ -182,8 +177,8 @@ void kernel Shade( global float4* accumulator,
 		float r0, r1, r2, r3;
 		if (depth == 0 && sampleIdx < 4)
 		{
-			float2 noise0 = Noise( pixelIdx % rd.height, pixelIdx / rd.height, sampleIdx * 2 );
-			float2 noise1 = Noise( pixelIdx % rd.height, pixelIdx / rd.height, sampleIdx * 2 + 1 );
+			float2 noise0 = Noise( pixelIdx % height, pixelIdx / height, sampleIdx * 2 );
+			float2 noise1 = Noise( pixelIdx % height, pixelIdx / height, sampleIdx * 2 + 1 );
 			r0 = noise0.x, r1 = noise0.y;
 			r2 = noise0.x, r3 = noise0.y;
 		}
@@ -204,20 +199,16 @@ void kernel Shade( global float4* accumulator,
 		{
 			float3 P = (float3)(r0 * 9.0f - 4.5f, 30, r1 * 5.0f - 3.5f);
 			float3 L = P - I;
+			float dist2 = dot( L, L ), dist = sqrt( dist2 );
+			L *= native_recip( dist );
 			float NdotL = dot( N, L );
 			if (NdotL > 0)
 			{
-				uint newShadowIdx = atomic_inc( &connectTasks );
-				float dist2 = dot( L, L ), dist = sqrt( dist2 );
-				L *= native_recip( dist );
-				float NLdotL = fabs( L.y ); // actually, fabs( dot( L, LN ) )
-				float solidAngle = min( TWOPI, 9 * 5 * NLdotL / dist2 );
-				float lightPDF = 1.0f / solidAngle;
-				// calculate the pdf for the alternative technique: brdf sampling
-				float brdfPDF = dot( L, N ) * INVPI;
 				// use MIS pdf to calculate potential direct light contribution
-				float MISPDF = lightPDF + brdfPDF;
-				float3 contribution = T * lightColor * BRDF * (NdotL / MISPDF);
+				float lightPDF = LightPDF( dist, L );
+				float brdfPDF = dot( L, N ) * INVPI;
+				float3 contribution = T * lightColor * BRDF * (NdotL / (lightPDF + brdfPDF));
+				uint newShadowIdx = atomic_inc( &connectTasks );
 				shadowOut[newShadowIdx].T = (float4)(contribution, 0);
 				shadowOut[newShadowIdx].O = (float4)(I + L * EPSILON, as_float( pixelIdx ));
 				shadowOut[newShadowIdx].D = (float4)(L, dist - 2 * EPSILON);
@@ -265,7 +256,7 @@ void kernel Connect( global float4* accumulator, global struct Potential* shadow
 		if (rayId < 0) break;
 		const float4 T4 = shadowIn[rayId].T, O4 = shadowIn[rayId].O, D4 = shadowIn[rayId].D;
 		const float3 rD = native_recip( D4.xyz );
-		if (isoccluded_cwbvh( rd.cwbvhNodes, rd.cwbvhTris, O4.xyz, D4.xyz, rD, D4.w )) continue;
+		if (isoccluded_cwbvh( cwbvhNodes, cwbvhTris, O4.xyz, D4.xyz, rD, D4.w )) continue;
 		accumulator[as_uint( O4.w )] += T4;
 	}
 }
