@@ -630,15 +630,15 @@ float4 traverse_cwbvh( global const float4* cwbvhNodes, global const float4* cwb
 			{
 				const unsigned slot_index = (child_bit_index - 24) ^ (octinv4 & 255);
 				const unsigned relative_index = __popc( imask & ~(0xFFFFFFFF << slot_index) );
-				const unsigned child_node_index = child_node_base_index + relative_index;
+				const unsigned child_node_index = (child_node_base_index + relative_index) * 5;
 			#ifdef USE_VLOAD_VSTORE
-				const float* p = (float*)&cwbvhNodes[child_node_index * 5 + 0];
+				const float* p = (float*)&cwbvhNodes[child_node_index + 0];
 				float4 n0 = vload4( 0, p ), n1 = vload4( 1, p ), n2 = vload4( 2, p );
 				float4 n3 = vload4( 3, p ), n4 = vload4( 4, p );
 			#else
-				float4 n0 = cwbvhNodes[child_node_index * 5 + 0], n1 = cwbvhNodes[child_node_index * 5 + 1];
-				float4 n2 = cwbvhNodes[child_node_index * 5 + 2], n3 = cwbvhNodes[child_node_index * 5 + 3];
-				float4 n4 = cwbvhNodes[child_node_index * 5 + 4];
+				float4 n0 = cwbvhNodes[child_node_index + 0], n1 = cwbvhNodes[child_node_index + 1];
+				float4 n2 = cwbvhNodes[child_node_index + 2], n3 = cwbvhNodes[child_node_index + 3];
+				float4 n4 = cwbvhNodes[child_node_index + 4];
 			#endif
 				const char4 e = as_char4( n0.w );
 				ngroup.x = as_uint( n1.x ), tgroup = (uint2)(as_uint( n1.y ), 0);
@@ -804,8 +804,8 @@ float4 traverse_cwbvh( global const float4* cwbvhNodes, global const float4* cwb
 			// component of vertex 0.
 			const int triangleIndex = __bfind( tgroup.y ), triAddr = tgroup.x + triangleIndex * 3;
 			const float3 v0 = cwbvhTris[triAddr].xyz;
-			const float3 e1 = cwbvhTris[triAddr + 1].xyz - v0;
-			const float3 e2 = cwbvhTris[triAddr + 2].xyz - v0;
+			const float3 e1 = cwbvhTris[triAddr + 1].xyz;
+			const float3 e2 = cwbvhTris[triAddr + 2].xyz;
 		#ifdef SIMD_AABBTEST
 			const float3 r = cross( D4.xyz, e2 );
 		#else
@@ -887,15 +887,15 @@ bool isoccluded_cwbvh( global const float4* cwbvhNodes, global const float4* cwb
 			{
 				const unsigned slot_index = (child_bit_index - 24) ^ (octinv4 & 255);
 				const unsigned relative_index = __popc( imask & ~(0xFFFFFFFF << slot_index) );
-				const unsigned child_node_index = child_node_base_index + relative_index;
+				const unsigned child_node_index = (child_node_base_index + relative_index) * 5;
 			#ifdef USE_VLOAD_VSTORE
-				const float* p = (float*)&cwbvhNodes[child_node_index * 5 + 0];
+				const float* p = (float*)&cwbvhNodes[child_node_index + 0];
 				float4 n0 = vload4( 0, p ), n1 = vload4( 1, p ), n2 = vload4( 2, p );
 				float4 n3 = vload4( 3, p ), n4 = vload4( 4, p );
 			#else
-				float4 n0 = cwbvhNodes[child_node_index * 5 + 0], n1 = cwbvhNodes[child_node_index * 5 + 1];
-				float4 n2 = cwbvhNodes[child_node_index * 5 + 2], n3 = cwbvhNodes[child_node_index * 5 + 3];
-				float4 n4 = cwbvhNodes[child_node_index * 5 + 4];
+				float4 n0 = cwbvhNodes[child_node_index + 0], n1 = cwbvhNodes[child_node_index + 1];
+				float4 n2 = cwbvhNodes[child_node_index + 2], n3 = cwbvhNodes[child_node_index + 3];
+				float4 n4 = cwbvhNodes[child_node_index + 4];
 			#endif
 				const char4 e = as_char4( n0.w );
 				ngroup.x = as_uint( n1.x ), tgroup = (uint2)(as_uint( n1.y ), 0);
@@ -1061,8 +1061,8 @@ bool isoccluded_cwbvh( global const float4* cwbvhNodes, global const float4* cwb
 			// component of vertex 0.
 			const int triangleIndex = __bfind( tgroup.y ), triAddr = tgroup.x + triangleIndex * 3;
 			const float3 v0 = cwbvhTris[triAddr].xyz;
-			const float3 e1 = cwbvhTris[triAddr + 1].xyz - v0;
-			const float3 e2 = cwbvhTris[triAddr + 2].xyz - v0;
+			const float3 e1 = cwbvhTris[triAddr + 1].xyz;
+			const float3 e2 = cwbvhTris[triAddr + 2].xyz;
 		#ifdef SIMD_AABBTEST
 			const float3 r = cross( D4.xyz, e2 );
 		#else

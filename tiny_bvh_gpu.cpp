@@ -23,7 +23,7 @@ using namespace tinybvh;
 static BVH8_CWBVH bvh;
 static bvhvec4* tris = 0;
 static int triCount = 0, frameIdx = 0, spp = 0;
-static Kernel* init, * clear, * generate, * extend, * shade;
+static Kernel* init, * clear, * rayGen, * extend, * shade;
 static Kernel* updateCounters1, * updateCounters2, * traceShadows, * finalize;
 static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triData;
 static Buffer* cwbvhNodes = 0, * cwbvhTris = 0, * noise = 0;
@@ -60,7 +60,7 @@ void AddQuad( const bvhvec3 pos, const float w, const float d, int c )
 // Blue noise from file
 void LoadBlueNoise()
 {
-	std::fstream s{ "./testdata/blue_noise_128x128x8_2d.raw", s.binary | s.in }; 
+	std::fstream s{ "./testdata/blue_noise_128x128x8_2d.raw", s.binary | s.in };
 	s.read( (char*)blueNoise, 128 * 128 * 8 * 4 );
 }
 
@@ -70,7 +70,7 @@ void Init()
 	// create OpenCL kernels
 	init = new Kernel( "wavefront.cl", "SetRenderData" );
 	clear = new Kernel( "wavefront.cl", "Clear" );
-	generate = new Kernel( "wavefront.cl", "Generate" );
+	rayGen = new Kernel( "wavefront.cl", "Generate" );
 	extend = new Kernel( "wavefront.cl", "Extend" );
 	shade = new Kernel( "wavefront.cl", "Shade" );
 	updateCounters1 = new Kernel( "wavefront.cl", "UpdateCounters1" );
@@ -158,8 +158,8 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	// wavefront step 0: render on the GPU
 	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2, frameIdx, SCRWIDTH, SCRHEIGHT, cwbvhNodes, cwbvhTris, noise );
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
-	generate->SetArguments( raysOut, spp * 19191 );
-	generate->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
+	rayGen->SetArguments( raysOut, spp * 19191 );
+	rayGen->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
 	for (int i = 0; i < 3; i++)
 	{
 		swap( raysOut, raysIn );

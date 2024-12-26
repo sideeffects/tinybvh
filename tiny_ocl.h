@@ -78,7 +78,6 @@ inline void free64( void* ptr, void* = nullptr ) { free( ptr ); }
 #endif
 
 namespace tinyocl {
-
 // Math classes
 struct oclint2
 {
@@ -91,14 +90,14 @@ struct oclvec3 { float x, y, z; };
 // ============================================================================
 //
 //        T I N Y _ O C L   I N T E R F A C E
-// 
+//
 // ============================================================================
 
 // OpenCL context
-// *Only!* in case you want to override the default memory allocator used by 
+// *Only!* in case you want to override the default memory allocator used by
 // tinyocl::Buffer: call OpenCL::CreateInstance with OpenCLContext fields describing
 // your allocator and deallocator, before using any tinyocl functionality.
-// In all other cases, the first use of tinyocl (creating a buffer, loading a 
+// In all other cases, the first use of tinyocl (creating a buffer, loading a
 // kernel) will take care of this for you transparently.
 struct OpenCLContext
 {
@@ -322,13 +321,12 @@ private:
 public:
 	inline static bool candoInterop = false, clStarted = false;
 };
-
 } // namespace tinybvh
 
 // ============================================================================
 //
 //        I M P L E M E N T A T I O N
-// 
+//
 // ============================================================================
 
 #ifdef TINY_OCL_IMPLEMENTATION
@@ -655,7 +653,11 @@ Kernel::Kernel( const char* file, const char* entryPoint )
 	// see if we have seen this source file before
 	for (int s = (int)loadedKernels.size(), i = 0; i < s; i++)
 	{
+	#ifdef _MSC_VER
 		if (!_stricmp( file, loadedKernels[i]->sourceFile ))
+		#else
+		if (!strcasecmp( file, loadedKernels[i]->sourceFile ))
+		#endif
 		{
 			cl_int error;
 			program = loadedKernels[i]->program;

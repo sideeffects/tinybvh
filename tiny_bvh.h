@@ -37,7 +37,7 @@ THE SOFTWARE.
 // tinybvh can use custom vector types by defining TINYBVH_USE_CUSTOM_VECTOR_TYPES once before inclusion.
 // To define custom vector types create a tinybvh namespace with the appropriate using directives, e.g.:
 //	 namespace tinybvh
-//   {  
+//   {
 //     using bvhint2 = math::int2;
 //     using bvhint3 = math::int3;
 //     using bvhuint2 = math::uint2;
@@ -46,7 +46,7 @@ THE SOFTWARE.
 //     using bvhvec4 = math::float4;
 //     using bvhdbl3 = math::double3;
 //   }
-// 
+//
 //	 #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
 //   #include <tiny_bvh.h>
 
@@ -179,7 +179,6 @@ inline void free64( void* ptr, void* = nullptr ) { free( ptr ); }
 #endif
 
 namespace tinybvh {
-
 #ifdef _MSC_VER
 // Suppress a warning caused by the union of x,y,.. and cell[..] in vectors.
 // We need this union to address vector components either by name or by index.
@@ -797,7 +796,7 @@ public:
 class BVH4_GPU : public BVHBase
 {
 public:
-	struct BVHNode
+	struct BVHNode // actual struct is unused; left here to show structure of data in bvh4Data.
 	{
 		// 4-way BVH node, optimized for GPU rendering
 		struct aabb8 { uint8_t xmin, ymin, zmin, xmax, ymax, zmax; }; // quantized
@@ -924,7 +923,6 @@ public:
 	bvhvec3 TransformPoint( const bvhvec3& v ) const;
 	bvhvec3 TransformVector( const bvhvec3& v ) const;
 };
-
 } // namespace tinybvh
 
 // ============================================================================
@@ -941,7 +939,7 @@ public:
 #endif
 #include <fstream>			// fstream
 
-// We need quite a bit of type reinterpretation, so we'll 
+// We need quite a bit of type reinterpretation, so we'll
 // turn off the gcc warning here until the end of the file.
 #ifdef __GNUC__
 #pragma GCC diagnostic push
@@ -949,7 +947,6 @@ public:
 #endif
 
 namespace tinybvh {
-
 #if defined BVH_USEAVX || defined BVH_USENEON
 
 static uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
@@ -2195,7 +2192,7 @@ void BVH_GPU::Build( const bvhvec4slice& vertices )
 void BVH_GPU::ConvertFrom( const BVH& original )
 {
 	// get a copy of the original bvh
-	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor. 
+	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor.
 	bvh = original;
 	// allocate space
 	const uint32_t spaceNeeded = original.usedNodes;
@@ -2305,7 +2302,7 @@ void BVH_SoA::Build( const bvhvec4slice& vertices )
 void BVH_SoA::ConvertFrom( const BVH& original )
 {
 	// get a copy of the original bvh
-	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor. 
+	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor.
 	bvh = original;
 	// allocate space
 	const uint32_t spaceNeeded = bvh.usedNodes;
@@ -2375,7 +2372,7 @@ void BVH4::Build( const bvhvec4slice& vertices )
 void BVH4::ConvertFrom( const BVH& original )
 {
 	// get a copy of the original bvh
-	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor. 
+	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor.
 	bvh = original;
 	// allocate space
 	const uint32_t spaceNeeded = original.usedNodes;
@@ -2479,7 +2476,7 @@ void BVH4_CPU::Build( const bvhvec4slice& vertices )
 void BVH4_CPU::ConvertFrom( const BVH4& original )
 {
 	// get a copy of the original bvh4
-	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor. 
+	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor.
 	bvh4 = original;
 	// Convert a 4-wide BVH to a format suitable for CPU traversal.
 	// See Faster Incoherent Ray Traversal Using 8-Wide AVX InstructionsLayout,
@@ -2584,7 +2581,7 @@ void BVH4_GPU::Build( const bvhvec4slice& vertices )
 void BVH4_GPU::ConvertFrom( const BVH4& original )
 {
 	// get a copy of the original bvh4
-	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor. 
+	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor.
 	bvh4 = original;
 	// Convert a 4-wide BVH to a format suitable for GPU traversal. Layout:
 	// offs 0:   aabbMin (12 bytes), 4x quantized child xmin (4 bytes)
@@ -2836,7 +2833,7 @@ void BVH8::Build( const bvhvec4slice& vertices )
 void BVH8::ConvertFrom( const BVH& original )
 {
 	// get a copy of the original
-	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor. 
+	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor.
 	bvh = original;
 	// allocate space
 	// Note: The safe upper bound here is usedNodes when converting an existing
@@ -3008,7 +3005,7 @@ void BVH8_CWBVH::Build( const bvhvec4slice& vertices )
 void BVH8_CWBVH::ConvertFrom( BVH8& original )
 {
 	// get a copy of the original bvh8
-	if (&original != &bvh8) ownBVH8 = false; // bvh isn't ours; don't delete in destructor. 
+	if (&original != &bvh8) ownBVH8 = false; // bvh isn't ours; don't delete in destructor.
 	bvh8 = original;
 	// Convert a BVH8 to the format specified in: "Efficient Incoherent Ray
 	// Traversal on GPUs Through Compressed Wide BVHs", Ylitie et al. 2017.
@@ -3127,10 +3124,10 @@ void BVH8_CWBVH::ConvertFrom( BVH8& original )
 				triDataPtr += 4;
 			#else
 				bvhvec4 t = bvh8.bvh.verts[primitiveIndex * 3 + 0];
+				bvh8Tris[triDataPtr + 1] = bvh8.bvh.verts[primitiveIndex * 3 + 1] - t;
+				bvh8Tris[triDataPtr + 2] = bvh8.bvh.verts[primitiveIndex * 3 + 2] - t;
 				t.w = *(float*)&primitiveIndex;
-				bvh8Tris[triDataPtr++] = t;
-				bvh8Tris[triDataPtr++] = bvh8.bvh.verts[primitiveIndex * 3 + 1];
-				bvh8Tris[triDataPtr++] = bvh8.bvh.verts[primitiveIndex * 3 + 2];
+				bvh8Tris[triDataPtr] = t, triDataPtr += 3;
 			#endif
 			}
 		}
@@ -5402,7 +5399,6 @@ void BVH_Verbose::MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32
 		MergeSubtree( node.right, newIdx, newIdxPtr );
 	}
 }
-
 } // namespace tinybvh
 
 #ifdef __GNUC__
