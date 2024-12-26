@@ -26,6 +26,7 @@
     <ClInclude Include="..\tiny_ocl.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\tools.cl" />
     <None Include="..\traverse.cl" />
     <None Include="..\wavefront.cl" />
   </ItemGroup>
