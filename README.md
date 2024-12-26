@@ -1,6 +1,3 @@
-# dev
-This is the **development branch** of tinybvh.
-
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
@@ -152,6 +149,9 @@ Plans, ordered by priority:
 # tinybvh in the Wild
 A list of projects using tinybvh:
 * [unity-tinybvh](https://github.com/andr3wmac/unity-tinybvh): An example implementation for tinybvh in Unity and a foundation for building compute based raytracing solutions, by Andrew MacIntyre.
+
+# tinybvh Rust bindings
+The tinybvh library can now also be used from Rust, with the [Rust bindings](https://docs.rs/tinybvh-rs/latest/tinybvh_rs) provided by David Peicho.
 
 Created or know about other projects? [Let me know](mailto:bikker.j@gmail.com)!
 
