@@ -101,8 +101,13 @@ void kernel Extend( global struct PathState* raysIn )
 		if (pathId < 0) break; // someone else could have decreased it before us.
 		const float4 O4 = raysIn[pathId].O;
 		const float4 D4 = raysIn[pathId].D;
+	#ifdef SIMD_AABBTEST
+		const float4 rD4 = native_recip( D4 );
+		raysIn[pathId].hit = traverse_cwbvh( cwbvhNodes, cwbvhTris, O4, D4, rD4, 1e30f );
+	#else
 		const float3 rD = native_recip( D4.xyz );
 		raysIn[pathId].hit = traverse_cwbvh( cwbvhNodes, cwbvhTris, O4.xyz, D4.xyz, rD, 1e30f );
+	#endif
 	}
 }
 
@@ -255,8 +260,13 @@ void kernel Connect( global float4* accumulator, global struct Potential* shadow
 		const int rayId = atomic_dec( &connectTasks ) - 1;
 		if (rayId < 0) break;
 		const float4 T4 = shadowIn[rayId].T, O4 = shadowIn[rayId].O, D4 = shadowIn[rayId].D;
+	#ifdef SIMD_AABBTEST
+		const float4 rD4 = native_recip( D4 );
+		if (isoccluded_cwbvh( cwbvhNodes, cwbvhTris, O4, D4, rD4, D4.w )) continue;
+	#else
 		const float3 rD = native_recip( D4.xyz );
 		if (isoccluded_cwbvh( cwbvhNodes, cwbvhTris, O4.xyz, D4.xyz, rD, D4.w )) continue;
+	#endif
 		accumulator[as_uint( O4.w )] += T4;
 	}
 }

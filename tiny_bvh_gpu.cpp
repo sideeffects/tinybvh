@@ -96,6 +96,9 @@ void Init()
 	AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0x2ffff88 );
 	AddQuad( bvhvec3( 0, 30, -1 ), 9, 5, 0x1ffffff ); // hard-coded light source
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
+#if 1
+	bvh.Build( tris, triCount );
+#else
 	if (!bvh.Load( "cwbvh.bin" ))
 	{
 		// optimizing a BVH: from BVH to BVH_Verbose, optimize, then back to BVH.
@@ -106,11 +109,12 @@ void Init()
 		verbose.Optimize( 1000000 ); // this will take a while: Next time, use cache.
 		bvh2.ConvertFrom( verbose );
 		// building a cwbvh without the convenient constructor: From BVH, via BVH8.
-		BVH8 bvh8;
+		MBVH<8> bvh8;
 		bvh8.ConvertFrom( bvh2 );
 		bvh.ConvertFrom( bvh8 );
 		bvh.Save( "cwbvh.bin" );
-	}
+}
+#endif
 	// create OpenCL buffers for BVH data
 	cwbvhNodes = new Buffer( bvh.usedBlocks * sizeof( bvhvec4 ), bvh.bvh8Data );
 	cwbvhTris = new Buffer( bvh.idxCount * 3 * sizeof( bvhvec4 ), bvh.bvh8Tris );
