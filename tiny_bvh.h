@@ -82,6 +82,7 @@ THE SOFTWARE.
 
 // Binned BVH building: bin count.
 #define BVHBINS 8
+#define AVXBINS 8 // must stay at 8.
 
 // SAH BVH building: Heuristic parameters
 // CPU builds: C_INT = 1, C_TRAV = 1 seems optimal.
@@ -389,10 +390,12 @@ static inline double dot( const bvhdbl3& a, const bvhdbl3& b ) { return a.x * b.
 // SIMD typedef, helps keeping the interface generic
 #ifdef BVH_USEAVX
 typedef __m128 SIMDVEC4;
+typedef __m256 SIMDVEC8;
 #define SIMD_SETVEC(a,b,c,d) _mm_set_ps( a, b, c, d )
 #define SIMD_SETRVEC(a,b,c,d) _mm_set_ps( d, c, b, a )
 #elif defined(BVH_USENEON)
 typedef float32x4_t SIMDVEC4;
+typedef float32x4x2_t SIMDVEC8;
 inline float32x4_t SIMD_SETVEC( float w, float z, float y, float x )
 {
 	ALIGNED( 64 ) float data[4] = { x, y, z, w };
@@ -830,34 +833,6 @@ public:
 	bool ownBVH4 = true;			// False when ConvertFrom receives an external bvh4.
 };
 
-class BVH4_WiVe : public BVHBase
-{
-public:
-	struct BVHNode
-	{
-		// 4-way BVH node, optimized for CPU rendering.
-		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units",
-		// Fuetterling1 et al., 2017.
-		union { SIMDVEC4 xmin4; float xmin[4]; };
-		union { SIMDVEC4 xmax4; float xmax[4]; };
-		union { SIMDVEC4 ymin4; float ymin[4]; };
-		union { SIMDVEC4 ymax4; float ymax[4]; };
-		union { SIMDVEC4 zmin4; float zmin[4]; };
-		union { SIMDVEC4 zmax4; float zmax[4]; };
-		// ORSTRec rec[4];
-	};
-	BVH4_WiVe( BVHContext ctx = {} ) { context = ctx; }
-	~BVH4_WiVe() { AlignedFree( bvh4Node ); }
-	BVH4_WiVe( const bvhvec4* vertices, const uint32_t primCount );
-	BVH4_WiVe( const bvhvec4slice& vertices );
-	int32_t Intersect( Ray& ray ) const;
-	bool IsOccluded( const Ray& ray ) const;
-	// BVH4 data
-	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
-	uint32_t* triIdx = 0;			// primitive index array - pointer copied from original.
-	BVHNode* bvh4Node = 0;			// 128-byte 4-wide BVH node for efficient CPU rendering.
-};
-
 class BVH8_CWBVH : public BVHBase
 {
 public:
@@ -894,6 +869,63 @@ public:
 	bvhvec3 TransformPoint( const bvhvec3& v ) const;
 	bvhvec3 TransformVector( const bvhvec3& v ) const;
 };
+
+// Experimental & 'under construction' structs
+
+class BVH4_WiVe : public BVHBase
+{
+public:
+	struct BVHNode
+	{
+		// 4-way BVH node, optimized for CPU rendering.
+		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units",
+		// Fuetterling1 et al., 2017.
+		union { SIMDVEC4 xmin4; float xmin[4]; };
+		union { SIMDVEC4 xmax4; float xmax[4]; };
+		union { SIMDVEC4 ymin4; float ymin[4]; };
+		union { SIMDVEC4 ymax4; float ymax[4]; };
+		union { SIMDVEC4 zmin4; float zmin[4]; };
+		union { SIMDVEC4 zmax4; float zmax[4]; };
+		// ORSTRec rec[4];
+	};
+	BVH4_WiVe( BVHContext ctx = {} ) { context = ctx; }
+	~BVH4_WiVe() { AlignedFree( bvh4Node ); }
+	BVH4_WiVe( const bvhvec4* vertices, const uint32_t primCount );
+	BVH4_WiVe( const bvhvec4slice& vertices );
+	int32_t Intersect( Ray& ray ) const;
+	bool IsOccluded( const Ray& ray ) const;
+	// BVH4 data
+	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
+	uint32_t* triIdx = 0;			// primitive index array - pointer copied from original.
+	BVHNode* bvh4Node = 0;			// 128-byte 4-wide BVH node for efficient CPU rendering.
+};
+
+class QBVH6
+{
+public:
+	// based on https://github.com/RenderKit/embree/blob/master/kernels/rthwif/rtbuild/qnode.h
+	struct QBVH6BasicNode
+	{
+		// 16 bytes specify the quantization grid
+		bvhvec3 lower;				// world space origin of quantization grid
+		int8_t exp_x;				// 2^exp_x is the size of the grid in x dimension
+		int8_t exp_y;				// 2^exp_y is the size of the grid in y dimension
+		int8_t exp_z;				// 2^exp_z is the size of the grid in z dimension
+		uint8_t pad;				// unused byte
+		// 12 bytes for...
+		uint32_t childPtr;			// offset to consequtive list of child nodes, in 64-byte multiples
+		uint32_t primCount;			// 6x4=24bit prim count (1..16) for each leaf node, 8 bits: offset of leaf 6.
+		uint32_t offset;			// 4x8=32bit leaf 1, 2, 3, 4 offsets (leaf 0 offset = 0).
+		// 36 bytes of quantized child node bounds
+		uint8_t lower_x[6];			// the quantized lower bounds in x-dimension
+		uint8_t upper_x[6];			// the quantized upper bounds in x-dimension
+		uint8_t lower_y[6];			// the quantized lower bounds in y-dimension
+		uint8_t upper_y[6];			// the quantized upper bounds in y-dimension
+		uint8_t lower_z[6];			// the quantized lower bounds in z-dimension
+		uint8_t upper_z[6];			// the quantized upper bounds in z-dimension	
+	};
+};
+
 } // namespace tinybvh
 
 // ============================================================================
@@ -3046,12 +3078,12 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildAVX( .. ), primCount == 0." );
 	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildAVX( .. ), stride must be multiple of 16." );
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildAVX( .. ), primCount == 0." );
-	int32_t test = BVHBINS;
-	if (test != 8) assert( false ); // AVX builders require BVHBINS == 8.
+	int32_t test = AVXBINS;
+	if (test != 8) assert( false ); // AVX builders require AVXBINS == 8.
 	// aligned data
-	ALIGNED( 64 ) __m256 binbox[3 * BVHBINS];			// 768 bytes
-	ALIGNED( 64 ) __m256 binboxOrig[3 * BVHBINS];		// 768 bytes
-	ALIGNED( 64 ) uint32_t count[3][BVHBINS]{};			// 96 bytes
+	ALIGNED( 64 ) __m256 binbox[3 * AVXBINS];			// 768 bytes
+	ALIGNED( 64 ) __m256 binboxOrig[3 * AVXBINS];		// 768 bytes
+	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};			// 96 bytes
 	ALIGNED( 64 ) __m256 bestLBox, bestRBox;			// 64 bytes
 	// some constants
 	static const __m128 max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
@@ -3059,10 +3091,10 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
 	static const __m128 signFlip4 = _mm_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f );
 	static const __m128 mask3 = _mm_cmpeq_ps( _mm_setr_ps( 0, 0, 0, 1 ), _mm_setzero_ps() );
-	static const __m128 binmul3 = _mm_set1_ps( BVHBINS * 0.49999f );
+	static const __m128 binmul3 = _mm_set1_ps( AVXBINS * 0.49999f );
 	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR );
 	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
-	for (uint32_t i = 0; i < 3 * BVHBINS; i++) binboxOrig[i] = max8; // binbox initialization template
+	for (uint32_t i = 0; i < 3 * AVXBINS; i++) binboxOrig[i] = max8; // binbox initialization template
 	// reset node pool
 	const uint32_t primCount = vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2;
@@ -3126,29 +3158,29 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 			#if defined __GNUC__ || _MSC_VER < 1920
 				if (fid > triCount) fid = triCount - 1; // never happens but g++ *and* vs2017 need this to not crash...
 			#endif
-				const __m256 b0 = binbox[i0], b1 = binbox[BVHBINS + i1], b2 = binbox[2 * BVHBINS + i2];
+				const __m256 b0 = binbox[i0], b1 = binbox[AVXBINS + i1], b2 = binbox[2 * AVXBINS + i2];
 				const __m128 fmin = frag4[fid].bmin4, fmax = frag4[fid].bmax4;
 				r0 = _mm256_max_ps( b0, f ), r1 = _mm256_max_ps( b1, f ), r2 = _mm256_max_ps( b2, f );
 				const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_sub_ps( fmax, fmin ), nmin4 ), rpd4 ), half4 ) );
 				const __m128i b4c = _mm_max_epi32( _mm_min_epi32( bi4, maxbin4 ), _mm_setzero_si128() ); // clamp needed after all
 				f = frag8[fid], count[0][i0]++, count[1][i1]++, count[2][i2]++;
 				binbox[i0] = r0, i0 = ILANE( b4c, 0 );
-				binbox[BVHBINS + i1] = r1, i1 = ILANE( b4c, 1 );
-				binbox[2 * BVHBINS + i2] = r2, i2 = ILANE( b4c, 2 );
+				binbox[AVXBINS + i1] = r1, i1 = ILANE( b4c, 1 );
+				binbox[2 * AVXBINS + i2] = r2, i2 = ILANE( b4c, 2 );
 			}
 			// final business for final fragment
-			const __m256 b0 = binbox[i0], b1 = binbox[BVHBINS + i1], b2 = binbox[2 * BVHBINS + i2];
+			const __m256 b0 = binbox[i0], b1 = binbox[AVXBINS + i1], b2 = binbox[2 * AVXBINS + i2];
 			count[0][i0]++, count[1][i1]++, count[2][i2]++;
 			r0 = _mm256_max_ps( b0, f ), r1 = _mm256_max_ps( b1, f ), r2 = _mm256_max_ps( b2, f );
-			binbox[i0] = r0, binbox[BVHBINS + i1] = r1, binbox[2 * BVHBINS + i2] = r2;
+			binbox[i0] = r0, binbox[AVXBINS + i1] = r1, binbox[2 * AVXBINS + i2] = r2;
 			// calculate per-split totals
 			float splitCost = BVH_FAR, rSAV = 1.0f / node.SurfaceArea();
 			uint32_t bestAxis = 0, bestPos = 0, n = newNodePtr, j = node.leftFirst + node.triCount, src = node.leftFirst;
 			const __m256* bb = binbox;
-			for (int32_t a = 0; a < 3; a++, bb += BVHBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
+			for (int32_t a = 0; a < 3; a++, bb += AVXBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
 			{
-				// hardcoded bin processing for BVHBINS == 8
-				assert( BVHBINS == 8 );
+				// hardcoded bin processing for AVXBINS == 8
+				assert( AVXBINS == 8 );
 				const uint32_t lN0 = count[a][0], rN0 = count[a][7];
 				const __m256 lb0 = bb[0], rb0 = bb[7];
 				const uint32_t lN1 = lN0 + count[a][1], rN1 = rN0 + count[a][6], lN2 = lN1 + count[a][2];
@@ -4146,12 +4178,12 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
 	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildNEON( .. ), stride must be multiple of 16." );
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
-	int32_t test = BVHBINS;
-	if (test != 8) assert( false ); // AVX builders require BVHBINS == 8.
+	int32_t test = AVXBINS;
+	if (test != 8) assert( false ); // AVX builders require AVXBINS == 8.
 	// aligned data
-	ALIGNED( 64 ) float32x4x2_t binbox[3 * BVHBINS];		// 768 bytes
-	ALIGNED( 64 ) float32x4x2_t binboxOrig[3 * BVHBINS];	// 768 bytes
-	ALIGNED( 64 ) uint32_t count[3][BVHBINS]{};				// 96 bytes
+	ALIGNED( 64 ) float32x4x2_t binbox[3 * AVXBINS];		// 768 bytes
+	ALIGNED( 64 ) float32x4x2_t binboxOrig[3 * AVXBINS];	// 768 bytes
+	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};				// 96 bytes
 	ALIGNED( 64 ) float32x4x2_t bestLBox, bestRBox;			// 64 bytes
 	// some constants
 	static const float32x4_t max4 = vdupq_n_f32( -BVH_FAR ), half4 = vdupq_n_f32( 0.5f );
@@ -4160,8 +4192,8 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	static const float32x4_t signFlip4 = SIMD_SETRVEC( -0.0f, -0.0f, -0.0f, 0.0f );
 	static const float32x4x2_t signFlip8 = { signFlip4, vdupq_n_f32( 0 ) }; // TODO: Check me
 	static const float32x4_t mask3 = vceqq_f32( SIMD_SETRVEC( 0, 0, 0, 1 ), vdupq_n_f32( 0 ) );
-	static const float32x4_t binmul3 = vdupq_n_f32( BVHBINS * 0.49999f );
-	for (uint32_t i = 0; i < 3 * BVHBINS; i++) binboxOrig[i] = max8; // binbox initialization template
+	static const float32x4_t binmul3 = vdupq_n_f32( AVXBINS * 0.49999f );
+	for (uint32_t i = 0; i < 3 * AVXBINS; i++) binboxOrig[i] = max8; // binbox initialization template
 	// reset node pool
 	const uint32_t primCount = vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2;
@@ -4228,8 +4260,8 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 				if (fid > triCount) fid = triCount - 1; // TODO: shouldn't be needed...
 			#endif
 				const float32x4x2_t b0 = binbox[i0];
-				const float32x4x2_t b1 = binbox[BVHBINS + i1];
-				const float32x4x2_t b2 = binbox[2 * BVHBINS + i2];
+				const float32x4x2_t b1 = binbox[AVXBINS + i1];
+				const float32x4x2_t b2 = binbox[2 * AVXBINS + i2];
 				const float32x4_t fmin = frag4[fid].bmin4, fmax = frag4[fid].bmax4;
 				r0 = vmaxq_f32x2( b0, f );
 				r1 = vmaxq_f32x2( b1, f );
@@ -4237,24 +4269,24 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 				const int32x4_t b4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vsubq_f32( fmax, fmin ), nmin4 ), rpd4 ), half4 ) ) );
 				f = frag8[fid], count[0][i0]++, count[1][i1]++, count[2][i2]++;
 				binbox[i0] = r0, i0 = (uint32_t)(tinybvh_clamp( ILANE( b4, 0 ), 0, 7 ));
-				binbox[BVHBINS + i1] = r1, i1 = (uint32_t)(tinybvh_clamp( ILANE( b4, 1 ), 0, 7 ));
-				binbox[2 * BVHBINS + i2] = r2, i2 = (uint32_t)(tinybvh_clamp( ILANE( b4, 2 ), 0, 7 ));
+				binbox[AVXBINS + i1] = r1, i1 = (uint32_t)(tinybvh_clamp( ILANE( b4, 1 ), 0, 7 ));
+				binbox[2 * AVXBINS + i2] = r2, i2 = (uint32_t)(tinybvh_clamp( ILANE( b4, 2 ), 0, 7 ));
 			}
 			// final business for final fragment
-			const float32x4x2_t b0 = binbox[i0], b1 = binbox[BVHBINS + i1], b2 = binbox[2 * BVHBINS + i2];
+			const float32x4x2_t b0 = binbox[i0], b1 = binbox[AVXBINS + i1], b2 = binbox[2 * AVXBINS + i2];
 			count[0][i0]++, count[1][i1]++, count[2][i2]++;
 			r0 = vmaxq_f32x2( b0, f );
 			r1 = vmaxq_f32x2( b1, f );
 			r2 = vmaxq_f32x2( b2, f );
-			binbox[i0] = r0, binbox[BVHBINS + i1] = r1, binbox[2 * BVHBINS + i2] = r2;
+			binbox[i0] = r0, binbox[AVXBINS + i1] = r1, binbox[2 * AVXBINS + i2] = r2;
 			// calculate per-split totals
 			float splitCost = BVH_FAR, rSAV = 1.0f / node.SurfaceArea();
 			uint32_t bestAxis = 0, bestPos = 0, n = newNodePtr, j = node.leftFirst + node.triCount, src = node.leftFirst;
 			const float32x4x2_t* bb = binbox;
-			for (int32_t a = 0; a < 3; a++, bb += BVHBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
+			for (int32_t a = 0; a < 3; a++, bb += AVXBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
 			{
-				// hardcoded bin processing for BVHBINS == 8
-				assert( BVHBINS == 8 );
+				// hardcoded bin processing for AVXBINS == 8
+				assert( AVXBINS == 8 );
 				const uint32_t lN0 = count[a][0], rN0 = count[a][7];
 				const float32x4x2_t lb0 = bb[0], rb0 = bb[7];
 				const uint32_t lN1 = lN0 + count[a][1], rN1 = rN0 + count[a][6], lN2 = lN1 + count[a][2];

@@ -18,7 +18,8 @@ global float4* cwbvhNodes;
 global float4* cwbvhTris;
 global uint* blueNoise;
 global volatile int extendTasks, shadeTasks, connectTasks; // atomic counters
-const float3 lightColor = (float3)(15,15,14);
+const float3 lightColor = (float3)(25,25,22);
+const float3 lightPos = (float3)(-22, 12, 2);
 
 // Blue noise interface for fixed 128x128x8 dataset.
 float2 Noise( const uint x, const uint y, const uint page /* 0..7 */ )
@@ -202,7 +203,7 @@ void kernel Shade( global float4* accumulator,
 		// direct illumination: next event estimation
 		if (materialType != MATERIAL_SPECULAR)
 		{
-			float3 P = (float3)(r0 * 9.0f - 4.5f, 30, r1 * 5.0f - 3.5f);
+			float3 P = lightPos + (float3)(r0 * 9.0f - 4.5f, 0, r1 * 5.0f - 2.5f);
 			float3 L = P - I;
 			float dist2 = dot( L, L ), dist = sqrt( dist2 );
 			L *= native_recip( dist );
