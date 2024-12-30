@@ -940,10 +940,9 @@ public:
 		uint8_t lower_y[6];			// the quantized lower bounds in y-dimension
 		uint8_t upper_y[6];			// the quantized upper bounds in y-dimension
 		uint8_t lower_z[6];			// the quantized lower bounds in z-dimension
-		uint8_t upper_z[6];			// the quantized upper bounds in z-dimension	
+		uint8_t upper_z[6];			// the quantized upper bounds in z-dimension
 	};
 };
-
 } // namespace tinybvh
 
 // ============================================================================
@@ -1231,7 +1230,7 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 }
 
 // Basic single-function binned-SAH-builder.
-// This is the reference builder; it yields a decent tree suitable for ray tracing on the CPU. 
+// This is the reference builder; it yields a decent tree suitable for ray tracing on the CPU.
 // This code uses no SIMD instructions. Faster code, using SSE/AVX, is available for x64 CPUs.
 // For GPU rendering: The resulting BVH should be converted to a more optimal
 // format after construction, e.g. BVH_GPU, BVH4_GPU or BVH8_CWBVH.
@@ -1279,6 +1278,7 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 	verts = vertices, idxCount = triCount = primCount;
 	// prepare fragments
 	BVHNode& root = bvhNode[0];
+	root.leftFirst = 0, root.triCount = triCount, root.aabbMin = bvhvec3( BVH_FAR ), root.aabbMax = bvhvec3( -BVH_FAR );
 	if (!indices)
 	{
 		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareBuild( .. ), primCount == 0." );
@@ -1308,11 +1308,10 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 			fragment[i].bmin = fmin, fragment[i].bmax = fmax;
 			root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
 			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
-		}		
+		}
 	}
-	root.leftFirst = 0, root.triCount = triCount, root.aabbMin = bvhvec3( BVH_FAR ), root.aabbMax = bvhvec3( -BVH_FAR );
 	// reset node pool
-	uint32_t newNodePtr = 2;
+	newNodePtr = 2;
 	// all set; actual build happens in BVH::Build.
 }
 void BVH::Build()
@@ -3473,10 +3472,10 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 			// consider a spatial split
 			bool spatial = false;
 			uint32_t NL[BVHBINS - 1], NR[BVHBINS - 1], budget = sliceEnd - sliceStart;
-			bvhvec3 bestLMin = bvhvec3( LANE8( bestLBox, 0 ), LANE8( bestLBox, 1 ), LANE8( bestLBox, 2 ) ) * -1.0f;  
-			bvhvec3 bestLMax = bvhvec3( LANE8( bestLBox, 4 ), LANE8( bestLBox, 5 ), LANE8( bestLBox, 6 ) );  
-			bvhvec3 bestRMin = bvhvec3( LANE8( bestRBox, 0 ), LANE8( bestRBox, 1 ), LANE8( bestRBox, 2 ) ) * -1.0f;  
-			bvhvec3 bestRMax = bvhvec3( LANE8( bestRBox, 4 ), LANE8( bestRBox, 5 ), LANE8( bestRBox, 6 ) );  
+			bvhvec3 bestLMin = bvhvec3( LANE8( bestLBox, 0 ), LANE8( bestLBox, 1 ), LANE8( bestLBox, 2 ) ) * -1.0f;
+			bvhvec3 bestLMax = bvhvec3( LANE8( bestLBox, 4 ), LANE8( bestLBox, 5 ), LANE8( bestLBox, 6 ) );
+			bvhvec3 bestRMin = bvhvec3( LANE8( bestRBox, 0 ), LANE8( bestRBox, 1 ), LANE8( bestRBox, 2 ) ) * -1.0f;
+			bvhvec3 bestRMax = bvhvec3( LANE8( bestRBox, 4 ), LANE8( bestRBox, 5 ), LANE8( bestRBox, 6 ) );
 			bvhvec3 spatialUnion = bestLMax - bestRMin; // TODO: probably a faster way to do this.
 			float spatialOverlap = (spatialUnion.halfArea()) / rootArea;
 			if (budget > node.triCount && splitCost < 1e30f && spatialOverlap > 1e-5f)
