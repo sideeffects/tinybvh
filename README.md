@@ -72,13 +72,13 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.1.4
+# Version 1.1.5
 
 Version 1.1.0 introduced a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. You can simply instantiate the desired layout; conversion (and data ownership) is then handled properly by the library. Examples:
 
 ````
 BVH bvh;
-bvh.Build( (bvhvec4*)myTriData, triangleCount );
+bvh.Build( (bvhvec4*)myTriData, triangleCount ); // or: BuildHQ( .. )
 bvh.Intersect( ray );
 ````
 

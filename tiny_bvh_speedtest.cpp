@@ -14,12 +14,12 @@
 
 // tests to perform
 // #define BUILD_MIDPOINT
-// #define BUILD_REFERENCE
-// #define BUILD_DOUBLE
+#define BUILD_REFERENCE
+#define BUILD_DOUBLE
 #define BUILD_AVX
-// #define BUILD_NEON
+#define BUILD_NEON
 #define BUILD_SBVH
-#define BUILD_AVX_SBVH
+// #define BUILD_AVX_SBVH
 #define TRAVERSE_2WAY_ST
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST

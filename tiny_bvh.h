@@ -117,7 +117,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	1
-#define TINY_BVH_VERSION_SUB	4
+#define TINY_BVH_VERSION_SUB	5
 
 // ============================================================================
 //
