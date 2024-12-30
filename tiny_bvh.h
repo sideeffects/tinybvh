@@ -4591,7 +4591,9 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 			// main loop operates on two fragments to minimize dependencies and maximize ILP.
 			uint32_t fi = triIdx[node.leftFirst];
 			memset( count, 0, sizeof( count ) );
-			float32x4x2_t r0, r1, r2, f = frag8[fi]; //  TODO: = veorq_s32x2( signFlip8, frag8[fi] );
+			Fragment tmp = fragment[fi];
+			tmp.bmin *= -1.0f;
+			float32x4x2_t r0, r1, r2, f = *(float32x4x2_t*)&tmp; //  TODO: = veorq_s32x2( signFlip8, frag8[fi] );
 			int32x4_t bi4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vaddq_f32( frag4[fi].bmax4, frag4[fi].bmin4 ), nmin4 ), rpd4 ), half4 ) ) );
 			memcpy( binbox, binboxOrig, sizeof( binbox ) );
 			uint32_t i0 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 0 ), 0, 7 ));
@@ -4612,7 +4614,10 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 				r1 = vmaxq_f32x2( b1, f );
 				r2 = vmaxq_f32x2( b2, f );
 				const int32x4_t b4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vaddq_f32( fmax, fmin ), nmin4 ), rpd4 ), half4 ) ) );
-				f = frag8[fid], /* TODO: veorq_s32x2( signFlip8, frag8[fid] ), */ count[0][i0]++, count[1][i1]++, count[2][i2]++;
+				Fragment tmp = fragment[fid];
+				tmp.bmin *= -1.0f;
+				f = *(float32x4x2_t*)&tmp; // TODO: veorq_s32x2( signFlip8, frag8[fid] )
+				count[0][i0]++, count[1][i1]++, count[2][i2]++;
 				binbox[i0] = r0, i0 = (uint32_t)(tinybvh_clamp( ILANE( b4, 0 ), 0, 7 ));
 				binbox[AVXBINS + i1] = r1, i1 = (uint32_t)(tinybvh_clamp( ILANE( b4, 1 ), 0, 7 ));
 				binbox[2 * AVXBINS + i2] = r2, i2 = (uint32_t)(tinybvh_clamp( ILANE( b4, 2 ), 0, 7 ));
