@@ -14,11 +14,12 @@
 
 // tests to perform
 // #define BUILD_MIDPOINT
-#define BUILD_REFERENCE
-#define BUILD_DOUBLE
+// #define BUILD_REFERENCE
+// #define BUILD_DOUBLE
 #define BUILD_AVX
 // #define BUILD_NEON
 #define BUILD_SBVH
+#define BUILD_AVX_SBVH
 #define TRAVERSE_2WAY_ST
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
@@ -465,8 +466,7 @@ int main()
 
 #endif
 
-#ifdef BUILD_AVX
-#ifdef BVH_USEAVX
+#if defined BUILD_AVX && defined BVH_USEAVX
 
 	// measure single-core bvh construction time - AVX builder
 	printf( "- fast AVX builder:  " );
@@ -476,7 +476,6 @@ int main()
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
 	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
 
-#endif
 #endif
 
 #ifdef BUILD_NEON
@@ -499,6 +498,18 @@ int main()
 	printf( "- HQ (SBVH) builder: " );
 	t.reset();
 	for (int pass = 0; pass < 3; pass++) bvh->BuildHQ( triangles, verts / 3 );
+	buildTime = t.elapsed() / 3.0f;
+	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
+	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
+
+#endif
+
+#if defined BUILD_AVX_SBVH && defined BVH_USEAVX
+
+	// measure single-core bvh construction time - AVX builder
+	printf( "- AVX SBVH builder:  " );
+	t.reset();
+	for (int pass = 0; pass < 3; pass++) bvh->BuildHQAVX( triangles, verts / 3 );
 	buildTime = t.elapsed() / 3.0f;
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
 	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );

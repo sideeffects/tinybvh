@@ -505,7 +505,6 @@ public:
 	// BVH flags, maintainted by tiny_bvh.
 	bool rebuildable = true;		// rebuilds are safe only if a tree has not been converted.
 	bool refittable = true;			// refits are safe only if the tree has no spatial splits.
-	bool frag_min_flipped = false;	// AVX builders flip aabb min.
 	bool may_have_holes = false;	// threaded builds and MergeLeafs produce BVHs with unused nodes.
 	bool bvh_over_aabbs = false;	// a BVH over AABBs is useful for e.g. TLAS traversal.
 	BVHContext context;				// context used to provide user-defined allocation functions
@@ -580,6 +579,8 @@ public:
 #ifdef BVH_USEAVX
 	void BuildAVX( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildAVX( const bvhvec4slice& vertices );
+	void BuildHQAVX( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQAVX( const bvhvec4slice& vertices );
 #elif defined BVH_USENEON
 	void BuildNEON( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildNEON( const bvhvec4slice& vertices );
@@ -668,6 +669,8 @@ public:
 	~BVH_GPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
@@ -693,6 +696,8 @@ public:
 	~BVH_SoA();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
@@ -759,6 +764,8 @@ public:
 	~MBVH();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
 	void SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims );
 	// BVH data
@@ -794,6 +801,8 @@ public:
 	~BVH4_GPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const MBVH<4>& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
@@ -823,6 +832,8 @@ public:
 	~BVH4_CPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const MBVH<4>& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
@@ -843,6 +854,8 @@ public:
 	bool Load( const char* fileName );
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( MBVH<8>& original ); // NOTE: Not const; this may change some nodes in the original.
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
@@ -1005,7 +1018,6 @@ void BVHBase::CopyBasePropertiesFrom( const BVHBase& original )
 {
 	this->rebuildable = original.rebuildable;
 	this->refittable = original.refittable;
-	this->frag_min_flipped = original.frag_min_flipped;
 	this->may_have_holes = original.may_have_holes;
 	this->bvh_over_aabbs = original.bvh_over_aabbs;
 	this->context = original.context;
@@ -1209,7 +1221,6 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 	}
 	// all done.
 	refittable = true; // not using spatial splits: can refit this BVH
-	frag_min_flipped = false; // did not use AVX for binning
 	may_have_holes = false; // the reference builder produces a continuous list of nodes
 	usedNodes = newNodePtr;
 }
@@ -1361,7 +1372,6 @@ void BVH::Build( const bvhvec4slice& vertices )
 	}
 	// all done.
 	refittable = true; // not using spatial splits: can refit this BVH
-	frag_min_flipped = false; // did not use AVX for binning
 	may_have_holes = false; // the reference builder produces a continuous list of nodes
 	bvh_over_aabbs = (verts == 0); // bvh over aabbs is suitable as TLAS
 	usedNodes = newNodePtr;
@@ -1450,7 +1460,7 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 				binMax[2][bi.z] = tinybvh_max( binMax[2][bi.z], fragment[fi].bmax ), count[2][bi.z]++;
 			}
 			// calculate per-split totals
-			float splitCost = BVH_FAR, rSAV = 1.0f / node.SurfaceArea();
+			float splitCost = 1e30f, rSAV = 1.0f / node.SurfaceArea();
 			uint32_t bestAxis = 0, bestPos = 0;
 			for (int32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
 			{
@@ -1483,7 +1493,7 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 			uint32_t NL[BVHBINS - 1], NR[BVHBINS - 1], budget = sliceEnd - sliceStart;
 			bvhvec3 spatialUnion = bestLMax - bestRMin;
 			float spatialOverlap = (spatialUnion.halfArea()) / rootArea;
-			if (budget > node.triCount && splitCost < BVH_FAR && spatialOverlap > 1e-5f)
+			if (budget > node.triCount && splitCost < 1e30f && spatialOverlap > 1e-5f)
 			{
 				for (uint32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
 				{
@@ -1610,7 +1620,6 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 	// Compact(); - TODO
 	// all done.
 	refittable = false; // can't refit an SBVH
-	frag_min_flipped = false; // did not use AVX for binning
 	may_have_holes = false; // there may be holes in the index list, but not in the node list
 	usedNodes = newNodePtr;
 }
@@ -2085,7 +2094,6 @@ void BVH_Verbose::Optimize( const uint32_t iterations )
 void BVH_Verbose::SplitLeafs( const uint32_t maxPrims )
 {
 	uint32_t nodeIdx = 0, stack[64], stackPtr = 0;
-	float fragMinFix = frag_min_flipped ? -1.0f : 1.0f;
 	while (1)
 	{
 		BVHNode& node = bvhNode[nodeIdx];
@@ -2104,11 +2112,11 @@ void BVH_Verbose::SplitLeafs( const uint32_t maxPrims )
 				new1.aabbMin = new2.aabbMin = BVH_FAR, new1.aabbMax = new2.aabbMax = -BVH_FAR;
 				for (uint32_t fi, i = 0; i < new1.triCount; i++)
 					fi = triIdx[new1.firstTri + i],
-					new1.aabbMin = tinybvh_min( new1.aabbMin, fragment[fi].bmin * fragMinFix ),
+					new1.aabbMin = tinybvh_min( new1.aabbMin, fragment[fi].bmin ),
 					new1.aabbMax = tinybvh_max( new1.aabbMax, fragment[fi].bmax );
 				for (uint32_t fi, i = 0; i < new2.triCount; i++)
 					fi = triIdx[new2.firstTri + i],
-					new2.aabbMin = tinybvh_min( new2.aabbMin, fragment[fi].bmin * fragMinFix ),
+					new2.aabbMin = tinybvh_min( new2.aabbMin, fragment[fi].bmin ),
 					new2.aabbMax = tinybvh_max( new2.aabbMax, fragment[fi].bmax );
 				// recurse
 				if (new1.triCount > 1) stack[stackPtr++] = newIdx1;
@@ -2189,6 +2197,15 @@ void BVH_GPU::Build( const bvhvec4* vertices, const uint32_t primCount )
 void BVH_GPU::Build( const bvhvec4slice& vertices )
 {
 	bvh.BuildDefault( vertices );
+	ConvertFrom( bvh );
+}
+void BVH_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+void BVH_GPU::BuildHQ( const bvhvec4slice& vertices )
+{
+	bvh.BuildHQ( vertices );
 	ConvertFrom( bvh );
 }
 
@@ -2301,6 +2318,16 @@ void BVH_SoA::Build( const bvhvec4slice& vertices )
 	bvh.BuildDefault( vertices );
 	ConvertFrom( bvh );
 }
+void BVH_SoA::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+void BVH_SoA::BuildHQ( const bvhvec4slice& vertices )
+{
+	bvh.context = context; // properly propagate context to fix issue #66.
+	bvh.BuildHQ( vertices );
+	ConvertFrom( bvh );
+}
 
 void BVH_SoA::ConvertFrom( const BVH& original )
 {
@@ -2369,6 +2396,16 @@ template<int M> void MBVH<M>::Build( const bvhvec4slice& vertices )
 {
 	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildDefault( vertices );
+	ConvertFrom( bvh );
+}
+template<int M> void MBVH<M>::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+template<int M> void MBVH<M>::BuildHQ( const bvhvec4slice& vertices )
+{
+	bvh.context = context; // properly propagate context to fix issue #66.
+	bvh.BuildHQ( vertices );
 	ConvertFrom( bvh );
 }
 
@@ -2441,7 +2478,6 @@ template<int M> void MBVH<M>::ConvertFrom( const BVH& original )
 // busy leafs recursively in multiple leaves, until the requirement is met.
 template<int M> void MBVH<M>::SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims )
 {
-	float fragMinFix = frag_min_flipped ? -1.0f : 1.0f;
 	const uint32_t* triIdx = bvh.triIdx;
 	const Fragment* fragment = bvh.fragment;
 	MBVHNode& node = mbvhNode[nodeIdx];
@@ -2467,7 +2503,7 @@ template<int M> void MBVH<M>::SplitBVHLeaf( const uint32_t nodeIdx, const uint32
 			// TODO: why is this producing wrong aabbs for SBVH?
 			child.aabbMin = bvhvec3( BVH_FAR ), child.aabbMax = bvhvec3( -BVH_FAR );
 			for (uint32_t fi, j = 0; j < child.triCount; j++) fi = triIdx[child.firstTri + j],
-				child.aabbMin = tinybvh_min( child.aabbMin, fragment[fi].bmin * fragMinFix ),
+				child.aabbMin = tinybvh_min( child.aabbMin, fragment[fi].bmin ),
 				child.aabbMax = tinybvh_max( child.aabbMax, fragment[fi].bmax );
 		}
 	}
@@ -2494,6 +2530,16 @@ void BVH4_CPU::Build( const bvhvec4slice& vertices )
 {
 	bvh4.context = context; // properly propagate context to fix issue #66.
 	bvh4.Build( vertices );
+	ConvertFrom( bvh4 );
+}
+void BVH4_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+void BVH4_CPU::BuildHQ( const bvhvec4slice& vertices )
+{
+	bvh4.context = context; // properly propagate context to fix issue #66.
+	bvh4.BuildHQ( vertices );
 	ConvertFrom( bvh4 );
 }
 
@@ -2599,6 +2645,16 @@ void BVH4_GPU::Build( const bvhvec4slice& vertices )
 {
 	bvh4.context = context; // properly propagate context to fix issue #66.
 	bvh4.Build( vertices );
+	ConvertFrom( bvh4 );
+}
+void BVH4_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+void BVH4_GPU::BuildHQ( const bvhvec4slice& vertices )
+{
+	bvh4.context = context; // properly propagate context to fix issue #66.
+	bvh4.BuildHQ( vertices );
 	ConvertFrom( bvh4 );
 }
 
@@ -2878,6 +2934,16 @@ void BVH8_CWBVH::Build( const bvhvec4slice& vertices )
 	bvh8.Build( vertices );
 	ConvertFrom( bvh8 );
 }
+void BVH8_CWBVH::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+void BVH8_CWBVH::BuildHQ( const bvhvec4slice& vertices )
+{
+	bvh8.context = context; // properly propagate context to fix issue #66.
+	bvh8.BuildHQ( vertices );
+	ConvertFrom( bvh8 );
+}
 
 void BVH8_CWBVH::ConvertFrom( MBVH<8>& original )
 {
@@ -3077,7 +3143,6 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 {
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildAVX( .. ), primCount == 0." );
 	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildAVX( .. ), stride must be multiple of 16." );
-	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildAVX( .. ), primCount == 0." );
 	int32_t test = AVXBINS;
 	if (test != 8) assert( false ); // AVX builders require AVXBINS == 8.
 	// aligned data
@@ -3086,13 +3151,13 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};			// 96 bytes
 	ALIGNED( 64 ) __m256 bestLBox, bestRBox;			// 64 bytes
 	// some constants
-	static const __m128 max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
+	static const __m128 min4 = _mm_set1_ps( BVH_FAR ), max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
 	static const __m128 two4 = _mm_set1_ps( 2.0f ), min1 = _mm_set1_ps( -1 );
 	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
 	static const __m128 signFlip4 = _mm_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f );
 	static const __m128 mask3 = _mm_cmpeq_ps( _mm_setr_ps( 0, 0, 0, 1 ), _mm_setzero_ps() );
 	static const __m128 binmul3 = _mm_set1_ps( AVXBINS * 0.49999f );
-	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR );
+	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR ), mask6 = _mm256_set_m128( mask3, mask3 );
 	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
 	for (uint32_t i = 0; i < 3 * AVXBINS; i++) binboxOrig[i] = max8; // binbox initialization template
 	// reset node pool
@@ -3121,14 +3186,13 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount;
 	// initialize fragments and update root bounds
-	__m128 rootMin = max4, rootMax = max4;
+	__m128 rootMin = min4, rootMax = max4;
 	for (uint32_t i = 0; i < triCount; i++)
 	{
-		const __m128 v1 = _mm_xor_ps( signFlip4, _mm_min_ps( _mm_min_ps( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] ) );
+		const __m128 v1 = _mm_min_ps( _mm_min_ps( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
 		const __m128 v2 = _mm_max_ps( _mm_max_ps( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
-		frag4[i].bmin4 = v1, frag4[i].bmax4 = v2, rootMin = _mm_max_ps( rootMin, v1 ), rootMax = _mm_max_ps( rootMax, v2 ), triIdx[i] = i;
+		frag4[i].bmin4 = v1, frag4[i].bmax4 = v2, rootMin = _mm_min_ps( rootMin, v1 ), rootMax = _mm_max_ps( rootMax, v2 ), triIdx[i] = i;
 	}
-	rootMin = _mm_xor_ps( rootMin, signFlip4 );
 	root.aabbMin = *(bvhvec3*)&rootMin, root.aabbMax = *(bvhvec3*)&rootMax;
 	// subdivide recursively
 	ALIGNED( 64 ) uint32_t task[128], taskCount = 0, nodeIdx = 0;
@@ -3147,8 +3211,9 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 			// main loop operates on two fragments to minimize dependencies and maximize ILP.
 			uint32_t fi = triIdx[node.leftFirst];
 			memset( count, 0, sizeof( count ) );
-			__m256 r0, r1, r2, f = frag8[fi];
-			const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_sub_ps( frag4[fi].bmax4, frag4[fi].bmin4 ), nmin4 ), rpd4 ), half4 ) );
+			__m256 r0, r1, r2, f = _mm256_xor_ps( _mm256_and_ps( frag8[fi], mask6 ), signFlip8 );
+			const __m128 fmin = _mm_and_ps( frag4[fi].bmin4, mask3 ), fmax = _mm_and_ps( frag4[fi].bmax4, mask3 );
+			const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_add_ps( fmax, fmin ), nmin4 ), rpd4 ), half4 ) );
 			const __m128i b4c = _mm_max_epi32( _mm_min_epi32( bi4, maxbin4 ), _mm_setzero_si128() ); // clamp needed after all
 			memcpy( binbox, binboxOrig, sizeof( binbox ) );
 			uint32_t i0 = ILANE( b4c, 0 ), i1 = ILANE( b4c, 1 ), i2 = ILANE( b4c, 2 ), * ti = triIdx + node.leftFirst + 1;
@@ -3159,11 +3224,11 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 				if (fid > triCount) fid = triCount - 1; // never happens but g++ *and* vs2017 need this to not crash...
 			#endif
 				const __m256 b0 = binbox[i0], b1 = binbox[AVXBINS + i1], b2 = binbox[2 * AVXBINS + i2];
-				const __m128 fmin = frag4[fid].bmin4, fmax = frag4[fid].bmax4;
+				const __m128 fmin = _mm_and_ps( frag4[fid].bmin4, mask3 ), fmax = _mm_and_ps( frag4[fid].bmax4, mask3 );
 				r0 = _mm256_max_ps( b0, f ), r1 = _mm256_max_ps( b1, f ), r2 = _mm256_max_ps( b2, f );
-				const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_sub_ps( fmax, fmin ), nmin4 ), rpd4 ), half4 ) );
+				const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_add_ps( fmax, fmin ), nmin4 ), rpd4 ), half4 ) );
 				const __m128i b4c = _mm_max_epi32( _mm_min_epi32( bi4, maxbin4 ), _mm_setzero_si128() ); // clamp needed after all
-				f = frag8[fid], count[0][i0]++, count[1][i1]++, count[2][i2]++;
+				f = _mm256_xor_ps( _mm256_and_ps( frag8[fid], mask6 ), signFlip8 ), count[0][i0]++, count[1][i1]++, count[2][i2]++;
 				binbox[i0] = r0, i0 = ILANE( b4c, 0 );
 				binbox[AVXBINS + i1] = r1, i1 = ILANE( b4c, 1 );
 				binbox[2 * AVXBINS + i2] = r2, i2 = ILANE( b4c, 2 );
@@ -3208,7 +3273,7 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 			uint32_t t, fr = triIdx[src];
 			for (uint32_t i = 0; i < node.triCount; i++)
 			{
-				const uint32_t bi = (uint32_t)((fragment[fr].bmax[bestAxis] - fragment[fr].bmin[bestAxis] - nmin) * rpd);
+				const uint32_t bi = (uint32_t)((fragment[fr].bmax[bestAxis] + fragment[fr].bmin[bestAxis] - nmin) * rpd);
 				if (bi <= bestPos) fr = triIdx[++src]; else t = fr, fr = triIdx[src] = triIdx[--j], triIdx[j] = t;
 			}
 			// create child nodes and recurse
@@ -3226,8 +3291,290 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 	}
 	// all done.
 	refittable = true; // not using spatial splits: can refit this BVH
-	frag_min_flipped = true; // AVX was used for binning; fragment.min flipped
 	may_have_holes = false; // the AVX builder produces a continuous list of nodes
+	usedNodes = newNodePtr;
+}
+
+// BuildHQAVX: This builder uses AVX code to find the optimal object split, then proceeds using
+// scalar code to find a good spatial split. For now the speed benefit is somewhat limited.
+// Additionally, the code produces wrong results when using GCC.. Don't use, for now.
+void BVH::BuildHQAVX( const bvhvec4* vertices, const uint32_t primCount )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices:
+	// in this case, the stride for the slice is 16 bytes.
+	BuildHQAVX( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) } );
+}
+void BVH::BuildHQAVX( const bvhvec4slice& vertices )
+{
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildHQAVX( .. ), primCount == 0." );
+	// aligned data
+	ALIGNED( 64 ) __m256 binbox[3 * AVXBINS];			// 768 bytes
+	ALIGNED( 64 ) __m256 binboxOrig[3 * AVXBINS];		// 768 bytes
+	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};			// 96 bytes
+	ALIGNED( 64 ) __m256 bestLBox, bestRBox;			// 64 bytes
+	// some constants
+	static const __m128 min4 = _mm_set1_ps( BVH_FAR ), max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
+	static const __m128 two4 = _mm_set1_ps( 2.0f ), min1 = _mm_set1_ps( -1 );
+	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
+	static const __m128 signFlip4 = _mm_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f );
+	static const __m128 mask3 = _mm_cmpeq_ps( _mm_setr_ps( 0, 0, 0, 1 ), _mm_setzero_ps() );
+	static const __m128 binmul3 = _mm_set1_ps( AVXBINS * 0.49999f );
+	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR ), mask6 = _mm256_set_m128( mask3, mask3 );
+	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+	for (uint32_t i = 0; i < 3 * AVXBINS; i++) binboxOrig[i] = max8; // binbox initialization template
+	// allocate on first build
+	const uint32_t primCount = vertices.count / 3;
+	const uint32_t slack = primCount >> 2; // for split prims
+	const uint32_t spaceNeeded = primCount * 3;
+	if (allocatedNodes < spaceNeeded)
+	{
+		AlignedFree( bvhNode );
+		AlignedFree( triIdx );
+		AlignedFree( fragment );
+		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
+		allocatedNodes = spaceNeeded;
+		memset( &bvhNode[1], 0, 32 );	// node 1 remains unused, for cache line alignment.
+		triIdx = (uint32_t*)AlignedAlloc( (primCount + slack) * sizeof( uint32_t ) );
+		fragment = (Fragment*)AlignedAlloc( (primCount + slack) * sizeof( Fragment ) );
+	}
+	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildHQAVX( .. ), bvh not rebuildable." );
+	verts = vertices; // note: we're not copying this data; don't delete.
+	idxCount = primCount + slack;
+	triCount = primCount;
+	uint32_t* triIdxA = triIdx, * triIdxB = new uint32_t[triCount + slack];
+	memset( triIdxA, 0, (triCount + slack) * 4 );
+	memset( triIdxB, 0, (triCount + slack) * 4 );
+	// reset node pool
+	uint32_t newNodePtr = 2, nextFrag = triCount;
+	struct FragSSE { __m128 bmin4, bmax4; };
+	FragSSE* frag4 = (FragSSE*)fragment;
+	__m256* frag8 = (__m256*)fragment;
+	const __m128* verts4 = (__m128*)verts.data; // that's why it must be 16-byte aligned.
+	// assign all triangles to the root node
+	BVHNode& root = bvhNode[0];
+	root.leftFirst = 0, root.triCount = triCount;
+	// initialize fragments and update root bounds
+	__m128 rootMin = min4, rootMax = max4;
+	for (uint32_t i = 0; i < triCount; i++)
+	{
+		const __m128 v1 = _mm_min_ps( _mm_min_ps( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
+		const __m128 v2 = _mm_max_ps( _mm_max_ps( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
+		frag4[i].bmin4 = v1, frag4[i].bmax4 = v2, rootMin = _mm_min_ps( rootMin, v1 ), rootMax = _mm_max_ps( rootMax, v2 ), triIdx[i] = i;
+		fragment[i].primIdx = i;
+	}
+	root.aabbMin = *(bvhvec3*)&rootMin, root.aabbMax = *(bvhvec3*)&rootMax;
+	const float rootArea = (root.aabbMax - root.aabbMin).halfArea();
+	// subdivide recursively
+	struct Task { uint32_t node, sliceStart, sliceEnd, dummy; };
+	ALIGNED( 64 ) Task task[256];
+	uint32_t taskCount = 0, nodeIdx = 0, sliceStart = 0, sliceEnd = triCount + slack;
+	const bvhvec3 minDim = (root.aabbMax - root.aabbMin) * 1e-7f /* don't touch, carefully picked */;
+	while (1)
+	{
+		while (1)
+		{
+			BVHNode& node = bvhNode[nodeIdx];
+			__m128* node4 = (__m128*) & bvhNode[nodeIdx];
+			// find optimal object split
+			const __m128 d4 = _mm_blendv_ps( min1, _mm_sub_ps( node4[1], node4[0] ), mask3 );
+			const __m128 nmin4 = _mm_mul_ps( _mm_and_ps( node4[0], mask3 ), two4 );
+			const __m128 rpd4 = _mm_and_ps( _mm_div_ps( binmul3, d4 ), _mm_cmpneq_ps( d4, _mm_setzero_ps() ) );
+			// implementation of Section 4.1 of "Parallel Spatial Splits in Bounding Volume Hierarchies":
+			// main loop operates on two fragments to minimize dependencies and maximize ILP.
+			uint32_t fi = triIdx[node.leftFirst];
+			memset( count, 0, sizeof( count ) );
+			__m256 r0, r1, r2, f = _mm256_xor_ps( signFlip8, _mm256_and_ps( frag8[fi], mask6 ) ); // NOTE: fragment bounds in __m256 have .bmin negated.
+			const __m128 fmin = _mm_and_ps( frag4[fi].bmin4, mask3 ), fmax = _mm_and_ps( frag4[fi].bmax4, mask3 );
+			const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_add_ps( fmin, fmax ), nmin4 ), rpd4 ), half4 ) );
+			const __m128i b4c = _mm_max_epi32( _mm_min_epi32( bi4, maxbin4 ), _mm_setzero_si128() ); // clamp needed after all
+			memcpy( binbox, binboxOrig, sizeof( binbox ) );
+			uint32_t i0 = ILANE( b4c, 0 ), i1 = ILANE( b4c, 1 ), i2 = ILANE( b4c, 2 ), * ti = triIdx + node.leftFirst + 1;
+			for (uint32_t i = 0; i < node.triCount - 1; i++)
+			{
+				uint32_t fid = *ti++;
+			#if defined __GNUC__ || _MSC_VER < 1920
+				if (fid > triCount) fid = triCount - 1; // never happens but g++ *and* vs2017 need this to not crash...
+			#endif
+				const __m256 b0 = binbox[i0], b1 = binbox[AVXBINS + i1], b2 = binbox[2 * AVXBINS + i2];
+				const __m128 fmin = _mm_and_ps( frag4[fid].bmin4, mask3 ), fmax = _mm_and_ps( frag4[fid].bmax4, mask3 );
+				r0 = _mm256_max_ps( b0, f ), r1 = _mm256_max_ps( b1, f ), r2 = _mm256_max_ps( b2, f );
+				const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_add_ps( fmin, fmax ), nmin4 ), rpd4 ), half4 ) );
+				const __m128i b4c = _mm_max_epi32( _mm_min_epi32( bi4, maxbin4 ), _mm_setzero_si128() ); // clamp needed after all
+				f = _mm256_xor_ps( signFlip8, _mm256_and_ps( frag8[fid], mask6 ) ), count[0][i0]++, count[1][i1]++, count[2][i2]++;
+				binbox[i0] = r0, i0 = ILANE( b4c, 0 );
+				binbox[AVXBINS + i1] = r1, i1 = ILANE( b4c, 1 );
+				binbox[2 * AVXBINS + i2] = r2, i2 = ILANE( b4c, 2 );
+			}
+			// final business for final fragment
+			const __m256 b0 = binbox[i0], b1 = binbox[AVXBINS + i1], b2 = binbox[2 * AVXBINS + i2];
+			count[0][i0]++, count[1][i1]++, count[2][i2]++;
+			r0 = _mm256_max_ps( b0, f ), r1 = _mm256_max_ps( b1, f ), r2 = _mm256_max_ps( b2, f );
+			binbox[i0] = r0, binbox[AVXBINS + i1] = r1, binbox[2 * AVXBINS + i2] = r2;
+			// calculate per-split totals
+			float splitCost = 1e30f, rSAV = 1.0f / node.SurfaceArea();
+			uint32_t bestAxis = 0, bestPos = 0, n = newNodePtr, j = node.leftFirst + node.triCount;
+			const __m256* bb = binbox; // REMINDER: fragment bounds in __m256 have .bmin negated.
+			for (int32_t a = 0; a < 3; a++, bb += AVXBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
+			{
+				// hardcoded bin processing for AVXBINS == 8
+				assert( AVXBINS == 8 );
+				const uint32_t lN0 = count[a][0], rN0 = count[a][7];
+				const __m256 lb0 = bb[0], rb0 = bb[7];
+				const uint32_t lN1 = lN0 + count[a][1], rN1 = rN0 + count[a][6], lN2 = lN1 + count[a][2];
+				const uint32_t rN2 = rN1 + count[a][5], lN3 = lN2 + count[a][3], rN3 = rN2 + count[a][4];
+				const __m256 lb1 = _mm256_max_ps( lb0, bb[1] ), rb1 = _mm256_max_ps( rb0, bb[6] );
+				const __m256 lb2 = _mm256_max_ps( lb1, bb[2] ), rb2 = _mm256_max_ps( rb1, bb[5] );
+				const __m256 lb3 = _mm256_max_ps( lb2, bb[3] ), rb3 = _mm256_max_ps( rb2, bb[4] );
+				const uint32_t lN4 = lN3 + count[a][4], rN4 = rN3 + count[a][3], lN5 = lN4 + count[a][5];
+				const uint32_t rN5 = rN4 + count[a][2], lN6 = lN5 + count[a][6], rN6 = rN5 + count[a][1];
+				const __m256 lb4 = _mm256_max_ps( lb3, bb[4] ), rb4 = _mm256_max_ps( rb3, bb[3] );
+				const __m256 lb5 = _mm256_max_ps( lb4, bb[5] ), rb5 = _mm256_max_ps( rb4, bb[2] );
+				const __m256 lb6 = _mm256_max_ps( lb5, bb[6] ), rb6 = _mm256_max_ps( rb5, bb[1] );
+				float ANLR3 = BVH_FAR; PROCESS_PLANE( a, 3, ANLR3, lN3, rN3, lb3, rb3 ); // most likely split
+				float ANLR2 = BVH_FAR; PROCESS_PLANE( a, 2, ANLR2, lN2, rN4, lb2, rb4 );
+				float ANLR4 = BVH_FAR; PROCESS_PLANE( a, 4, ANLR4, lN4, rN2, lb4, rb2 );
+				float ANLR5 = BVH_FAR; PROCESS_PLANE( a, 5, ANLR5, lN5, rN1, lb5, rb1 );
+				float ANLR1 = BVH_FAR; PROCESS_PLANE( a, 1, ANLR1, lN1, rN5, lb1, rb5 );
+				float ANLR0 = BVH_FAR; PROCESS_PLANE( a, 0, ANLR0, lN0, rN6, lb0, rb6 );
+				float ANLR6 = BVH_FAR; PROCESS_PLANE( a, 6, ANLR6, lN6, rN0, lb6, rb0 ); // least likely split
+			}
+			// consider a spatial split
+			bool spatial = false;
+			uint32_t NL[BVHBINS - 1], NR[BVHBINS - 1], budget = sliceEnd - sliceStart;
+			bvhvec3 bestLMin = bvhvec3( LANE8( bestLBox, 0 ), LANE8( bestLBox, 1 ), LANE8( bestLBox, 2 ) ) * -1.0f;  
+			bvhvec3 bestLMax = bvhvec3( LANE8( bestLBox, 4 ), LANE8( bestLBox, 5 ), LANE8( bestLBox, 6 ) );  
+			bvhvec3 bestRMin = bvhvec3( LANE8( bestRBox, 0 ), LANE8( bestRBox, 1 ), LANE8( bestRBox, 2 ) ) * -1.0f;  
+			bvhvec3 bestRMax = bvhvec3( LANE8( bestRBox, 4 ), LANE8( bestRBox, 5 ), LANE8( bestRBox, 6 ) );  
+			bvhvec3 spatialUnion = bestLMax - bestRMin; // TODO: probably a faster way to do this.
+			float spatialOverlap = (spatialUnion.halfArea()) / rootArea;
+			if (budget > node.triCount && splitCost < 1e30f && spatialOverlap > 1e-5f)
+			{
+				for (uint32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
+				{
+					// setup bins
+					bvhvec3 binMin[BVHBINS], binMax[BVHBINS];
+					for (uint32_t i = 0; i < BVHBINS; i++) binMin[i] = BVH_FAR, binMax[i] = -BVH_FAR;
+					uint32_t countIn[BVHBINS] = { 0 }, countOut[BVHBINS] = { 0 };
+					// populate bins with clipped fragments
+					const float planeDist = (node.aabbMax[a] - node.aabbMin[a]) / (BVHBINS * 0.9999f);
+					const float rPlaneDist = 1.0f / planeDist, nodeMin = node.aabbMin[a];
+					for (uint32_t i = 0; i < node.triCount; i++)
+					{
+						const uint32_t fragIdx = triIdxA[node.leftFirst + i];
+						const int32_t bin1 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmin[a] - nodeMin) * rPlaneDist), 0, BVHBINS - 1 );
+						const int32_t bin2 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmax[a] - nodeMin) * rPlaneDist), 0, BVHBINS - 1 );
+						countIn[bin1]++, countOut[bin2]++;
+						if (bin2 == bin1)
+						{
+							// fragment fits in a single bin
+							binMin[bin1] = tinybvh_min( binMin[bin1], fragment[fragIdx].bmin );
+							binMax[bin1] = tinybvh_max( binMax[bin1], fragment[fragIdx].bmax );
+						}
+						else for (int32_t j = bin1; j <= bin2; j++)
+						{
+							// clip fragment to each bin it overlaps
+							bvhvec3 bmin = node.aabbMin, bmax = node.aabbMax;
+							bmin[a] = nodeMin + planeDist * j;
+							bmax[a] = j == 6 ? node.aabbMax[a] : (bmin[a] + planeDist);
+							Fragment orig = fragment[fragIdx];
+							Fragment tmpFrag;
+							if (!ClipFrag( orig, tmpFrag, bmin, bmax, minDim )) continue;
+							binMin[j] = tinybvh_min( binMin[j], tmpFrag.bmin );
+							binMax[j] = tinybvh_max( binMax[j], tmpFrag.bmax );
+						}
+					}
+					// evaluate split candidates
+					bvhvec3 lBMin[BVHBINS - 1], rBMin[BVHBINS - 1], l1 = BVH_FAR, l2 = -BVH_FAR;
+					bvhvec3 lBMax[BVHBINS - 1], rBMax[BVHBINS - 1], r1 = BVH_FAR, r2 = -BVH_FAR;
+					float ANL[BVHBINS], ANR[BVHBINS];
+					for (uint32_t lN = 0, rN = 0, i = 0; i < BVHBINS - 1; i++)
+					{
+						lBMin[i] = l1 = tinybvh_min( l1, binMin[i] ), rBMin[BVHBINS - 2 - i] = r1 = tinybvh_min( r1, binMin[BVHBINS - 1 - i] );
+						lBMax[i] = l2 = tinybvh_max( l2, binMax[i] ), rBMax[BVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[BVHBINS - 1 - i] );
+						lN += countIn[i], rN += countOut[BVHBINS - 1 - i], NL[i] = lN, NR[BVHBINS - 2 - i] = rN;
+						ANL[i] = lN == 0 ? BVH_FAR : ((l2 - l1).halfArea() * (float)lN);
+						ANR[BVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
+					}
+					// find best position for spatial split
+					for (uint32_t i = 0; i < BVHBINS - 1; i++)
+					{
+						const float Cspatial = C_TRAV + C_INT * rSAV * (ANL[i] + ANR[i]);
+						if (Cspatial < splitCost && NL[i] + NR[i] < budget)
+						{
+							spatial = true, splitCost = Cspatial, bestAxis = a, bestPos = i;
+							bestLMin = lBMin[i], bestLMax = lBMax[i], bestRMin = rBMin[i], bestRMax = rBMax[i];
+							bestLMax[a] = bestRMin[a]; // accurate
+						}
+					}
+				}
+			}
+			// terminate recursion
+			float noSplitCost = (float)node.triCount * C_INT;
+			if (splitCost >= noSplitCost) break; // not splitting is better.
+			// double-buffered partition
+			uint32_t A = sliceStart, B = sliceEnd, src = node.leftFirst;
+			if (spatial)
+			{
+				const float planeDist = (node.aabbMax[bestAxis] - node.aabbMin[bestAxis]) / (BVHBINS * 0.9999f);
+				const float rPlaneDist = 1.0f / planeDist, nodeMin = node.aabbMin[bestAxis];
+				for (uint32_t i = 0; i < node.triCount; i++)
+				{
+					const uint32_t fragIdx = triIdxA[src++];
+					const uint32_t bin1 = (uint32_t)((fragment[fragIdx].bmin[bestAxis] - nodeMin) * rPlaneDist);
+					const uint32_t bin2 = (uint32_t)((fragment[fragIdx].bmax[bestAxis] - nodeMin) * rPlaneDist);
+					if (bin2 <= bestPos) triIdxB[A++] = fragIdx; else if (bin1 > bestPos) triIdxB[--B] = fragIdx; else
+					{
+						// split straddler
+						Fragment tmpFrag = fragment[fragIdx];
+						Fragment newFrag;
+						if (ClipFrag( tmpFrag, newFrag, tinybvh_max( bestRMin, node.aabbMin ), tinybvh_min( bestRMax, node.aabbMax ), minDim ))
+							fragment[nextFrag] = newFrag, triIdxB[--B] = nextFrag++;
+						if (ClipFrag( tmpFrag, fragment[fragIdx], tinybvh_max( bestLMin, node.aabbMin ), tinybvh_min( bestLMax, node.aabbMax ), minDim ))
+							triIdxB[A++] = fragIdx;
+					}
+				}
+			}
+			else
+			{
+				// object partitioning
+				const float rpd = (*(bvhvec3*)&rpd4)[bestAxis], nmin = (*(bvhvec3*)&nmin4)[bestAxis];
+				for (uint32_t i = 0; i < node.triCount; i++)
+				{
+					const uint32_t fr = triIdx[src + i];
+					int32_t bi = (int32_t)(((fragment[fr].bmax[bestAxis] + fragment[fr].bmin[bestAxis]) - nmin) * rpd);
+					bi = tinybvh_clamp( bi, 0, AVXBINS - 1 );
+					if (bi <= (int32_t)bestPos) triIdxB[A++] = fr; else triIdxB[--B] = fr;
+				}
+			}
+			// copy back slice data
+			memcpy( triIdxA + sliceStart, triIdxB + sliceStart, (sliceEnd - sliceStart) * 4 );
+			// create child nodes
+			uint32_t leftCount = A - sliceStart, rightCount = sliceEnd - B;
+			if (leftCount == 0 || rightCount == 0) break;
+			int32_t leftChildIdx = newNodePtr++, rightChildIdx = newNodePtr++;
+			bvhNode[leftChildIdx].aabbMin = bestLMin, bvhNode[leftChildIdx].aabbMax = bestLMax;
+			bvhNode[leftChildIdx].leftFirst = sliceStart, bvhNode[leftChildIdx].triCount = leftCount;
+			bvhNode[rightChildIdx].aabbMin = bestRMin, bvhNode[rightChildIdx].aabbMax = bestRMax;
+			bvhNode[rightChildIdx].leftFirst = B, bvhNode[rightChildIdx].triCount = rightCount;
+			node.leftFirst = leftChildIdx, node.triCount = 0;
+			// recurse
+			task[taskCount].node = rightChildIdx;
+			task[taskCount].sliceEnd = sliceEnd;
+			task[taskCount++].sliceStart = sliceEnd = (A + B) >> 1;
+			nodeIdx = leftChildIdx;
+		}
+		// fetch subdivision task from stack
+		if (taskCount == 0) break; else
+			nodeIdx = task[--taskCount].node,
+			sliceStart = task[taskCount].sliceStart,
+			sliceEnd = task[taskCount].sliceEnd;
+	}
+	// clean up
+	for (uint32_t i = 0; i < triCount + slack; i++) triIdx[i] = fragment[triIdx[i]].primIdx;
+	// Compact(); - TODO
+	// all done.
+	refittable = false; // can't refit an SBVH
+	may_have_holes = false; // there may be holes in the index list, but not in the node list
 	usedNodes = newNodePtr;
 }
 #if defined(_MSC_VER)
@@ -4177,7 +4524,6 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 {
 	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
 	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildNEON( .. ), stride must be multiple of 16." );
-	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildNEON( .. ), primCount == 0." );
 	int32_t test = AVXBINS;
 	if (test != 8) assert( false ); // AVX builders require AVXBINS == 8.
 	// aligned data
@@ -4186,7 +4532,7 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};				// 96 bytes
 	ALIGNED( 64 ) float32x4x2_t bestLBox, bestRBox;			// 64 bytes
 	// some constants
-	static const float32x4_t max4 = vdupq_n_f32( -BVH_FAR ), half4 = vdupq_n_f32( 0.5f );
+	static const float32x4_t min4 = vdupq_n_f32( BVH_FAR ); max4 = vdupq_n_f32( -BVH_FAR ), half4 = vdupq_n_f32( 0.5f );
 	static const float32x4_t two4 = vdupq_n_f32( 2.0f ), min1 = vdupq_n_f32( -1 );
 	static const float32x4x2_t max8 = { max4, max4 };
 	static const float32x4_t signFlip4 = SIMD_SETRVEC( -0.0f, -0.0f, -0.0f, 0.0f );
@@ -4220,14 +4566,13 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount;
 	// initialize fragments and update root bounds
-	float32x4_t rootMin = max4, rootMax = max4;
+	float32x4_t rootMin = min4, rootMax = max4;
 	for (uint32_t i = 0; i < triCount; i++)
 	{
-		const float32x4_t v1 = veorq_s32( signFlip4, vminq_f32( vminq_f32( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] ) );
+		const float32x4_t v1 = vminq_f32( vminq_f32( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
 		const float32x4_t v2 = vmaxq_f32( vmaxq_f32( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
-		frag4[i].bmin4 = v1, frag4[i].bmax4 = v2, rootMin = vmaxq_f32( rootMin, v1 ), rootMax = vmaxq_f32( rootMax, v2 ), triIdx[i] = i;
+		frag4[i].bmin4 = v1, frag4[i].bmax4 = v2, rootMin = vminq_f32( rootMin, v1 ), rootMax = vmaxq_f32( rootMax, v2 ), triIdx[i] = i;
 	}
-	rootMin = veorq_s32( rootMin, signFlip4 );
 	root.aabbMin = *(bvhvec3*)&rootMin, root.aabbMax = *(bvhvec3*)&rootMax;
 	// subdivide recursively
 	ALIGNED( 64 ) uint32_t task[128], taskCount = 0, nodeIdx = 0;
@@ -4246,8 +4591,8 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 			// main loop operates on two fragments to minimize dependencies and maximize ILP.
 			uint32_t fi = triIdx[node.leftFirst];
 			memset( count, 0, sizeof( count ) );
-			float32x4x2_t r0, r1, r2, f = frag8[fi];
-			int32x4_t bi4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vsubq_f32( frag4[fi].bmax4, frag4[fi].bmin4 ), nmin4 ), rpd4 ), half4 ) ) );
+			float32x4x2_t r0, r1, r2, f = veorq_s32x2( signFlip8, frag8[fi] );
+			int32x4_t bi4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vaddq_f32( frag4[fi].bmax4, frag4[fi].bmin4 ), nmin4 ), rpd4 ), half4 ) ) );
 			memcpy( binbox, binboxOrig, sizeof( binbox ) );
 			uint32_t i0 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 0 ), 0, 7 ));
 			uint32_t i1 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 1 ), 0, 7 ));
@@ -4266,8 +4611,8 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 				r0 = vmaxq_f32x2( b0, f );
 				r1 = vmaxq_f32x2( b1, f );
 				r2 = vmaxq_f32x2( b2, f );
-				const int32x4_t b4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vsubq_f32( fmax, fmin ), nmin4 ), rpd4 ), half4 ) ) );
-				f = frag8[fid], count[0][i0]++, count[1][i1]++, count[2][i2]++;
+				const int32x4_t b4 = vcvtq_s32_f32( vrnd32xq_f32( vsubq_f32( vmulq_f32( vsubq_f32( vaddq_f32( fmax, fmin ), nmin4 ), rpd4 ), half4 ) ) );
+				f = veorq_s32x2( signFlip8, frag8[fid] ), count[0][i0]++, count[1][i1]++, count[2][i2]++;
 				binbox[i0] = r0, i0 = (uint32_t)(tinybvh_clamp( ILANE( b4, 0 ), 0, 7 ));
 				binbox[AVXBINS + i1] = r1, i1 = (uint32_t)(tinybvh_clamp( ILANE( b4, 1 ), 0, 7 ));
 				binbox[2 * AVXBINS + i2] = r2, i2 = (uint32_t)(tinybvh_clamp( ILANE( b4, 2 ), 0, 7 ));
@@ -4314,7 +4659,7 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 			uint32_t t, fr = triIdx[src];
 			for (uint32_t i = 0; i < node.triCount; i++)
 			{
-				const uint32_t bi = (uint32_t)((fragment[fr].bmax[bestAxis] - fragment[fr].bmin[bestAxis] - nmin) * rpd);
+				const uint32_t bi = (uint32_t)((fragment[fr].bmax[bestAxis] + fragment[fr].bmin[bestAxis] - nmin) * rpd);
 				if (bi <= bestPos) fr = triIdx[++src]; else t = fr, fr = triIdx[src] = triIdx[--j], triIdx[j] = t;
 			}
 			// create child nodes and recurse
@@ -4334,7 +4679,6 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	}
 	// all done.
 	refittable = true; // not using spatial splits: can refit this BVH
-	frag_min_flipped = true; // NEON was used for binning; fragment.min flipped
 	may_have_holes = false; // the NEON builder produces a continuous list of nodes
 	usedNodes = newNodePtr;
 }
@@ -4916,7 +5260,6 @@ void BVH_Double::Build( const bvhdbl3* vertices, const uint32_t primCount )
 	}
 	// all done.
 	refittable = true; // not using spatial splits: can refit this BVH
-	frag_min_flipped = false; // did not use AVX for binning
 	may_have_holes = false; // the reference builder produces a continuous list of nodes
 	bvh_over_aabbs = (verts == 0); // bvh over aabbs is suitable as TLAS
 	usedNodes = newNodePtr;
