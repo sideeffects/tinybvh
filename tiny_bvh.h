@@ -4532,7 +4532,7 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};				// 96 bytes
 	ALIGNED( 64 ) float32x4x2_t bestLBox, bestRBox;			// 64 bytes
 	// some constants
-	static const float32x4_t min4 = vdupq_n_f32( BVH_FAR ); max4 = vdupq_n_f32( -BVH_FAR ), half4 = vdupq_n_f32( 0.5f );
+	static const float32x4_t min4 = vdupq_n_f32( BVH_FAR ), max4 = vdupq_n_f32( -BVH_FAR ), half4 = vdupq_n_f32( 0.5f );
 	static const float32x4_t two4 = vdupq_n_f32( 2.0f ), min1 = vdupq_n_f32( -1 );
 	static const float32x4x2_t max8 = { max4, max4 };
 	static const float32x4_t signFlip4 = SIMD_SETRVEC( -0.0f, -0.0f, -0.0f, 0.0f );
