@@ -1260,7 +1260,7 @@ void BVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t
 }
 void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims )
 {
-	uint32_t primCount = prims > 0 ? prims : vertices.count;
+	uint32_t primCount = prims > 0 ? prims : vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2; // upper limit
 	// allocate memory on first build
 	if (allocatedNodes < spaceNeeded)
