@@ -5507,7 +5507,7 @@ void BVHBase::PrecomputeTriangle( const bvhvec4slice& vert, uint32_t triIndex, f
 	else memset( T, 0, 12 * 4 ); // cerr << "degenerate source " << endl;
 }
 
-#if 1
+#if 0
 
 // ClipFrag (helper), clip a triangle against an AABB.
 // Can probably be done a lot more efficiently. Used in SBVH construction.
@@ -5591,14 +5591,14 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 			if (v1in || v2in)
 			{
 				if (v1in ^ v2in)
-					C = v1 + (l - v0[axis]) / (v2[axis] - v1[axis]) * (v2 - v1),
+					C = v1 + (l - v1[axis]) / (v2[axis] - v1[axis]) * (v2 - v1),
 					C[axis] = l /* accurate */, vout[Nout++] = C;
 				if (v2in) vout[Nout++] = v2;
 			}
 			if (v2in || v0in)
 			{
 				if (v2in ^ v0in)
-					C = v2 + (l - v0[axis]) / (v0[axis] - v2[axis]) * (v0 - v2),
+					C = v2 + (l - v2[axis]) / (v0[axis] - v2[axis]) * (v0 - v2),
 					C[axis] = l /* accurate */, vout[Nout++] = C;
 				if (v0in) vout[Nout++] = v0;
 			}
