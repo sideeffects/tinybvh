@@ -945,7 +945,6 @@ public:
 		uint8_t upper_z[6];			// the quantized upper bounds in z-dimension
 	};
 };
-
 } // namespace tinybvh
 
 // ============================================================================
@@ -5508,11 +5507,11 @@ void BVHBase::PrecomputeTriangle( const bvhvec4slice& vert, uint32_t triIndex, f
 	else memset( T, 0, 12 * 4 ); // cerr << "degenerate source " << endl;
 }
 
-#if 0
+#if 1
 
 // ClipFrag (helper), clip a triangle against an AABB.
 // Can probably be done a lot more efficiently. Used in SBVH construction.
-bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim )
+bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim, uint32_t )
 {
 	// find intersection of bmin/bmax and orig bmin/bmax
 	bmin = tinybvh_max( bmin, orig.bmin );
