@@ -117,7 +117,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	1
-#define TINY_BVH_VERSION_SUB	6
+#define TINY_BVH_VERSION_SUB	7
 
 // ============================================================================
 //
@@ -579,6 +579,8 @@ public:
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ2( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ2( const bvhvec4slice& vertices );
 #ifdef BVH_USEAVX
 	void BuildAVX( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildAVX( const bvhvec4slice& vertices );
@@ -598,7 +600,7 @@ public:
 	void Intersect256RaysSSE( Ray* packet ) const; // requires BVH_USEAVX
 private:
 	void PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-	bool ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim );
+	bool ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim, const uint32_t splitAxis );
 	void RefitUpVerbose( uint32_t nodeIdx );
 	uint32_t FindBestNewPosition( const uint32_t Lid );
 	void ReinsertNodeVerbose( const uint32_t Lid, const uint32_t Nid, const uint32_t origin );
@@ -943,6 +945,7 @@ public:
 		uint8_t upper_z[6];			// the quantized upper bounds in z-dimension
 	};
 };
+
 } // namespace tinybvh
 
 // ============================================================================
@@ -1440,8 +1443,7 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildHQ( .. ), bvh not rebuildable." );
 	verts = vertices; // note: we're not copying this data; don't delete.
-	idxCount = primCount + slack;
-	triCount = primCount;
+	idxCount = primCount + slack, triCount = primCount;
 	uint32_t* triIdxA = triIdx, * triIdxB = new uint32_t[triCount + slack];
 	memset( triIdxA, 0, (triCount + slack) * 4 );
 	memset( triIdxB, 0, (triCount + slack) * 4 );
@@ -1512,11 +1514,9 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 				for (uint32_t i = 0; i < BVHBINS - 1; i++)
 				{
 					const float C = C_TRAV + C_INT * rSAV * (ANL[i] + ANR[i]);
-					if (C < splitCost)
-					{
-						splitCost = C, bestAxis = a, bestPos = i;
-						bestLMin = lBMin[i], bestRMin = rBMin[i], bestLMax = lBMax[i], bestRMax = rBMax[i];
-					}
+					if (C >= splitCost) continue;
+					splitCost = C, bestAxis = a, bestPos = i;
+					bestLMin = lBMin[i], bestRMin = rBMin[i], bestLMax = lBMax[i], bestRMax = rBMax[i];
 				}
 			}
 			// consider a spatial split
@@ -1555,7 +1555,7 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 							bmax[a] = j == 6 ? node.aabbMax[a] : (bmin[a] + planeDist);
 							Fragment orig = fragment[fragIdx];
 							Fragment tmpFrag;
-							if (!ClipFrag( orig, tmpFrag, bmin, bmax, minDim )) continue;
+							if (!ClipFrag( orig, tmpFrag, bmin, bmax, minDim, a )) continue;
 							binMin[j] = tinybvh_min( binMin[j], tmpFrag.bmin );
 							binMax[j] = tinybvh_max( binMax[j], tmpFrag.bmax );
 						}
@@ -1585,7 +1585,7 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 					}
 				}
 			}
-			// terminate recursion
+			// evaluate best split cost
 			float noSplitCost = (float)node.triCount * C_INT;
 			if (splitCost >= noSplitCost) break; // not splitting is better.
 			// double-buffered partition
@@ -1604,9 +1604,9 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 						// split straddler
 						Fragment tmpFrag = fragment[fragIdx];
 						Fragment newFrag;
-						if (ClipFrag( tmpFrag, newFrag, tinybvh_max( bestRMin, node.aabbMin ), tinybvh_min( bestRMax, node.aabbMax ), minDim ))
+						if (ClipFrag( tmpFrag, newFrag, tinybvh_max( bestRMin, node.aabbMin ), tinybvh_min( bestRMax, node.aabbMax ), minDim, bestAxis ))
 							fragment[nextFrag] = newFrag, triIdxB[--B] = nextFrag++;
-						if (ClipFrag( tmpFrag, fragment[fragIdx], tinybvh_max( bestLMin, node.aabbMin ), tinybvh_min( bestLMax, node.aabbMax ), minDim ))
+						if (ClipFrag( tmpFrag, fragment[fragIdx], tinybvh_max( bestLMin, node.aabbMin ), tinybvh_min( bestLMax, node.aabbMax ), minDim, bestAxis ))
 							triIdxB[A++] = fragIdx;
 					}
 				}
@@ -1635,10 +1635,8 @@ void BVH::BuildHQ( const bvhvec4slice& vertices )
 			bvhNode[rightChildIdx].leftFirst = B, bvhNode[rightChildIdx].triCount = rightCount;
 			node.leftFirst = leftChildIdx, node.triCount = 0;
 			// recurse
-			task[taskCount].node = rightChildIdx;
-			task[taskCount].sliceEnd = sliceEnd;
-			task[taskCount++].sliceStart = sliceEnd = (A + B) >> 1;
-			nodeIdx = leftChildIdx;
+			task[taskCount].node = rightChildIdx, task[taskCount].sliceEnd = sliceEnd;
+			task[taskCount++].sliceStart = sliceEnd = (A + B) >> 1, nodeIdx = leftChildIdx;
 		}
 		// fetch subdivision task from stack
 		if (taskCount == 0) break; else
@@ -3509,7 +3507,7 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 							bmax[a] = j == 6 ? node.aabbMax[a] : (bmin[a] + planeDist);
 							Fragment orig = fragment[fragIdx];
 							Fragment tmpFrag;
-							if (!ClipFrag( orig, tmpFrag, bmin, bmax, minDim )) continue;
+							if (!ClipFrag( orig, tmpFrag, bmin, bmax, minDim, a )) continue;
 							binMin[j] = tinybvh_min( binMin[j], tmpFrag.bmin );
 							binMax[j] = tinybvh_max( binMax[j], tmpFrag.bmax );
 						}
@@ -3558,9 +3556,9 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 						// split straddler
 						Fragment tmpFrag = fragment[fragIdx];
 						Fragment newFrag;
-						if (ClipFrag( tmpFrag, newFrag, tinybvh_max( bestRMin, node.aabbMin ), tinybvh_min( bestRMax, node.aabbMax ), minDim ))
+						if (ClipFrag( tmpFrag, newFrag, tinybvh_max( bestRMin, node.aabbMin ), tinybvh_min( bestRMax, node.aabbMax ), minDim, bestAxis ))
 							fragment[nextFrag] = newFrag, triIdxB[--B] = nextFrag++;
-						if (ClipFrag( tmpFrag, fragment[fragIdx], tinybvh_max( bestLMin, node.aabbMin ), tinybvh_min( bestLMax, node.aabbMax ), minDim ))
+						if (ClipFrag( tmpFrag, fragment[fragIdx], tinybvh_max( bestLMin, node.aabbMin ), tinybvh_min( bestLMax, node.aabbMax ), minDim, bestAxis ))
 							triIdxB[A++] = fragIdx;
 					}
 				}
@@ -5510,6 +5508,8 @@ void BVHBase::PrecomputeTriangle( const bvhvec4slice& vert, uint32_t triIndex, f
 	else memset( T, 0, 12 * 4 ); // cerr << "degenerate source " << endl;
 }
 
+#if 0
+
 // ClipFrag (helper), clip a triangle against an AABB.
 // Can probably be done a lot more efficiently. Used in SBVH construction.
 bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim )
@@ -5532,7 +5532,7 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 			{
 				bvhvec3 v0 = vin[v], v1 = vin[(v + 1) % Nin];
 				const bool v0in = v0[a] >= l - eps, v1in = v1[a] >= l - eps;
-				if (!(v0in || v1in)) continue; else if (v0in != v1in)
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
 				{
 					bvhvec3 C = v0 + (l - v0[a]) / (v1[a] - v0[a]) * (v1 - v0);
 					C[a] = l /* accurate */, vout[Nout++] = C;
@@ -5544,7 +5544,7 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 			{
 				bvhvec3 v0 = vout[v], v1 = vout[(v + 1) % Nout];
 				const bool v0in = v0[a] <= r + eps, v1in = v1[a] <= r + eps;
-				if (!(v0in || v1in)) continue; else if (v0in != v1in)
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
 				{
 					bvhvec3 C = v0 + (r - v0[a]) / (v1[a] - v0[a]) * (v1 - v0);
 					C[a] = r /* accurate */, vin[Nin++] = C;
@@ -5560,6 +5560,108 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 	newFrag.clipped = 1;
 	return Nin > 0;
 }
+
+#else
+
+// Faster ClipFrag, which clips against only two planes if a tri wasn't clipped before.
+bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim, const uint32_t axis )
+{
+	// find intersection of bmin/bmax and orig bmin/bmax
+	bmin = tinybvh_max( bmin, orig.bmin ), bmax = tinybvh_min( bmax, orig.bmax );
+	const bvhvec3 extent = bmax - bmin;
+	uint32_t Nin = 3, vidx = orig.primIdx * 3;
+	// special case: if this fragment has not been clipped before, only clip against planes on split axis.
+	if (orig.clipped == 0)
+	{
+		const float eps = minDim.cell[axis];
+		bool hasVerts = false;
+		bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR ), vout[4], C;
+		if (extent.cell[axis] > eps)
+		{
+			uint32_t Nout = 0;
+			const float l = bmin[axis], r = bmax[axis];
+			bvhvec3 v0 = verts[vidx + 0], v1 = verts[vidx + 1], v2 = verts[vidx + 2];
+			bool v0in = v0[axis] >= l - eps, v1in = v1[axis] >= l - eps, v2in = v2[axis] >= l - eps;
+			if (v0in || v1in)
+			{
+				if (v0in ^ v1in)
+					C = v0 + (l - v0[axis]) / (v1[axis] - v0[axis]) * (v1 - v0),
+					C[axis] = l /* accurate */, vout[Nout++] = C;
+				if (v1in) vout[Nout++] = v1;
+			}
+			if (v1in || v2in)
+			{
+				if (v1in ^ v2in)
+					C = v1 + (l - v0[axis]) / (v2[axis] - v1[axis]) * (v2 - v1),
+					C[axis] = l /* accurate */, vout[Nout++] = C;
+				if (v2in) vout[Nout++] = v2;
+			}
+			if (v2in || v0in)
+			{
+				if (v2in ^ v0in)
+					C = v2 + (l - v0[axis]) / (v0[axis] - v2[axis]) * (v0 - v2),
+					C[axis] = l /* accurate */, vout[Nout++] = C;
+				if (v0in) vout[Nout++] = v0;
+			}
+			for (uint32_t v = 0; v < Nout; v++)
+			{
+				bvhvec3 v0 = vout[v], v1 = vout[(v + 1) % Nout];
+				const bool v0in = v0[axis] <= r + eps, v1in = v1[axis] <= r + eps;
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+				{
+					bvhvec3 C = v0 + (r - v0[axis]) / (v1[axis] - v0[axis]) * (v1 - v0);
+					C[axis] = r /* accurate */, hasVerts = true, mn = tinybvh_min( mn, C ), mx = tinybvh_max( mx, C );
+				}
+				if (v1in) hasVerts = true, mn = tinybvh_min( mn, v1 ), mx = tinybvh_max( mx, v1 );
+			}
+		}
+		newFrag.bmin = tinybvh_max( mn, bmin ), newFrag.bmax = tinybvh_min( mx, bmax );
+		newFrag.primIdx = orig.primIdx, newFrag.clipped = 1;
+		return hasVerts;
+	}
+	// generic case: Sutherland-Hodgeman against six bounding planes
+	bvhvec3 vin[10] = { verts[vidx], verts[vidx + 1], verts[vidx + 2] }, vout[10];
+	for (uint32_t a = 0; a < 3; a++)
+	{
+		const float eps = minDim.cell[a];
+		if (extent.cell[a] > eps)
+		{
+			uint32_t Nout = 0;
+			const float l = bmin[a], r = bmax[a];
+			for (uint32_t v = 0; v < Nin; v++)
+			{
+				bvhvec3 v0 = vin[v], v1 = vin[(v + 1) % Nin];
+				const bool v0in = v0[a] >= l - eps, v1in = v1[a] >= l - eps;
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+				{
+					bvhvec3 C = v0 + (l - v0[a]) / (v1[a] - v0[a]) * (v1 - v0);
+					C[a] = l /* accurate */, vout[Nout++] = C;
+				}
+				if (v1in) vout[Nout++] = v1;
+			}
+			Nin = 0;
+			for (uint32_t v = 0; v < Nout; v++)
+			{
+				bvhvec3 v0 = vout[v], v1 = vout[(v + 1) % Nout];
+				const bool v0in = v0[a] <= r + eps, v1in = v1[a] <= r + eps;
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+				{
+					bvhvec3 C = v0 + (r - v0[a]) / (v1[a] - v0[a]) * (v1 - v0);
+					C[a] = r /* accurate */, vin[Nin++] = C;
+				}
+				if (v1in) vin[Nin++] = v1;
+			}
+		}
+	}
+	bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR );
+	for (uint32_t i = 0; i < Nin; i++) mn = tinybvh_min( mn, vin[i] ), mx = tinybvh_max( mx, vin[i] );
+	newFrag.primIdx = orig.primIdx;
+	newFrag.bmin = tinybvh_max( mn, bmin ), newFrag.bmax = tinybvh_min( mx, bmax );
+	newFrag.clipped = 1;
+	return Nin > 0;
+}
+
+#endif
 
 // RefitUpVerbose: Update bounding boxes of ancestors of the specified node.
 void BVH_Verbose::RefitUpVerbose( uint32_t nodeIdx )
