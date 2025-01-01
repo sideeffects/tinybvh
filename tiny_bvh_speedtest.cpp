@@ -19,14 +19,13 @@
 #define BUILD_AVX
 // #define BUILD_NEON
 #define BUILD_SBVH
+// #define BUILD_AVX_SBVH
 #define TRAVERSE_2WAY_ST
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
 #define TRAVERSE_4WAY
 #define TRAVERSE_2WAY_DBL
 #define TRAVERSE_CWBVH
-#define TRAVERSE_BVH4
-#define TRAVERSE_BVH8
 #define TRAVERSE_2WAY_MT
 #define TRAVERSE_2WAY_MT_PACKET
 #define TRAVERSE_OPTIMIZED_ST
@@ -75,10 +74,9 @@ BVH_Verbose* bvh_verbose = 0;
 BVH_Double* bvh_double = new BVH_Double();
 BVH_SoA* bvh_soa = 0;
 BVH_GPU* bvh_gpu = 0;
-BVH4* bvh4 = 0;
+MBVH<4>* bvh4 = 0;
 BVH4_CPU* bvh4_cpu = 0;
 BVH4_GPU* bvh4_gpu = 0;
-BVH8* bvh8 = 0;
 BVH8_CWBVH* cwbvh = 0;
 enum { _DEFAULT = 1, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _GPU4, _BVH8, _CWBVH };
 
@@ -146,10 +144,8 @@ float TestPrimaryRays( uint32_t layout, Ray* batch, unsigned N, unsigned passes 
 		{
 		case _DEFAULT: for (unsigned i = 0; i < N; i++) bvh->Intersect( batch[i] ); break;
 		case _GPU2: for (unsigned i = 0; i < N; i++) bvh_gpu->Intersect( batch[i] ); break;
-		case _BVH4: for (unsigned i = 0; i < N; i++) bvh4->Intersect( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) bvh4_cpu->Intersect( batch[i] ); break;
 		case _GPU4: for (unsigned i = 0; i < N; i++) bvh4_gpu->Intersect( batch[i] ); break;
-		case _BVH8: for (unsigned i = 0; i < N; i++) bvh8->Intersect( batch[i] ); break;
 		#ifdef BVH_USEAVX
 		case _CWBVH: for (unsigned i = 0; i < N; i++) cwbvh->Intersect( batch[i] ); break;
 		case _SOA: for (unsigned i = 0; i < N; i++) bvh_soa->Intersect( batch[i] ); break;
@@ -470,8 +466,7 @@ int main()
 
 #endif
 
-#ifdef BUILD_AVX
-#ifdef BVH_USEAVX
+#if defined BUILD_AVX && defined BVH_USEAVX
 
 	// measure single-core bvh construction time - AVX builder
 	printf( "- fast AVX builder:  " );
@@ -481,7 +476,6 @@ int main()
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
 	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
 
-#endif
 #endif
 
 #ifdef BUILD_NEON
@@ -504,6 +498,18 @@ int main()
 	printf( "- HQ (SBVH) builder: " );
 	t.reset();
 	for (int pass = 0; pass < 3; pass++) bvh->BuildHQ( triangles, verts / 3 );
+	buildTime = t.elapsed() / 3.0f;
+	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
+	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
+
+#endif
+
+#if defined BUILD_AVX_SBVH && defined BVH_USEAVX
+
+	// measure single-core bvh construction time - AVX builder
+	printf( "- AVX SBVH builder:  " );
+	t.reset();
+	for (int pass = 0; pass < 3; pass++) bvh->BuildHQAVX( triangles, verts / 3 );
 	buildTime = t.elapsed() / 3.0f;
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
 	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
@@ -654,36 +660,6 @@ int main()
 
 #endif
 
-#ifdef TRAVERSE_BVH4
-
-	// Basic BVH4 - Basic implementation, not efficient on CPU.
-	if (!bvh4)
-	{
-		bvh4 = new BVH4();
-		bvh4->Build( triangles, verts / 3 );
-	}
-	printf( "- BASIC_BVH4  - primary: " );
-	traceTime = TestPrimaryRays( _BVH4, smallBatch, Nsmall, 3 );
-	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
-	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
-
-#endif
-
-#ifdef TRAVERSE_BVH8
-
-	// Basic BVH8 - Basic implementation, not efficient on CPU.
-	if (!bvh8)
-	{
-		bvh8 = new BVH8();
-		bvh8->Build( triangles, verts / 3 );
-	}
-	printf( "- BASIC_BVH8  - primary: " );
-	traceTime = TestPrimaryRays( _BVH8, smallBatch, Nsmall, 3 );
-	ValidateTraceResult( smallBatch, refDist, Nsmall, __LINE__ );
-	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
-
-#endif
-
 #if defined TRAVERSE_OPTIMIZED_ST || defined TRAVERSE_4WAY_OPTIMIZED
 
 	printf( "Optimized BVH performance - Optimizing... " );
@@ -723,7 +699,7 @@ int main()
 	delete bvh4_cpu;
 	// Building a BVH4_CPU over an optimized BVH: Careful, do not delete the
 	// passed BVH; we use some of its data in the BVH4_CPU.
-	bvh4 = new BVH4();
+	bvh4 = new MBVH<4>();
 	bvh4_cpu = new BVH4_CPU();
 	bvh4->ConvertFrom( *bvh );
 	bvh4_cpu->ConvertFrom( *bvh4 );
@@ -1005,7 +981,6 @@ int main()
 	delete bvh4;
 	delete bvh4_cpu;
 	delete bvh4_gpu;
-	delete bvh8;
 	delete cwbvh;
 
 	printf( "all done." );
