@@ -252,7 +252,7 @@ struct bvhuint2
 
 #endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
-struct bvhaabb
+struct ALIGNED( 32 ) bvhaabb
 {
 	bvhvec3 minBounds; uint32_t dummy1;
 	bvhvec3 maxBounds; uint32_t dummy2;
@@ -491,7 +491,7 @@ enum TraceDevice : uint32_t { USE_CPU = 1, USE_GPU };
 class BVHBase
 {
 public:
-	struct Fragment
+	struct ALIGNED( 32 ) Fragment
 	{
 		// A fragment stores the bounds of an input primitive. The name 'Fragment' is from
 		// "Parallel Spatial Splits in Bounding Volume Hierarchies", 2016, Fuetterling et al.,
@@ -572,18 +572,17 @@ public:
 	}
 	void BuildQuick( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildQuick( const bvhvec4slice& vertices );
-	void Build();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
-	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
-	void BuildHQ2( const bvhvec4* vertices, const uint32_t primCount );
-	void BuildHQ2( const bvhvec4slice& vertices );
 #ifdef BVH_USEAVX
 	void BuildAVX( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildAVX( const bvhvec4slice& vertices );
+	void BuildAVX( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildAVX( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQAVX( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQAVX( const bvhvec4slice& vertices );
 #elif defined BVH_USENEON
@@ -600,6 +599,9 @@ public:
 	void Intersect256RaysSSE( Ray* packet ) const; // requires BVH_USEAVX
 private:
 	void PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Build();
+	void PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildAVX();
 	bool ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim, const uint32_t splitAxis );
 	void RefitUpVerbose( uint32_t nodeIdx );
 	uint32_t FindBestNewPosition( const uint32_t Lid );
@@ -676,6 +678,8 @@ public:
 	~BVH_GPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
@@ -703,6 +707,8 @@ public:
 	~BVH_SoA();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
@@ -771,6 +777,8 @@ public:
 	~MBVH();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const BVH& original );
@@ -808,6 +816,8 @@ public:
 	~BVH4_GPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const MBVH<4>& original );
@@ -839,6 +849,8 @@ public:
 	~BVH4_CPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( const MBVH<4>& original );
@@ -861,6 +873,8 @@ public:
 	bool Load( const char* fileName );
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
 	void ConvertFrom( MBVH<8>& original ); // NOTE: Not const; this may change some nodes in the original.
@@ -883,9 +897,9 @@ class BLASInstance
 public:
 	BLASInstance( BVH* bvh ) : blas( bvh ) {}
 	void Update();					// Update the world bounds based on the current transform.
-	BVH* blas = 0;					// Bottom-level acceleration structure.
 	bvhaabb worldBounds;			// World-space AABB over the transformed blas root node.
 	float transform[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }; // identity
+	BVH* blas = 0;					// Bottom-level acceleration structure.
 	bvhvec3 TransformPoint( const bvhvec3& v ) const;
 	bvhvec3 TransformVector( const bvhvec3& v ) const;
 };
@@ -3169,27 +3183,17 @@ void BVH::BuildAVX( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH::BuildAVX( const bvhvec4slice& vertices )
 {
-	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildAVX( .. ), primCount == 0." );
-	FATAL_ERROR_IF( vertices.stride & 15, "BVH::BuildAVX( .. ), stride must be multiple of 16." );
-	int32_t test = AVXBINS;
-	if (test != 8) assert( false ); // AVX builders require AVXBINS == 8.
-	// aligned data
-	ALIGNED( 64 ) __m256 binbox[3 * AVXBINS];			// 768 bytes
-	ALIGNED( 64 ) __m256 binboxOrig[3 * AVXBINS];		// 768 bytes
-	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};			// 96 bytes
-	ALIGNED( 64 ) __m256 bestLBox, bestRBox;			// 64 bytes
+	PrepareAVXBuild( vertices, 0, 0 );
+	BuildAVX();
+}
+void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims )
+{
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), primCount == 0." );
+	FATAL_ERROR_IF( vertices.stride & 15, "BVH::PrepareAVXBuild( .. ), stride must be multiple of 16." );
 	// some constants
-	static const __m128 min4 = _mm_set1_ps( BVH_FAR ), max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
-	static const __m128 two4 = _mm_set1_ps( 2.0f ), min1 = _mm_set1_ps( -1 );
-	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
-	static const __m128 signFlip4 = _mm_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f );
-	static const __m128 mask3 = _mm_cmpeq_ps( _mm_setr_ps( 0, 0, 0, 1 ), _mm_setzero_ps() );
-	static const __m128 binmul3 = _mm_set1_ps( AVXBINS * 0.49999f );
-	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR ), mask6 = _mm256_set_m128( mask3, mask3 );
-	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
-	for (uint32_t i = 0; i < 3 * AVXBINS; i++) binboxOrig[i] = max8; // binbox initialization template
+	static const __m128 min4 = _mm_set1_ps( BVH_FAR ), max4 = _mm_set1_ps( -BVH_FAR );
 	// reset node pool
-	const uint32_t primCount = vertices.count / 3;
+	uint32_t primCount = prims > 0 ? prims : vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2;
 	if (allocatedNodes < spaceNeeded)
 	{
@@ -3205,25 +3209,69 @@ void BVH::BuildAVX( const bvhvec4slice& vertices )
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildAVX( .. ), bvh not rebuildable." );
 	verts = vertices; // note: we're not copying this data; don't delete.
 	triCount = idxCount = primCount;
-	uint32_t newNodePtr = 2;
+	newNodePtr = 2;
 	struct FragSSE { __m128 bmin4, bmax4; };
 	FragSSE* frag4 = (FragSSE*)fragment;
-	__m256* frag8 = (__m256*)fragment;
 	const __m128* verts4 = (__m128*)verts.data; // that's why it must be 16-byte aligned.
 	// assign all triangles to the root node
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount;
 	// initialize fragments and update root bounds
 	__m128 rootMin = min4, rootMax = max4;
-	for (uint32_t i = 0; i < triCount; i++)
+	if (indices)
 	{
-		const __m128 v1 = _mm_min_ps( _mm_min_ps( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
-		const __m128 v2 = _mm_max_ps( _mm_max_ps( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
-		frag4[i].bmin4 = v1, frag4[i].bmax4 = v2, rootMin = _mm_min_ps( rootMin, v1 ), rootMax = _mm_max_ps( rootMax, v2 ), triIdx[i] = i;
+		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareBuild( .. ), empty vertex slice." );
+		FATAL_ERROR_IF( prims == 0, "BVH::PrepareBuild( .. ), prims == 0." );
+		// build the BVH over indexed triangles
+		for (uint32_t i = 0; i < triCount; i++)
+		{
+			const uint32_t i0 = indices[i * 3], i1 = indices[i * 3 + 1], i2 = indices[i * 3 + 2];
+			const __m128 v0 = verts4[i0], v1 = verts4[i1], v2 = verts4[i2];
+			const __m128 t1 = _mm_min_ps( _mm_min_ps( v0, v1 ), v2 );
+			const __m128 t2 = _mm_max_ps( _mm_max_ps( v0, v1 ), v2 );
+			frag4[i].bmin4 = t1, frag4[i].bmax4 = t2, rootMin = _mm_min_ps( rootMin, t1 ), rootMax = _mm_max_ps( rootMax, t2 );
+			triIdx[i] = i;
+		}
+	}
+	else
+	{
+		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
+		FATAL_ERROR_IF( prims != 0, "BVH::PrepareAVXBuild( .. ), indices == 0." );
+		// build the BVH over a list of vertices: three per triangle
+		for (uint32_t i = 0; i < triCount; i++)
+		{
+			const __m128 v0 = verts4[i * 3], v1 = verts4[i * 3 + 1], v2 = verts4[i * 3 + 2];
+			const __m128 t1 = _mm_min_ps( _mm_min_ps( v0, v1 ), v2 );
+			const __m128 t2 = _mm_max_ps( _mm_max_ps( v0, v1 ), v2 );
+			frag4[i].bmin4 = t1, frag4[i].bmax4 = t2, rootMin = _mm_min_ps( rootMin, t1 ), rootMax = _mm_max_ps( rootMax, t2 );
+			triIdx[i] = i;
+		}
 	}
 	root.aabbMin = *(bvhvec3*)&rootMin, root.aabbMax = *(bvhvec3*)&rootMax;
+}
+void BVH::BuildAVX()
+{
+	// aligned data
+	ALIGNED( 64 ) __m256 binbox[3 * AVXBINS];			// 768 bytes
+	ALIGNED( 64 ) __m256 binboxOrig[3 * AVXBINS];		// 768 bytes
+	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};			// 96 bytes
+	ALIGNED( 64 ) __m256 bestLBox, bestRBox;			// 64 bytes
+	// some constants
+	static const __m128 min4 = _mm_set1_ps( BVH_FAR ), max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
+	static const __m128 two4 = _mm_set1_ps( 2.0f ), min1 = _mm_set1_ps( -1 );
+	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
+	static const __m128 signFlip4 = _mm_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f );
+	static const __m128 mask3 = _mm_cmpeq_ps( _mm_setr_ps( 0, 0, 0, 1 ), _mm_setzero_ps() );
+	static const __m128 binmul3 = _mm_set1_ps( AVXBINS * 0.49999f );
+	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR ), mask6 = _mm256_set_m128( mask3, mask3 );
+	static const __m256 signFlip8 = _mm256_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f );
+	for (uint32_t i = 0; i < 3 * AVXBINS; i++) binboxOrig[i] = max8; // binbox initialization template
+	struct FragSSE { __m128 bmin4, bmax4; };
+	FragSSE* frag4 = (FragSSE*)fragment;
+	__m256* frag8 = (__m256*)fragment;
 	// subdivide recursively
 	ALIGNED( 64 ) uint32_t task[128], taskCount = 0, nodeIdx = 0;
+	BVHNode& root = bvhNode[0];
 	const bvhvec3 minDim = (root.aabbMax - root.aabbMin) * 1e-7f;
 	while (1)
 	{
@@ -5569,10 +5617,53 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 	bmin = tinybvh_max( bmin, orig.bmin ), bmax = tinybvh_min( bmax, orig.bmax );
 	const bvhvec3 extent = bmax - bmin;
 	uint32_t Nin = 3, vidx = orig.primIdx * 3;
-	// special case: if this fragment has not been clipped before, only clip against planes on split axis.
-	if (orig.clipped == 0)
+	const float eps = minDim.cell[axis];
+	if (orig.clipped)
 	{
-		const float eps = minDim.cell[axis];
+		// generic case: Sutherland-Hodgeman against six bounding planes
+		bvhvec3 vin[10] = { verts[vidx], verts[vidx + 1], verts[vidx + 2] }, vout[10];
+		for (uint32_t a = 0; a < 3; a++)
+		{
+			const float eps = minDim.cell[a];
+			if (extent.cell[a] > eps)
+			{
+				uint32_t Nout = 0;
+				const float l = bmin[a], r = bmax[a];
+				for (uint32_t v = 0; v < Nin; v++)
+				{
+					bvhvec3 v0 = vin[v], v1 = vin[(v + 1) % Nin];
+					const bool v0in = v0[a] >= l - eps, v1in = v1[a] >= l - eps;
+					if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+					{
+						bvhvec3 C = v0 + (l - v0[a]) / (v1[a] - v0[a]) * (v1 - v0);
+						C[a] = l /* accurate */, vout[Nout++] = C;
+					}
+					if (v1in) vout[Nout++] = v1;
+				}
+				Nin = 0;
+				for (uint32_t v = 0; v < Nout; v++)
+				{
+					bvhvec3 v0 = vout[v], v1 = vout[(v + 1) % Nout];
+					const bool v0in = v0[a] <= r + eps, v1in = v1[a] <= r + eps;
+					if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+					{
+						bvhvec3 C = v0 + (r - v0[a]) / (v1[a] - v0[a]) * (v1 - v0);
+						C[a] = r /* accurate */, vin[Nin++] = C;
+					}
+					if (v1in) vin[Nin++] = v1;
+				}
+			}
+		}
+		bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR );
+		for (uint32_t i = 0; i < Nin; i++) mn = tinybvh_min( mn, vin[i] ), mx = tinybvh_max( mx, vin[i] );
+		newFrag.primIdx = orig.primIdx;
+		newFrag.bmin = tinybvh_max( mn, bmin ), newFrag.bmax = tinybvh_min( mx, bmax );
+		newFrag.clipped = 1;
+		return Nin > 0;
+	}
+	else
+	{
+		// special case: if this fragment has not been clipped before, only clip against planes on split axis.
 		bool hasVerts = false;
 		bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR ), vout[4], C;
 		if (extent.cell[axis] > eps)
@@ -5618,46 +5709,6 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 		newFrag.primIdx = orig.primIdx, newFrag.clipped = 1;
 		return hasVerts;
 	}
-	// generic case: Sutherland-Hodgeman against six bounding planes
-	bvhvec3 vin[10] = { verts[vidx], verts[vidx + 1], verts[vidx + 2] }, vout[10];
-	for (uint32_t a = 0; a < 3; a++)
-	{
-		const float eps = minDim.cell[a];
-		if (extent.cell[a] > eps)
-		{
-			uint32_t Nout = 0;
-			const float l = bmin[a], r = bmax[a];
-			for (uint32_t v = 0; v < Nin; v++)
-			{
-				bvhvec3 v0 = vin[v], v1 = vin[(v + 1) % Nin];
-				const bool v0in = v0[a] >= l - eps, v1in = v1[a] >= l - eps;
-				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
-				{
-					bvhvec3 C = v0 + (l - v0[a]) / (v1[a] - v0[a]) * (v1 - v0);
-					C[a] = l /* accurate */, vout[Nout++] = C;
-				}
-				if (v1in) vout[Nout++] = v1;
-			}
-			Nin = 0;
-			for (uint32_t v = 0; v < Nout; v++)
-			{
-				bvhvec3 v0 = vout[v], v1 = vout[(v + 1) % Nout];
-				const bool v0in = v0[a] <= r + eps, v1in = v1[a] <= r + eps;
-				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
-				{
-					bvhvec3 C = v0 + (r - v0[a]) / (v1[a] - v0[a]) * (v1 - v0);
-					C[a] = r /* accurate */, vin[Nin++] = C;
-				}
-				if (v1in) vin[Nin++] = v1;
-			}
-		}
-	}
-	bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR );
-	for (uint32_t i = 0; i < Nin; i++) mn = tinybvh_min( mn, vin[i] ), mx = tinybvh_max( mx, vin[i] );
-	newFrag.primIdx = orig.primIdx;
-	newFrag.bmin = tinybvh_max( mn, bmin ), newFrag.bmax = tinybvh_min( mx, bmax );
-	newFrag.clipped = 1;
-	return Nin > 0;
 }
 
 #endif
