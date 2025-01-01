@@ -1,6 +1,3 @@
-# dev
-This is the **development branch** of tinybvh (and tinyocl). New features are tested here first!
-
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
@@ -72,7 +69,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.1.7
+# Version 1.1.8
 
 Version 1.1.0 introduced a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. You can simply instantiate the desired layout; conversion (and data ownership) is then handled properly by the library. Examples:
 
@@ -88,11 +85,18 @@ bvh.Build( (bvhvec4*)myTriData, triangleCount );
 bvh.Intersect( ray );
 ````
 
+To build a BVH for indexed vertices, use the new indexed interface:
+
+````
+BVH bvh;
+bvh.Build( (bvhvec4*)vertices, (uint32_t*)indices, triangleCount );
+````
+
 If you wish to use a specific builder (such as the spatial splits builder) or if you need to do custom operations on the BVH, such as post-build optimizing, you can still do the conversions manually. Example:
 
 ````
 BVH bvh;
-bvh.Build( (bvhvec4*)myTriData, triangleCount );
+bvh.BuildHQ( verts, indices, triCount );
 BVH_Verbose tmp;
 tmp.ConvertFrom( bvh );
 tmp.Optimize( 100000 );

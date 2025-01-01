@@ -98,30 +98,11 @@ void Init()
 	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 0 ) );
 	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-#if 1
 	if (!bvh.Load( "cwbvh.bin" ))
 	{
 		bvh.BuildHQ( tris, triCount );
-		bvh.Save( "cwbvh.bin" );
+		bvh.Save( "cwbvh.bin" ); // cache for next run.
 	}
-#else
-	// this path will take a while, until we have a proper optimizer.
-	if (!bvh.Load( "cwbvh.bin" ))
-	{
-		// optimizing a BVH: from BVH to BVH_Verbose, optimize, then back to BVH.
-		BVH bvh2;
-		bvh2.Build( tris, triCount );
-		BVH_Verbose verbose;
-		verbose.ConvertFrom( bvh2 );
-		verbose.Optimize( 5000000 ); // this will take a while: Next time, use cache.
-		bvh2.ConvertFrom( verbose );
-		// building a cwbvh without the convenient constructor: From BVH, via BVH8.
-		MBVH<8> bvh8;
-		bvh8.ConvertFrom( bvh2 );
-		bvh.ConvertFrom( bvh8 );
-		bvh.Save( "cwbvh.bin" );
-	}
-#endif
 	// create OpenCL buffers for BVH data
 	cwbvhNodes = new Buffer( bvh.usedBlocks * sizeof( bvhvec4 ), bvh.bvh8Data );
 	cwbvhTris = new Buffer( bvh.idxCount * 3 * sizeof( bvhvec4 ), bvh.bvh8Tris );
