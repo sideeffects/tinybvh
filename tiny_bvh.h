@@ -566,6 +566,8 @@ public:
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 #ifdef BVH_USEAVX
 	void BuildAVX( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildAVX( const bvhvec4slice& vertices );
@@ -1477,9 +1479,20 @@ void BVH::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) } );
 }
+void BVH::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	BuildHQ( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
 void BVH::BuildHQ( const bvhvec4slice& vertices )
 {
 	PrepareHQBuild( vertices, 0, 0 );
+	BuildHQ();
+}
+void BVH::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	PrepareHQBuild( vertices, indices, prims );
 	BuildHQ();
 }
 void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims )
@@ -3346,10 +3359,9 @@ void BVH::BuildAVX()
 	ALIGNED( 64 ) uint32_t count[3][AVXBINS]{};			// 96 bytes
 	ALIGNED( 64 ) __m256 bestLBox, bestRBox;			// 64 bytes
 	// some constants
-	static const __m128 min4 = _mm_set1_ps( BVH_FAR ), max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
+	static const __m128 half4 = _mm_set1_ps( 0.5f );
 	static const __m128 two4 = _mm_set1_ps( 2.0f ), min1 = _mm_set1_ps( -1 );
 	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
-	static const __m128 signFlip4 = _mm_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f );
 	static const __m128 mask3 = _mm_cmpeq_ps( _mm_setr_ps( 0, 0, 0, 1 ), _mm_setzero_ps() );
 	static const __m128 binmul3 = _mm_set1_ps( AVXBINS * 0.49999f );
 	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR ), mask6 = _mm256_set_m128( mask3, mask3 );
@@ -3481,7 +3493,6 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 	static const __m128 min4 = _mm_set1_ps( BVH_FAR ), max4 = _mm_set1_ps( -BVH_FAR ), half4 = _mm_set1_ps( 0.5f );
 	static const __m128 two4 = _mm_set1_ps( 2.0f ), min1 = _mm_set1_ps( -1 );
 	static const __m128i maxbin4 = _mm_set1_epi32( 7 );
-	static const __m128 signFlip4 = _mm_setr_ps( -0.0f, -0.0f, -0.0f, 0.0f );
 	static const __m128 mask3 = _mm_cmpeq_ps( _mm_setr_ps( 0, 0, 0, 1 ), _mm_setzero_ps() );
 	static const __m128 binmul3 = _mm_set1_ps( AVXBINS * 0.49999f );
 	static const __m256 max8 = _mm256_set1_ps( -BVH_FAR ), mask6 = _mm256_set_m128( mask3, mask3 );
@@ -3577,7 +3588,7 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 			binbox[i0] = r0, binbox[AVXBINS + i1] = r1, binbox[2 * AVXBINS + i2] = r2;
 			// calculate per-split totals
 			float splitCost = 1e30f, rSAV = 1.0f / node.SurfaceArea();
-			uint32_t bestAxis = 0, bestPos = 0, n = newNodePtr, j = node.leftFirst + node.triCount;
+			uint32_t bestAxis = 0, bestPos = 0;
 			const __m256* bb = binbox; // REMINDER: fragment bounds in __m256 have .bmin negated.
 			for (int32_t a = 0; a < 3; a++, bb += AVXBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
 			{
