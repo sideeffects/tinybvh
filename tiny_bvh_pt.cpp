@@ -15,6 +15,7 @@
 #include <atomic>
 #include <fstream>
 #include <thread>
+#include <vector>
 
 using namespace tinybvh;
 
