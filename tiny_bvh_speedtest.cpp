@@ -70,6 +70,7 @@ unsigned refOccluded = 0, * refOccl = 0;
 
 // bvh layouts
 BVH* bvh = new BVH();
+BVH* ref_bvh = new BVH();
 BVH_Verbose* bvh_verbose = 0;
 BVH_Double* bvh_double = new BVH_Double();
 BVH_SoA* bvh_soa = 0;
@@ -142,7 +143,7 @@ float TestPrimaryRays( uint32_t layout, Ray* batch, unsigned N, unsigned passes 
 		if (pass == 1) t.reset(); // first pass is cache warming
 		switch (layout)
 		{
-		case _DEFAULT: for (unsigned i = 0; i < N; i++) bvh->Intersect( batch[i] ); break;
+		case _DEFAULT: for (unsigned i = 0; i < N; i++) ref_bvh->Intersect( batch[i] ); break;
 		case _GPU2: for (unsigned i = 0; i < N; i++) bvh_gpu->Intersect( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) bvh4_cpu->Intersect( batch[i] ); break;
 		case _GPU4: for (unsigned i = 0; i < N; i++) bvh4_gpu->Intersect( batch[i] ); break;
@@ -545,6 +546,7 @@ int main()
 
 	// report CPU single ray, single-core performance
 	printf( "BVH traversal speed - single-threaded\n" );
+	ref_bvh->Build( triangles, verts / 3 );
 
 	// estimate correct shadow ray epsilon based on scene extends
 	tinybvh::bvhvec4 bmin( 1e30f ), bmax( -1e30f );
@@ -569,7 +571,7 @@ int main()
 	// get reference shadow ray query result
 	refOccluded = 0, refOccl = new unsigned[Nsmall];
 	for (int i = 0; i < Nsmall; i++)
-		refOccluded += (refOccl[i] = bvh->IsOccluded( shadowBatch[i] ) ? 1 : 0);
+		refOccluded += (refOccl[i] = ref_bvh->IsOccluded( shadowBatch[i] ) ? 1 : 0);
 
 #ifdef TRAVERSE_2WAY_ST
 
@@ -590,7 +592,7 @@ int main()
 	if (!bvh_gpu)
 	{
 		bvh_gpu = new BVH_GPU();
-		bvh_gpu->Build( triangles, verts / 3 );
+		bvh_gpu->BuildHQ( triangles, verts / 3 );
 	}
 	printf( "- AILA_LAINE  - primary: " );
 	traceTime = TestPrimaryRays( _GPU2, smallBatch, Nsmall, 3 );
@@ -607,7 +609,7 @@ int main()
 	if (!bvh_soa)
 	{
 		bvh_soa = new BVH_SoA();
-		bvh_soa->Build( triangles, verts / 3 );
+		bvh_soa->BuildHQ( triangles, verts / 3 );
 	}
 	printf( "- ALT_SOA     - primary: " );
 	traceTime = TestPrimaryRays( _SOA, smallBatch, Nsmall, 3 );
@@ -624,7 +626,7 @@ int main()
 	if (!bvh4_cpu)
 	{
 		bvh4_cpu = new BVH4_CPU();
-		bvh4_cpu->Build( triangles, verts / 3 );
+		bvh4_cpu->BuildHQ( triangles, verts / 3 );
 	}
 	printf( "- BVH4_AFRA   - primary: " );
 	traceTime = TestPrimaryRays( _CPU4, smallBatch, Nsmall, 3 );
@@ -651,7 +653,7 @@ int main()
 	if (!cwbvh)
 	{
 		cwbvh = new BVH8_CWBVH();
-		cwbvh->Build( triangles, verts / 3 );
+		cwbvh->BuildHQ( triangles, verts / 3 );
 	}
 	printf( "- BVH8/CWBVH  - primary: " );
 	traceTime = TestPrimaryRays( _CWBVH, smallBatch, Nsmall, 3 );

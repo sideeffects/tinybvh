@@ -679,6 +679,8 @@ public:
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void ConvertFrom( const BVH& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
@@ -708,6 +710,8 @@ public:
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void ConvertFrom( const BVH& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
@@ -778,6 +782,8 @@ public:
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void ConvertFrom( const BVH& original );
 	void SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims );
 	// BVH data
@@ -817,6 +823,8 @@ public:
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void ConvertFrom( const MBVH<4>& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
@@ -850,6 +858,8 @@ public:
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void ConvertFrom( const MBVH<4>& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
@@ -874,6 +884,8 @@ public:
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void ConvertFrom( MBVH<8>& original ); // NOTE: Not const; this may change some nodes in the original.
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
@@ -1293,22 +1305,22 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 // This code uses no SIMD instructions. Faster code, using SSE/AVX, is available for x64 CPUs.
 // For GPU rendering: The resulting BVH should be converted to a more optimal
 // format after construction, e.g. BVH_GPU, BVH4_GPU or BVH8_CWBVH.
-void BVH::Build( const bvhvec4* vertices, const uint32_t primCount )
+void BVH::Build( const bvhvec4* vertices, const uint32_t prims )
 {
 	// build the BVH with a continuous array of bvhvec4 vertices:
 	// in this case, the stride for the slice is 16 bytes.
-	Build( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) } );
-}
-void BVH::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount )
-{
-	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
-	Build( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) }, indices, primCount );
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) } );
 }
 void BVH::Build( const bvhvec4slice& vertices )
 {
 	// build the BVH from vertices stored in a slice.
 	PrepareBuild( vertices, 0, 0 /* empty index list; primcount is derived from slice */ );
 	Build();
+}
+void BVH::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
 }
 void BVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
@@ -1479,22 +1491,26 @@ void BVH::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) } );
 }
+
 void BVH::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
 {
 	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
 	BuildHQ( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
 }
+
 void BVH::BuildHQ( const bvhvec4slice& vertices )
 {
 	PrepareHQBuild( vertices, 0, 0 );
 	BuildHQ();
 }
+
 void BVH::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
 	PrepareHQBuild( vertices, indices, prims );
 	BuildHQ();
 }
+
 void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims )
 {
 	uint32_t primCount = prims > 0 ? prims : vertices.count / 3;
@@ -2328,18 +2344,48 @@ void BVH_GPU::Build( const bvhvec4* vertices, const uint32_t primCount )
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH_GPU::Build( const bvhvec4slice& vertices )
 {
+	bvh.context = context;
 	bvh.BuildDefault( vertices );
 	ConvertFrom( bvh );
 }
+
+void BVH_GPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH_GPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	bvh.context = context;
+	bvh.BuildDefault( vertices, indices, prims );
+	ConvertFrom( bvh );
+}
+
 void BVH_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH_GPU::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh.BuildHQ( vertices );
+	ConvertFrom( bvh );
+}
+
+void BVH_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	BuildHQ( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH_GPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	bvh.context = context;
+	bvh.BuildHQ( vertices, indices, prims );
 	ConvertFrom( bvh );
 }
 
@@ -2446,20 +2492,49 @@ void BVH_SoA::Build( const bvhvec4* vertices, const uint32_t primCount )
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH_SoA::Build( const bvhvec4slice& vertices )
 {
 	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildDefault( vertices );
 	ConvertFrom( bvh );
 }
+
+void BVH_SoA::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH_SoA::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	bvh.context = context;
+	bvh.BuildDefault( vertices, indices, prims );
+	ConvertFrom( bvh );
+}
+
 void BVH_SoA::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH_SoA::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildHQ( vertices );
+	ConvertFrom( bvh );
+}
+
+void BVH_SoA::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	BuildHQ( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH_SoA::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	bvh.context = context;
+	bvh.BuildHQ( vertices, indices, prims );
 	ConvertFrom( bvh );
 }
 
@@ -2526,20 +2601,49 @@ template<int M> void MBVH<M>::Build( const bvhvec4* vertices, const uint32_t pri
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 template<int M> void MBVH<M>::Build( const bvhvec4slice& vertices )
 {
 	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildDefault( vertices );
 	ConvertFrom( bvh );
 }
+
+template<int M> void MBVH<M>::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+template<int M> void MBVH<M>::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	bvh.context = context;
+	bvh.BuildDefault( vertices, indices, prims );
+	ConvertFrom( bvh );
+}
+
 template<int M> void MBVH<M>::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 template<int M> void MBVH<M>::BuildHQ( const bvhvec4slice& vertices )
 {
-	bvh.context = context; // properly propagate context to fix issue #66.
+	bvh.context = context;
 	bvh.BuildHQ( vertices );
+	ConvertFrom( bvh );
+}
+
+template<int M> void MBVH<M>::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+template<int M> void MBVH<M>::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	bvh.context = context;
+	bvh.BuildHQ( vertices, indices, prims );
 	ConvertFrom( bvh );
 }
 
@@ -2660,20 +2764,49 @@ void BVH4_CPU::Build( const bvhvec4* vertices, const uint32_t primCount )
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH4_CPU::Build( const bvhvec4slice& vertices )
 {
 	bvh4.context = context; // properly propagate context to fix issue #66.
 	bvh4.Build( vertices );
 	ConvertFrom( bvh4 );
 }
+
+void BVH4_CPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH4_CPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	bvh4.context = context;
+	bvh4.Build( vertices, indices, prims );
+	ConvertFrom( bvh4 );
+}
+
 void BVH4_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH4_CPU::BuildHQ( const bvhvec4slice& vertices )
 {
-	bvh4.context = context; // properly propagate context to fix issue #66.
+	bvh4.context = context;
 	bvh4.BuildHQ( vertices );
+	ConvertFrom( bvh4 );
+}
+
+void BVH4_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH4_CPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	bvh4.context = context;
+	bvh4.BuildHQ( vertices, indices, prims );
 	ConvertFrom( bvh4 );
 }
 
@@ -2775,20 +2908,49 @@ void BVH4_GPU::Build( const bvhvec4* vertices, const uint32_t primCount )
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH4_GPU::Build( const bvhvec4slice& vertices )
 {
-	bvh4.context = context; // properly propagate context to fix issue #66.
+	bvh4.context = context;
 	bvh4.Build( vertices );
 	ConvertFrom( bvh4 );
 }
+
+void BVH4_GPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH4_GPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	bvh4.context = context;
+	bvh4.Build( vertices, indices, prims );
+	ConvertFrom( bvh4 );
+}
+
 void BVH4_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH4_GPU::BuildHQ( const bvhvec4slice& vertices )
 {
-	bvh4.context = context; // properly propagate context to fix issue #66.
+	bvh4.context = context;
 	bvh4.BuildHQ( vertices );
+	ConvertFrom( bvh4 );
+}
+
+void BVH4_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH4_GPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	bvh4.context = context;
+	bvh4.BuildHQ( vertices, indices, prims );
 	ConvertFrom( bvh4 );
 }
 
@@ -3062,20 +3224,49 @@ void BVH8_CWBVH::Build( const bvhvec4* vertices, const uint32_t primCount )
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH8_CWBVH::Build( const bvhvec4slice& vertices )
 {
 	bvh8.context = context; // properly propagate context to fix issue #66.
 	bvh8.Build( vertices );
 	ConvertFrom( bvh8 );
 }
+
+void BVH8_CWBVH::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH8_CWBVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	bvh8.context = context;
+	bvh8.Build( vertices, indices, prims );
+	ConvertFrom( bvh8 );
+}
+
 void BVH8_CWBVH::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
+
 void BVH8_CWBVH::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh8.context = context; // properly propagate context to fix issue #66.
 	bvh8.BuildHQ( vertices );
+	ConvertFrom( bvh8 );
+}
+
+void BVH8_CWBVH::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH8_CWBVH::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	bvh8.context = context;
+	bvh8.BuildHQ( vertices, indices, prims );
 	ConvertFrom( bvh8 );
 }
 
