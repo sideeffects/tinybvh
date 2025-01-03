@@ -508,8 +508,8 @@ int main()
 	// measure single-core bvh construction time - AVX builder
 	printf( "- HQ (SBVH) builder: " );
 	t.reset();
-	for (int pass = 0; pass < 3; pass++) bvh->BuildHQ( triangles, verts / 3 );
-	buildTime = t.elapsed() / 3.0f;
+	for (int pass = 0; pass < 2; pass++) bvh->BuildHQ( triangles, verts / 3 );
+	buildTime = t.elapsed() / 2.0f;
 	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
 	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
@@ -687,7 +687,7 @@ int main()
 		bvh_verbose->ConvertFrom( *bvh );
 	}
 	t.reset();
-	bvh_verbose->Optimize( 1000000 ); // optimize the raw SBVH
+	bvh_verbose->Optimize( 1500000 ); // optimize the raw SBVH
 	bvh->ConvertFrom( *bvh_verbose );
 	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
 	printf( "done (%.2fs). New: %i nodes, SAH=%.2f to %.2f, rayCost=%.2f\n", t.elapsed(), bvh->NodeCount(), prevSAH, bvh->SAHCost(), avgCost );
