@@ -27,8 +27,8 @@ int verts = 0;
 // setup view pyramid for a pinhole camera: 
 // eye, p1 (top-left), p2 (top-right) and p3 (bottom-left)
 #ifdef LOADSCENE
-static bvhvec3 eye( 0, 30, 0 ), p1, p2, p3;
-static bvhvec3 view = normalize( bvhvec3( -8, 2, -1.7f ) );
+static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
+static bvhvec3 view = normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 #else
 static bvhvec3 eye( -3.5f, -1.5f, -6.5f ), p1, p2, p3;
 static bvhvec3 view = normalize( bvhvec3( 3, 1.5f, 5 ) );
