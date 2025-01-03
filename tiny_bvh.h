@@ -82,6 +82,7 @@ THE SOFTWARE.
 
 // Binned BVH building: bin count.
 #define BVHBINS 8
+#define HQBVHBINS 32
 #define AVXBINS 8 // must stay at 8.
 
 // SAH BVH building: Heuristic parameters
@@ -1592,18 +1593,18 @@ void BVH::BuildHQ()
 		{
 			BVHNode& node = bvhNode[nodeIdx];
 			// find optimal object split
-			bvhvec3 binMin[3][BVHBINS], binMax[3][BVHBINS];
-			for (uint32_t a = 0; a < 3; a++) for (uint32_t i = 0; i < BVHBINS; i++) binMin[a][i] = BVH_FAR, binMax[a][i] = -BVH_FAR;
-			uint32_t count[3][BVHBINS];
-			memset( count, 0, BVHBINS * 3 * sizeof( uint32_t ) );
-			const bvhvec3 rpd3 = bvhvec3( BVHBINS / (node.aabbMax - node.aabbMin) ), nmin3 = node.aabbMin;
+			bvhvec3 binMin[3][HQBVHBINS], binMax[3][HQBVHBINS];
+			for (uint32_t a = 0; a < 3; a++) for (uint32_t i = 0; i < HQBVHBINS; i++) binMin[a][i] = BVH_FAR, binMax[a][i] = -BVH_FAR;
+			uint32_t count[3][HQBVHBINS];
+			memset( count, 0, HQBVHBINS * 3 * sizeof( uint32_t ) );
+			const bvhvec3 rpd3 = bvhvec3( HQBVHBINS / (node.aabbMax - node.aabbMin) ), nmin3 = node.aabbMin;
 			for (uint32_t i = 0; i < node.triCount; i++) // process all tris for x,y and z at once
 			{
 				const uint32_t fi = triIdx[node.leftFirst + i];
 				bvhint3 bi = bvhint3( ((fragment[fi].bmin + fragment[fi].bmax) * 0.5f - nmin3) * rpd3 );
-				bi.x = tinybvh_clamp( bi.x, 0, BVHBINS - 1 );
-				bi.y = tinybvh_clamp( bi.y, 0, BVHBINS - 1 );
-				bi.z = tinybvh_clamp( bi.z, 0, BVHBINS - 1 );
+				bi.x = tinybvh_clamp( bi.x, 0, HQBVHBINS - 1 );
+				bi.y = tinybvh_clamp( bi.y, 0, HQBVHBINS - 1 );
+				bi.z = tinybvh_clamp( bi.z, 0, HQBVHBINS - 1 );
 				binMin[0][bi.x] = tinybvh_min( binMin[0][bi.x], fragment[fi].bmin );
 				binMax[0][bi.x] = tinybvh_max( binMax[0][bi.x], fragment[fi].bmax ), count[0][bi.x]++;
 				binMin[1][bi.y] = tinybvh_min( binMin[1][bi.y], fragment[fi].bmin );
@@ -1616,21 +1617,21 @@ void BVH::BuildHQ()
 			uint32_t bestAxis = 0, bestPos = 0;
 			for (int32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
 			{
-				bvhvec3 lBMin[BVHBINS - 1], rBMin[BVHBINS - 1], l1 = BVH_FAR, l2 = -BVH_FAR;
-				bvhvec3 lBMax[BVHBINS - 1], rBMax[BVHBINS - 1], r1 = BVH_FAR, r2 = -BVH_FAR;
-				float ANL[BVHBINS - 1], ANR[BVHBINS - 1];
-				for (uint32_t lN = 0, rN = 0, i = 0; i < BVHBINS - 1; i++)
+				bvhvec3 lBMin[HQBVHBINS - 1], rBMin[HQBVHBINS - 1], l1 = BVH_FAR, l2 = -BVH_FAR;
+				bvhvec3 lBMax[HQBVHBINS - 1], rBMax[HQBVHBINS - 1], r1 = BVH_FAR, r2 = -BVH_FAR;
+				float ANL[HQBVHBINS - 1], ANR[HQBVHBINS - 1];
+				for (uint32_t lN = 0, rN = 0, i = 0; i < HQBVHBINS - 1; i++)
 				{
 					lBMin[i] = l1 = tinybvh_min( l1, binMin[a][i] );
-					rBMin[BVHBINS - 2 - i] = r1 = tinybvh_min( r1, binMin[a][BVHBINS - 1 - i] );
+					rBMin[HQBVHBINS - 2 - i] = r1 = tinybvh_min( r1, binMin[a][HQBVHBINS - 1 - i] );
 					lBMax[i] = l2 = tinybvh_max( l2, binMax[a][i] );
-					rBMax[BVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[a][BVHBINS - 1 - i] );
-					lN += count[a][i], rN += count[a][BVHBINS - 1 - i];
+					rBMax[HQBVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[a][HQBVHBINS - 1 - i] );
+					lN += count[a][i], rN += count[a][HQBVHBINS - 1 - i];
 					ANL[i] = lN == 0 ? BVH_FAR : ((l2 - l1).halfArea() * (float)lN);
-					ANR[BVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
+					ANR[HQBVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
 				}
 				// evaluate bin totals to find best position for object split
-				for (uint32_t i = 0; i < BVHBINS - 1; i++)
+				for (uint32_t i = 0; i < HQBVHBINS - 1; i++)
 				{
 					const float C = C_TRAV + C_INT * rSAV * (ANL[i] + ANR[i]);
 					if (C >= splitCost) continue;
@@ -1640,7 +1641,7 @@ void BVH::BuildHQ()
 			}
 			// consider a spatial split
 			bool spatial = false;
-			uint32_t NL[BVHBINS - 1], NR[BVHBINS - 1], budget = sliceEnd - sliceStart;
+			uint32_t NL[HQBVHBINS - 1], NR[HQBVHBINS - 1], budget = sliceEnd - sliceStart;
 			bvhvec3 spatialUnion = bestLMax - bestRMin;
 			float spatialOverlap = (spatialUnion.halfArea()) / rootArea;
 			if (budget > node.triCount && splitCost < 1e30f && spatialOverlap > 1e-5f)
@@ -1648,17 +1649,17 @@ void BVH::BuildHQ()
 				for (uint32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
 				{
 					// setup bins
-					bvhvec3 binMin[BVHBINS], binMax[BVHBINS];
-					for (uint32_t i = 0; i < BVHBINS; i++) binMin[i] = BVH_FAR, binMax[i] = -BVH_FAR;
-					uint32_t countIn[BVHBINS] = { 0 }, countOut[BVHBINS] = { 0 };
+					bvhvec3 binMin[HQBVHBINS], binMax[HQBVHBINS];
+					for (uint32_t i = 0; i < HQBVHBINS; i++) binMin[i] = BVH_FAR, binMax[i] = -BVH_FAR;
+					uint32_t countIn[HQBVHBINS] = { 0 }, countOut[HQBVHBINS] = { 0 };
 					// populate bins with clipped fragments
-					const float planeDist = (node.aabbMax[a] - node.aabbMin[a]) / (BVHBINS * 0.9999f);
+					const float planeDist = (node.aabbMax[a] - node.aabbMin[a]) / (HQBVHBINS * 0.9999f);
 					const float rPlaneDist = 1.0f / planeDist, nodeMin = node.aabbMin[a];
 					for (uint32_t i = 0; i < node.triCount; i++)
 					{
 						const uint32_t fragIdx = triIdxA[node.leftFirst + i];
-						const int32_t bin1 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmin[a] - nodeMin) * rPlaneDist), 0, BVHBINS - 1 );
-						const int32_t bin2 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmax[a] - nodeMin) * rPlaneDist), 0, BVHBINS - 1 );
+						const int32_t bin1 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmin[a] - nodeMin) * rPlaneDist), 0, HQBVHBINS - 1 );
+						const int32_t bin2 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmax[a] - nodeMin) * rPlaneDist), 0, HQBVHBINS - 1 );
 						countIn[bin1]++, countOut[bin2]++;
 						if (bin2 == bin1)
 						{
@@ -1680,19 +1681,19 @@ void BVH::BuildHQ()
 						}
 					}
 					// evaluate split candidates
-					bvhvec3 lBMin[BVHBINS - 1], rBMin[BVHBINS - 1], l1 = BVH_FAR, l2 = -BVH_FAR;
-					bvhvec3 lBMax[BVHBINS - 1], rBMax[BVHBINS - 1], r1 = BVH_FAR, r2 = -BVH_FAR;
-					float ANL[BVHBINS], ANR[BVHBINS];
-					for (uint32_t lN = 0, rN = 0, i = 0; i < BVHBINS - 1; i++)
+					bvhvec3 lBMin[HQBVHBINS - 1], rBMin[HQBVHBINS - 1], l1 = BVH_FAR, l2 = -BVH_FAR;
+					bvhvec3 lBMax[HQBVHBINS - 1], rBMax[HQBVHBINS - 1], r1 = BVH_FAR, r2 = -BVH_FAR;
+					float ANL[HQBVHBINS], ANR[HQBVHBINS];
+					for (uint32_t lN = 0, rN = 0, i = 0; i < HQBVHBINS - 1; i++)
 					{
-						lBMin[i] = l1 = tinybvh_min( l1, binMin[i] ), rBMin[BVHBINS - 2 - i] = r1 = tinybvh_min( r1, binMin[BVHBINS - 1 - i] );
-						lBMax[i] = l2 = tinybvh_max( l2, binMax[i] ), rBMax[BVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[BVHBINS - 1 - i] );
-						lN += countIn[i], rN += countOut[BVHBINS - 1 - i], NL[i] = lN, NR[BVHBINS - 2 - i] = rN;
+						lBMin[i] = l1 = tinybvh_min( l1, binMin[i] ), rBMin[HQBVHBINS - 2 - i] = r1 = tinybvh_min( r1, binMin[HQBVHBINS - 1 - i] );
+						lBMax[i] = l2 = tinybvh_max( l2, binMax[i] ), rBMax[HQBVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[HQBVHBINS - 1 - i] );
+						lN += countIn[i], rN += countOut[HQBVHBINS - 1 - i], NL[i] = lN, NR[HQBVHBINS - 2 - i] = rN;
 						ANL[i] = lN == 0 ? BVH_FAR : ((l2 - l1).halfArea() * (float)lN);
-						ANR[BVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
+						ANR[HQBVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
 					}
 					// find best position for spatial split
-					for (uint32_t i = 0; i < BVHBINS - 1; i++)
+					for (uint32_t i = 0; i < HQBVHBINS - 1; i++)
 					{
 						const float Cspatial = C_TRAV + C_INT * rSAV * (ANL[i] + ANR[i]);
 						if (Cspatial < splitCost && NL[i] + NR[i] < budget)
@@ -1711,7 +1712,7 @@ void BVH::BuildHQ()
 			uint32_t A = sliceStart, B = sliceEnd, src = node.leftFirst;
 			if (spatial)
 			{
-				const float planeDist = (node.aabbMax[bestAxis] - node.aabbMin[bestAxis]) / (BVHBINS * 0.9999f);
+				const float planeDist = (node.aabbMax[bestAxis] - node.aabbMin[bestAxis]) / (HQBVHBINS * 0.9999f);
 				const float rPlaneDist = 1.0f / planeDist, nodeMin = node.aabbMin[bestAxis];
 				for (uint32_t i = 0; i < node.triCount; i++)
 				{
@@ -1738,7 +1739,7 @@ void BVH::BuildHQ()
 				{
 					const uint32_t fr = triIdx[src + i];
 					int32_t bi = (int32_t)(((fragment[fr].bmin[bestAxis] + fragment[fr].bmax[bestAxis]) * 0.5f - nmin) * rpd);
-					bi = tinybvh_clamp( bi, 0, BVHBINS - 1 );
+					bi = tinybvh_clamp( bi, 0, HQBVHBINS - 1 );
 					if (bi <= (int32_t)bestPos) triIdxB[A++] = fr; else triIdxB[--B] = fr;
 				}
 			}
@@ -3829,7 +3830,7 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 			}
 			// consider a spatial split
 			bool spatial = false;
-			uint32_t NL[BVHBINS - 1], NR[BVHBINS - 1], budget = sliceEnd - sliceStart;
+			uint32_t NL[AVXBINS - 1], NR[AVXBINS - 1], budget = sliceEnd - sliceStart;
 			bvhvec3 bestLMin = bvhvec3( LANE8( bestLBox, 0 ), LANE8( bestLBox, 1 ), LANE8( bestLBox, 2 ) ) * -1.0f;
 			bvhvec3 bestLMax = bvhvec3( LANE8( bestLBox, 4 ), LANE8( bestLBox, 5 ), LANE8( bestLBox, 6 ) );
 			bvhvec3 bestRMin = bvhvec3( LANE8( bestRBox, 0 ), LANE8( bestRBox, 1 ), LANE8( bestRBox, 2 ) ) * -1.0f;
@@ -3841,17 +3842,17 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 				for (uint32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
 				{
 					// setup bins
-					bvhvec3 binMin[BVHBINS], binMax[BVHBINS];
-					for (uint32_t i = 0; i < BVHBINS; i++) binMin[i] = BVH_FAR, binMax[i] = -BVH_FAR;
-					uint32_t countIn[BVHBINS] = { 0 }, countOut[BVHBINS] = { 0 };
+					bvhvec3 binMin[AVXBINS], binMax[AVXBINS];
+					for (uint32_t i = 0; i < AVXBINS; i++) binMin[i] = BVH_FAR, binMax[i] = -BVH_FAR;
+					uint32_t countIn[AVXBINS] = { 0 }, countOut[AVXBINS] = { 0 };
 					// populate bins with clipped fragments
-					const float planeDist = (node.aabbMax[a] - node.aabbMin[a]) / (BVHBINS * 0.9999f);
+					const float planeDist = (node.aabbMax[a] - node.aabbMin[a]) / (AVXBINS * 0.9999f);
 					const float rPlaneDist = 1.0f / planeDist, nodeMin = node.aabbMin[a];
 					for (uint32_t i = 0; i < node.triCount; i++)
 					{
 						const uint32_t fragIdx = triIdxA[node.leftFirst + i];
-						const int32_t bin1 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmin[a] - nodeMin) * rPlaneDist), 0, BVHBINS - 1 );
-						const int32_t bin2 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmax[a] - nodeMin) * rPlaneDist), 0, BVHBINS - 1 );
+						const int32_t bin1 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmin[a] - nodeMin) * rPlaneDist), 0, AVXBINS - 1 );
+						const int32_t bin2 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmax[a] - nodeMin) * rPlaneDist), 0, AVXBINS - 1 );
 						countIn[bin1]++, countOut[bin2]++;
 						if (bin2 == bin1)
 						{
@@ -3873,19 +3874,19 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 						}
 					}
 					// evaluate split candidates
-					bvhvec3 lBMin[BVHBINS - 1], rBMin[BVHBINS - 1], l1 = BVH_FAR, l2 = -BVH_FAR;
-					bvhvec3 lBMax[BVHBINS - 1], rBMax[BVHBINS - 1], r1 = BVH_FAR, r2 = -BVH_FAR;
-					float ANL[BVHBINS], ANR[BVHBINS];
-					for (uint32_t lN = 0, rN = 0, i = 0; i < BVHBINS - 1; i++)
+					bvhvec3 lBMin[AVXBINS - 1], rBMin[AVXBINS - 1], l1 = BVH_FAR, l2 = -BVH_FAR;
+					bvhvec3 lBMax[AVXBINS - 1], rBMax[AVXBINS - 1], r1 = BVH_FAR, r2 = -BVH_FAR;
+					float ANL[AVXBINS], ANR[AVXBINS];
+					for (uint32_t lN = 0, rN = 0, i = 0; i < AVXBINS - 1; i++)
 					{
-						lBMin[i] = l1 = tinybvh_min( l1, binMin[i] ), rBMin[BVHBINS - 2 - i] = r1 = tinybvh_min( r1, binMin[BVHBINS - 1 - i] );
-						lBMax[i] = l2 = tinybvh_max( l2, binMax[i] ), rBMax[BVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[BVHBINS - 1 - i] );
-						lN += countIn[i], rN += countOut[BVHBINS - 1 - i], NL[i] = lN, NR[BVHBINS - 2 - i] = rN;
+						lBMin[i] = l1 = tinybvh_min( l1, binMin[i] ), rBMin[AVXBINS - 2 - i] = r1 = tinybvh_min( r1, binMin[AVXBINS - 1 - i] );
+						lBMax[i] = l2 = tinybvh_max( l2, binMax[i] ), rBMax[AVXBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[AVXBINS - 1 - i] );
+						lN += countIn[i], rN += countOut[AVXBINS - 1 - i], NL[i] = lN, NR[AVXBINS - 2 - i] = rN;
 						ANL[i] = lN == 0 ? BVH_FAR : ((l2 - l1).halfArea() * (float)lN);
-						ANR[BVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
+						ANR[AVXBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
 					}
 					// find best position for spatial split
-					for (uint32_t i = 0; i < BVHBINS - 1; i++)
+					for (uint32_t i = 0; i < AVXBINS - 1; i++)
 					{
 						const float Cspatial = C_TRAV + C_INT * rSAV * (ANL[i] + ANR[i]);
 						if (Cspatial < splitCost && NL[i] + NR[i] < budget)
@@ -3904,7 +3905,7 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 			uint32_t A = sliceStart, B = sliceEnd, src = node.leftFirst;
 			if (spatial)
 			{
-				const float planeDist = (node.aabbMax[bestAxis] - node.aabbMin[bestAxis]) / (BVHBINS * 0.9999f);
+				const float planeDist = (node.aabbMax[bestAxis] - node.aabbMin[bestAxis]) / (AVXBINS * 0.9999f);
 				const float rPlaneDist = 1.0f / planeDist, nodeMin = node.aabbMin[bestAxis];
 				for (uint32_t i = 0; i < node.triCount; i++)
 				{
