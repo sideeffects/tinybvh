@@ -82,7 +82,7 @@ THE SOFTWARE.
 
 // Binned BVH building: bin count.
 #define BVHBINS 8
-#define HQBVHBINS 16
+#define HQBVHBINS 32
 #define AVXBINS 8 // must stay at 8.
 
 // SAH BVH building: Heuristic parameters
@@ -1510,7 +1510,7 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 {
 	uint32_t primCount = prims > 0 ? prims : vertices.count / 3;
 	const uint32_t slack = primCount >> 1; // for split prims
-	const uint32_t spaceNeeded = primCount * 3;
+	const uint32_t spaceNeeded = primCount * 4;
 	// allocate memory on first build
 	if (allocatedNodes < spaceNeeded)
 	{
@@ -1577,7 +1577,7 @@ void BVH::BuildHQ()
 	BVHNode& root = bvhNode[0];
 	const float rootArea = (root.aabbMax - root.aabbMin).halfArea();
 	struct Task { uint32_t node, sliceStart, sliceEnd, dummy; };
-	ALIGNED( 64 ) Task task[256];
+	ALIGNED( 64 ) Task task[1024];
 	uint32_t taskCount = 0, nodeIdx = 0, sliceStart = 0, sliceEnd = triCount + slack;
 	const bvhvec3 minDim = (root.aabbMax - root.aabbMin) * 1e-7f /* don't touch, carefully picked */;
 	bvhvec3 bestLMin = 0, bestLMax = 0, bestRMin = 0, bestRMax = 0;
@@ -2066,7 +2066,7 @@ int32_t BVH::NodeCount() const
 void BVH::Compact()
 {
 	FATAL_ERROR_IF( bvhNode == 0, "BVH::Compact(), bvhNode == 0." );
-	BVHNode* tmp = (BVHNode*)AlignedAlloc( sizeof( BVHNode ) * usedNodes );
+	BVHNode* tmp = (BVHNode*)AlignedAlloc( sizeof( BVHNode ) * allocatedNodes /* do *not* trim */ );
 	memcpy( tmp, bvhNode, 2 * sizeof( BVHNode ) );
 	newNodePtr = 2;
 	uint32_t nodeIdx = 0, stack[128], stackPtr = 0;
