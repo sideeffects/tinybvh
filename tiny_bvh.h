@@ -82,7 +82,7 @@ THE SOFTWARE.
 
 // Binned BVH building: bin count.
 #define BVHBINS 8
-#define HQBVHBINS 32
+#define HQBVHBINS 16
 #define AVXBINS 8 // must stay at 8.
 
 // SAH BVH building: Heuristic parameters
@@ -1809,11 +1809,8 @@ int32_t BVH::Intersect( Ray& ray ) const
 		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++)
-			{
+			for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 				IntersectTri( ray, verts, triIdx[node->leftFirst + i] );
-				cost += C_INT;
-			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
