@@ -3199,6 +3199,8 @@ BVH8_CWBVH::~BVH8_CWBVH()
 void BVH8_CWBVH::Save( const char* fileName )
 {
 	std::fstream s{ fileName, s.binary | s.out };
+	uint32_t header = TINY_BVH_VERSION_SUB + (TINY_BVH_VERSION_MINOR << 6) + (TINY_BVH_VERSION_MAJOR << 12);
+	s.write( (char*)&header, sizeof( uint32_t ) );
 	s.write( (char*)this, sizeof( BVH8_CWBVH ) );
 	s.write( (char*)bvh8Data, usedBlocks * 16 );
 	s.write( (char*)bvh8Tris, bvh8.idxCount * 4 * 16 );
@@ -3209,6 +3211,11 @@ bool BVH8_CWBVH::Load( const char* fileName )
 	std::fstream s{ fileName, s.binary | s.in };
 	if (!s) return false;
 	BVHContext tmp = context;
+	uint32_t header;
+	s.read( (char*)&header, sizeof( uint32_t ) );
+	if (((header >> 6) & 63) != TINY_BVH_VERSION_MINOR ||
+		((header >> 12) & 63) != TINY_BVH_VERSION_MAJOR ||
+		(header & 63) != TINY_BVH_VERSION_SUB) return false;
 	s.read( (char*)this, sizeof( BVH8_CWBVH ) );
 	context = tmp; // can't load context; function pointers will differ.
 	bvh8Data = (bvhvec4*)AlignedAlloc( usedBlocks * 16 );
@@ -4485,7 +4492,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 			}
 		#endif
 			tgroup.y -= 1 << triangleIndex;
-		}
+					}
 		if (ngroup.y <= 0x00FFFFFF)
 		{
 			if (stackPtr > 0) { STACK_POP( /* nodeGroup */ ); }
@@ -4498,9 +4505,9 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 				break;
 			}
 		}
-	} while (true);
+				} while (true);
 	return 0;
-}
+			}
 
 // Traverse a 4-way BVH stored in 'Atilla Áfra' layout.
 inline void IntersectCompactTri( Ray& r, __m128& t4, const float* T )
@@ -4674,7 +4681,7 @@ inline bool OccludedCompactTri( const Ray& r, const float* T )
 	const float u = T[0] * wr.x + T[1] * wr.y + T[2] * wr.z + T[3];
 	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 	return u >= 0 && v >= 0 && u + v < 1;
-}
+		}
 #ifdef __GNUC__
 #pragma GCC push_options
 #pragma GCC optimize ("-O1") // TODO: I must be doing something wrong, figure out what.
@@ -5472,12 +5479,12 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
 				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
-			}
-		}
+	}
+}
 		// get next task
 		if (nodeIdx) continue;
 		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
-	}
+}
 	return false;
 }
 
@@ -5889,7 +5896,7 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 				}
 				if (v1in) vin[Nin++] = v1;
 			}
-		}
+}
 	}
 	bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR );
 	for (uint32_t i = 0; i < Nin; i++) mn = tinybvh_min( mn, vin[i] ), mx = tinybvh_max( mx, vin[i] );
@@ -6097,7 +6104,7 @@ void BVH_Verbose::MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32
 		MergeSubtree( node.left, newIdx, newIdxPtr );
 		MergeSubtree( node.right, newIdx, newIdxPtr );
 	}
-}
+	}
 } // namespace tinybvh
 
 #ifdef __GNUC__
