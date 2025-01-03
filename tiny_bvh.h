@@ -877,7 +877,7 @@ public:
 	BVH8_CWBVH( MBVH<8>& original ) { /* DEPRECATED */ ConvertFrom( bvh8 ); }
 	~BVH8_CWBVH();
 	void Save( const char* fileName );
-	bool Load( const char* fileName );
+	bool Load( const char* fileName, const uint32_t expectedTris );
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
@@ -2673,7 +2673,7 @@ template<int M> void MBVH<M>::ConvertFrom( const BVH& original )
 		else node.child[0] = orig.leftFirst, node.child[1] = orig.leftFirst + 1, node.childCount = 2;
 	}
 	// collapse
-	uint32_t stack[128], stackPtr = 1, nodeIdx = stack[0] = 0; // i.e., root node
+	uint32_t stack[128], stackPtr = 0, nodeIdx = 0; // i.e., root node
 	while (1)
 	{
 		MBVHNode& node = this->mbvhNode[nodeIdx];
@@ -2707,6 +2707,16 @@ template<int M> void MBVH<M>::ConvertFrom( const BVH& original )
 		if (stackPtr == 0) break;
 		nodeIdx = stack[--stackPtr];
 	}
+	// special case where root is leaf: add extra level - cwbvh needs this.
+	MBVHNode& root = this->mbvhNode[0];
+	if (root.isLeaf())
+	{
+		mbvhNode[1] = root;
+		root.childCount = 1;
+		root.child[0] = 1;
+		root.triCount = 0;
+	}
+	// finalize
 	usedNodes = original.usedNodes;
 	this->may_have_holes = true;
 }
@@ -3201,21 +3211,26 @@ void BVH8_CWBVH::Save( const char* fileName )
 	std::fstream s{ fileName, s.binary | s.out };
 	uint32_t header = TINY_BVH_VERSION_SUB + (TINY_BVH_VERSION_MINOR << 6) + (TINY_BVH_VERSION_MAJOR << 12);
 	s.write( (char*)&header, sizeof( uint32_t ) );
+	s.write( (char*)&triCount, sizeof( uint32_t ) );
 	s.write( (char*)this, sizeof( BVH8_CWBVH ) );
 	s.write( (char*)bvh8Data, usedBlocks * 16 );
 	s.write( (char*)bvh8Tris, bvh8.idxCount * 4 * 16 );
 }
 
-bool BVH8_CWBVH::Load( const char* fileName )
+bool BVH8_CWBVH::Load( const char* fileName, const uint32_t expectedTris )
 {
+	// open file and check contents
 	std::fstream s{ fileName, s.binary | s.in };
 	if (!s) return false;
 	BVHContext tmp = context;
-	uint32_t header;
+	uint32_t header, fileTriCount;
 	s.read( (char*)&header, sizeof( uint32_t ) );
 	if (((header >> 6) & 63) != TINY_BVH_VERSION_MINOR ||
 		((header >> 12) & 63) != TINY_BVH_VERSION_MAJOR ||
 		(header & 63) != TINY_BVH_VERSION_SUB) return false;
+	s.read( (char*)&fileTriCount, sizeof( uint32_t ) );
+	if (fileTriCount != expectedTris) return false;
+	// all checks passed; safe to overwrite *this
 	s.read( (char*)this, sizeof( BVH8_CWBVH ) );
 	context = tmp; // can't load context; function pointers will differ.
 	bvh8Data = (bvhvec4*)AlignedAlloc( usedBlocks * 16 );
