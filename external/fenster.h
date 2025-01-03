@@ -9,7 +9,7 @@
 #include <windows.h>
 #else
 #define _DEFAULT_SOURCE 1
-// #include <X11/XKBlib.h>
+#include <X11/XKBlib.h>
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 #include <time.h>
@@ -316,7 +316,6 @@ FENSTER_API int fenster_loop(struct fenster *f) {
     case MotionNotify:
       f->x = ev.xmotion.x, f->y = ev.xmotion.y;
       break;
-#if 0 // suddenly broken...
     case KeyPress:
     case KeyRelease: {
       int m = ev.xkey.state;
@@ -330,7 +329,6 @@ FENSTER_API int fenster_loop(struct fenster *f) {
       f->mod = (!!(m & ControlMask)) | (!!(m & ShiftMask) << 1) |
                (!!(m & Mod1Mask) << 2) | (!!(m & Mod4Mask) << 3);
     } break;
-#endif
     }
   }
   return 0;
