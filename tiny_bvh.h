@@ -613,7 +613,6 @@ public:
 	BVHNode* bvhNode = 0;			// BVH node pool, Wald 32-byte format. Root is always in node 0.
 	uint32_t newNodePtr = 0;		// used during build to keep track of next free node in pool.
 	Fragment* fragment = 0;			// input primitive bounding boxes.
-	BuildFlags buildFlag = NONE;	// hint to the builder: currently, NONE or FULLSPLIT.
 };
 
 #ifdef DOUBLE_PRECISION_SUPPORT
@@ -621,10 +620,6 @@ public:
 class BVH_Double : public BVHBase
 {
 public:
-	enum BuildFlags : uint32_t {
-		NONE = 0,			// Default building behavior (binned, SAH-driven).
-		FULLSPLIT = 1		// Split as far as possible, even when SAH doesn't agree.
-	};
 	struct BVHNode
 	{
 		// Double precision 'traditional' BVH node layout.
@@ -652,7 +647,6 @@ public:
 	Fragment* fragment = 0;			// input primitive bounding boxes, double-precision.
 	BVHNode* bvhNode = 0;			// BVH node, double precision format.
 	uint64_t* triIdx = 0;			// primitive index array for double-precision bvh.
-	BuildFlags buildFlag = NONE;	// hint to the builder: currently, NONE or FULLSPLIT.
 };
 
 #endif
@@ -1672,7 +1666,7 @@ void BVH::BuildHQ()
 							// clip fragment to each bin it overlaps
 							bvhvec3 bmin = node.aabbMin, bmax = node.aabbMax;
 							bmin[a] = nodeMin + planeDist * j;
-							bmax[a] = j == 6 ? node.aabbMax[a] : (bmin[a] + planeDist);
+							bmax[a] = j == (HQBVHBINS - 2) ? node.aabbMax[a] : (bmin[a] + planeDist);
 							Fragment orig = fragment[fragIdx];
 							Fragment tmpFrag;
 							if (!ClipFrag( orig, tmpFrag, bmin, bmax, minDim, a )) continue;
@@ -1809,13 +1803,17 @@ void BVH::Refit( const uint32_t nodeIdx )
 int32_t BVH::Intersect( Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
-	uint32_t stackPtr = 0, steps = 0;
+	uint32_t stackPtr = 0, cost = 0;
 	while (1)
 	{
-		steps++;
+		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++) IntersectTri( ray, verts, triIdx[node->leftFirst + i] );
+			for (uint32_t i = 0; i < node->triCount; i++)
+			{
+				IntersectTri( ray, verts, triIdx[node->leftFirst + i] );
+				cost += C_INT;
+			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -1833,7 +1831,7 @@ int32_t BVH::Intersect( Ray& ray ) const
 			if (dist2 != BVH_FAR) stack[stackPtr++] = child2; /* push far child */
 		}
 	}
-	return steps;
+	return cost;
 }
 
 bool BVH::IsOccluded( const Ray& ray ) const
@@ -2440,13 +2438,17 @@ int32_t BVH_GPU::Intersect( Ray& ray ) const
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
 	const uint32_t* triIdx = bvh.triIdx;
-	uint32_t stackPtr = 0, steps = 0;
+	uint32_t stackPtr = 0, cost = 0;
 	while (1)
 	{
-		steps++;
+		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++) IntersectTri( ray, verts, triIdx[node->firstTri + i] );
+			for (uint32_t i = 0; i < node->triCount; i++)
+			{
+				IntersectTri( ray, verts, triIdx[node->firstTri + i] );
+				cost += C_INT;
+			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -2477,7 +2479,7 @@ int32_t BVH_GPU::Intersect( Ray& ray ) const
 			if (dist2 != BVH_FAR) stack[stackPtr++] = bvhNode + ridx;
 		}
 	}
-	return steps;
+	return cost;
 }
 
 // BVH_SoA implementation
@@ -3099,10 +3101,10 @@ int32_t BVH4_GPU::Intersect( Ray& ray ) const
 {
 	// traverse a blas
 	uint32_t offset = 0, stack[128], stackPtr = 0, t2 /* for SWAP macro */;
-	uint32_t steps = 0;
+	uint32_t cost = 0;
 	while (1)
 	{
-		steps++;
+		cost += C_TRAV;
 		// fetch the node
 		const bvhvec4 data0 = bvh4Data[offset + 0], data1 = bvh4Data[offset + 1];
 		const bvhvec4 data2 = bvh4Data[offset + 2], data3 = bvh4Data[offset + 3];
@@ -3168,6 +3170,7 @@ int32_t BVH4_GPU::Intersect( Ray& ray ) const
 			uint32_t triStart = offset + (leaf[i] & 0xffff);
 			for (uint32_t j = 0; j < N; j++, triStart += 3)
 			{
+				cost += C_INT;
 				const bvhvec3 edge2 = bvhvec3( bvh4Data[triStart + 2] );
 				const bvhvec3 edge1 = bvhvec3( bvh4Data[triStart + 1] );
 				const bvhvec3 v0 = bvh4Data[triStart + 0];
@@ -3194,7 +3197,7 @@ int32_t BVH4_GPU::Intersect( Ray& ray ) const
 			offset = stack[--stackPtr];
 		}
 	}
-	return steps;
+	return cost;
 }
 
 // BVH8_CWBVH implementation
@@ -3865,7 +3868,7 @@ void BVH::BuildHQAVX( const bvhvec4slice& vertices )
 							// clip fragment to each bin it overlaps
 							bvhvec3 bmin = node.aabbMin, bmax = node.aabbMax;
 							bmin[a] = nodeMin + planeDist * j;
-							bmax[a] = j == 6 ? node.aabbMax[a] : (bmin[a] + planeDist);
+							bmax[a] = j == (AVXBINS - 2) ? node.aabbMax[a] : (bmin[a] + planeDist);
 							Fragment orig = fragment[fragIdx];
 							Fragment tmpFrag;
 							if (!ClipFrag( orig, tmpFrag, bmin, bmax, minDim, a )) continue;
@@ -4174,17 +4177,18 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
 	const uint32_t* triIdx = bvh.triIdx;
-	uint32_t stackPtr = 0, steps = 0;
+	uint32_t stackPtr = 0, cost = 0;
 	const __m128 Ox4 = _mm_set1_ps( ray.O.x ), rDx4 = _mm_set1_ps( ray.rD.x );
 	const __m128 Oy4 = _mm_set1_ps( ray.O.y ), rDy4 = _mm_set1_ps( ray.rD.y );
 	const __m128 Oz4 = _mm_set1_ps( ray.O.z ), rDz4 = _mm_set1_ps( ray.rD.z );
 	while (1)
 	{
-		steps++;
+		cost += C_TRAV;
 		if (node->isLeaf())
 		{
 			for (uint32_t i = 0; i < node->triCount; i++)
 			{
+				cost += C_INT;
 				const uint32_t tidx = triIdx[node->firstTri + i], vertIdx = tidx * 3;
 				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
 				const bvhvec3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
@@ -4256,7 +4260,7 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 			if (dist2 != BVH_FAR) stack[stackPtr++] = bvhNode + ridx;
 		}
 	}
-	return steps;
+	return cost;
 }
 
 // Find occlusions in the second alternative BVH layout (ALT_SOA).
@@ -4508,7 +4512,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 			}
 		#endif
 			tgroup.y -= 1 << triangleIndex;
-					}
+		}
 		if (ngroup.y <= 0x00FFFFFF)
 		{
 			if (stackPtr > 0) { STACK_POP( /* nodeGroup */ ); }
@@ -4521,9 +4525,9 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 				break;
 			}
 		}
-				} while (true);
+	} while (true);
 	return 0;
-			}
+}
 
 // Traverse a 4-way BVH stored in 'Atilla Áfra' layout.
 inline void IntersectCompactTri( Ray& r, __m128& t4, const float* T )
@@ -4540,7 +4544,7 @@ inline void IntersectCompactTri( Ray& r, __m128& t4, const float* T )
 }
 int32_t BVH4_CPU::Intersect( Ray& ray ) const
 {
-	uint32_t nodeIdx = 0, stack[1024], stackPtr = 0, steps = 0;
+	uint32_t nodeIdx = 0, stack[1024], stackPtr = 0, cost = 0;
 	const __m128 ox4 = _mm_set1_ps( ray.O.x ), rdx4 = _mm_set1_ps( ray.rD.x );
 	const __m128 oy4 = _mm_set1_ps( ray.O.y ), rdy4 = _mm_set1_ps( ray.rD.y );
 	const __m128 oz4 = _mm_set1_ps( ray.O.z ), rdz4 = _mm_set1_ps( ray.rD.z );
@@ -4550,7 +4554,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 	const __m128 inf4 = _mm_set1_ps( BVH_FAR );
 	while (1)
 	{
-		steps++;
+		cost += C_TRAV;
 		const BVHNode& node = bvh4Node[nodeIdx];
 		// intersect the ray with four AABBs
 		const __m128 xmin4 = node.xmin4, xmax4 = node.xmax4;
@@ -4575,7 +4579,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 			if (count == 0) nodeIdx = node.childFirst[lane]; else
 			{
 				const uint32_t first = node.childFirst[lane];
-				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < count; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 				if (stackPtr == 0) break;
 				nodeIdx = stack[--stackPtr];
@@ -4603,7 +4607,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 			if (triCount0 == 0) nodeIdx = node.childFirst[lane0]; else
 			{
 				const uint32_t first = node.childFirst[lane0];
-				for (uint32_t j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < triCount0; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 				nodeIdx = 0;
 			}
@@ -4616,7 +4620,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 			else
 			{
 				const uint32_t first = node.childFirst[lane1];
-				for (uint32_t j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < triCount1; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -4645,7 +4649,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 					continue;
 				}
 				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < count; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -4675,7 +4679,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 					continue;
 				}
 				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < count; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -4683,7 +4687,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 		if (nodeIdx) continue;
 		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
 	}
-	return steps;
+	return cost;
 }
 
 // Find occlusions in a 4-way BVH stored in 'Atilla Áfra' layout.
@@ -4697,7 +4701,7 @@ inline bool OccludedCompactTri( const Ray& r, const float* T )
 	const float u = T[0] * wr.x + T[1] * wr.y + T[2] * wr.z + T[3];
 	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 	return u >= 0 && v >= 0 && u + v < 1;
-		}
+}
 #ifdef __GNUC__
 #pragma GCC push_options
 #pragma GCC optimize ("-O1") // TODO: I must be doing something wrong, figure out what.
@@ -5084,17 +5088,17 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
 	const uint32_t* triIdx = bvh.triIdx;
-	uint32_t stackPtr = 0, steps = 0;
+	uint32_t stackPtr = 0, cost = 0;
 	const float32x4_t Ox4 = vdupq_n_f32( ray.O.x ), rDx4 = vdupq_n_f32( ray.rD.x );
 	const float32x4_t Oy4 = vdupq_n_f32( ray.O.y ), rDy4 = vdupq_n_f32( ray.rD.y );
 	const float32x4_t Oz4 = vdupq_n_f32( ray.O.z ), rDz4 = vdupq_n_f32( ray.rD.z );
 	// const float32x4_t inf4 = vdupq_n_f32( BVH_FAR );
 	while (1)
 	{
-		steps++;
+		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++)
+			for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT )
 			{
 				const uint32_t tidx = triIdx[node->firstTri + i], vertIdx = tidx * 3;
 				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
@@ -5167,7 +5171,7 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 			if (dist2 != BVH_FAR) stack[stackPtr++] = bvhNode + ridx;
 		}
 	}
-	return steps;
+	return cost;
 }
 
 // Traverse a 4-way BVH stored in 'Atilla Áfra' layout.
@@ -5192,7 +5196,7 @@ inline int32_t ARMVecMovemask( uint32x4_t v ) {
 
 int32_t BVH4_CPU::Intersect( Ray& ray ) const
 {
-	uint32_t nodeIdx = 0, stack[1024], stackPtr = 0, steps = 0;
+	uint32_t nodeIdx = 0, stack[1024], stackPtr = 0, cost = 0;
 	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
 	const float32x4_t oy4 = vdupq_n_f32( ray.O.y ), rdy4 = vdupq_n_f32( ray.rD.y );
 	const float32x4_t oz4 = vdupq_n_f32( ray.O.z ), rdz4 = vdupq_n_f32( ray.rD.z );
@@ -5202,7 +5206,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 	const float32x4_t inf4 = vdupq_n_f32( BVH_FAR );
 	while (1)
 	{
-		steps++;
+		cost += C_TRAV;
 		const BVHNode& node = bvh4Node[nodeIdx];
 		// intersect the ray with four AABBs
 		const float32x4_t xmin4 = node.xmin4, xmax4 = node.xmax4;
@@ -5229,7 +5233,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 			if (count == 0) nodeIdx = node.childFirst[lane]; else
 			{
 				const uint32_t first = node.childFirst[lane];
-				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < count; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 				if (stackPtr == 0) break;
 				nodeIdx = stack[--stackPtr];
@@ -5257,7 +5261,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 			if (triCount0 == 0) nodeIdx = node.childFirst[lane0]; else
 			{
 				const uint32_t first = node.childFirst[lane0];
-				for (uint32_t j = 0; j < triCount0; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < triCount0; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 				nodeIdx = 0;
 			}
@@ -5270,7 +5274,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 			else
 			{
 				const uint32_t first = node.childFirst[lane1];
-				for (uint32_t j = 0; j < triCount1; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < triCount1; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -5300,7 +5304,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 					continue;
 				}
 				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < count; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -5330,7 +5334,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 					continue;
 				}
 				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+				for (uint32_t j = 0; j < count; j++, cost += C_INT ) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
 		}
@@ -5338,7 +5342,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 		if (nodeIdx) continue;
 		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
 	}
-	return steps;
+	return cost;
 }
 
 // Find occlusions in a 4-way BVH stored in 'Atilla Áfra' layout.
@@ -5495,12 +5499,12 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
 				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
-	}
-}
+			}
+		}
 		// get next task
 		if (nodeIdx) continue;
 		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
-}
+	}
 	return false;
 }
 
@@ -5679,13 +5683,13 @@ double BVH_Double::SAHCost( const uint64_t nodeIdx ) const
 int32_t BVH_Double::Intersect( RayEx& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
-	uint32_t stackPtr = 0, steps = 0;
+	uint32_t stackPtr = 0, cost = 0;
 	while (1)
 	{
-		steps++;
+		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++)
+			for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT )
 			{
 				const uint64_t idx = triIdx[node->leftFirst + i];
 				const uint64_t vertIdx = idx * 3;
@@ -5725,7 +5729,7 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 			if (dist2 != BVH_DBL_FAR) stack[stackPtr++] = child2; /* push far child */
 		}
 	}
-	return steps;
+	return cost;
 }
 
 // IntersectAABB, double precision
@@ -5912,7 +5916,7 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 				}
 				if (v1in) vin[Nin++] = v1;
 			}
-}
+		}
 	}
 	bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR );
 	for (uint32_t i = 0; i < Nin; i++) mn = tinybvh_min( mn, vin[i] ), mx = tinybvh_max( mx, vin[i] );
@@ -6120,7 +6124,7 @@ void BVH_Verbose::MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32
 		MergeSubtree( node.left, newIdx, newIdxPtr );
 		MergeSubtree( node.right, newIdx, newIdxPtr );
 	}
-	}
+}
 } // namespace tinybvh
 
 #ifdef __GNUC__

@@ -79,7 +79,7 @@ MBVH<4>* bvh4 = 0;
 BVH4_CPU* bvh4_cpu = 0;
 BVH4_GPU* bvh4_gpu = 0;
 BVH8_CWBVH* cwbvh = 0;
-enum { _DEFAULT = 1, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _GPU4, _BVH8, _CWBVH };
+enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _GPU4, _BVH8, _CWBVH };
 
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 #include "embree4/rtcore.h"
@@ -132,7 +132,7 @@ void sphere_flake( float x, float y, float z, float s, int d = 0 )
 	if (d < 3) sphere_flake( x, y, z - s * 1.5f, s * 0.5f, d + 1 );
 }
 
-float TestPrimaryRays( uint32_t layout, Ray* batch, unsigned N, unsigned passes )
+float TestPrimaryRays( uint32_t layout, Ray* batch, unsigned N, unsigned passes, float* avgCost = 0 )
 {
 	// Primary rays: coherent batch of rays from a pinhole camera. One ray per
 	// pixel, organized in tiles to further increase coherence.
@@ -140,19 +140,22 @@ float TestPrimaryRays( uint32_t layout, Ray* batch, unsigned N, unsigned passes 
 	for (unsigned i = 0; i < N; i++) batch[i].hit.t = 1e30f;
 	for (unsigned pass = 0; pass < passes + 1; pass++)
 	{
+		uint32_t travCost = 0;
 		if (pass == 1) t.reset(); // first pass is cache warming
 		switch (layout)
 		{
-		case _DEFAULT: for (unsigned i = 0; i < N; i++) ref_bvh->Intersect( batch[i] ); break;
-		case _GPU2: for (unsigned i = 0; i < N; i++) bvh_gpu->Intersect( batch[i] ); break;
-		case _CPU4: for (unsigned i = 0; i < N; i++) bvh4_cpu->Intersect( batch[i] ); break;
-		case _GPU4: for (unsigned i = 0; i < N; i++) bvh4_gpu->Intersect( batch[i] ); break;
+		case _BVH: for (unsigned i = 0; i < N; i++) travCost += bvh->Intersect( batch[i] ); break;
+		case _DEFAULT: for (unsigned i = 0; i < N; i++) travCost += ref_bvh->Intersect( batch[i] ); break;
+		case _GPU2: for (unsigned i = 0; i < N; i++) travCost += bvh_gpu->Intersect( batch[i] ); break;
+		case _CPU4: for (unsigned i = 0; i < N; i++) travCost += bvh4_cpu->Intersect( batch[i] ); break;
+		case _GPU4: for (unsigned i = 0; i < N; i++) travCost += bvh4_gpu->Intersect( batch[i] ); break;
 		#ifdef BVH_USEAVX
-		case _CWBVH: for (unsigned i = 0; i < N; i++) cwbvh->Intersect( batch[i] ); break;
-		case _SOA: for (unsigned i = 0; i < N; i++) bvh_soa->Intersect( batch[i] ); break;
+		case _CWBVH: for (unsigned i = 0; i < N; i++) travCost += cwbvh->Intersect( batch[i] ); break;
+		case _SOA: for (unsigned i = 0; i < N; i++) travCost += bvh_soa->Intersect( batch[i] ); break;
 		#endif
 		default: break;
 		};
+		if (avgCost) *avgCost = travCost / (float)N;
 	}
 	return t.elapsed() / passes;
 }
@@ -438,6 +441,8 @@ int main()
 
 #endif
 
+	float avgCost;
+
 #ifdef BUILD_REFERENCE
 
 	// measure single-core bvh construction time - reference builder
@@ -445,8 +450,9 @@ int main()
 	t.reset();
 	for (int pass = 0; pass < 3; pass++) bvh->Build( triangles, verts / 3 );
 	buildTime = t.elapsed() / 3.0f;
+	TestPrimaryRays( _BVH, smallBatch, Nsmall, 3, &avgCost );
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
+	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
 
 #endif
 
@@ -474,8 +480,9 @@ int main()
 	t.reset();
 	for (int pass = 0; pass < 3; pass++) bvh->BuildAVX( triangles, verts / 3 );
 	buildTime = t.elapsed() / 3.0f;
+	TestPrimaryRays( _BVH, smallBatch, Nsmall, 3, &avgCost );
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
+	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
 
 #endif
 
@@ -487,8 +494,9 @@ int main()
 	t.reset();
 	for (int pass = 0; pass < 3; pass++) bvh->BuildNEON( triangles, verts / 3 );
 	buildTime = t.elapsed() / 3.0f;
+	TestPrimaryRays( _BVH, smallBatch, Nsmall, 3, &avgCost );
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
+	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
 
 #endif
 #endif
@@ -500,8 +508,9 @@ int main()
 	t.reset();
 	for (int pass = 0; pass < 3; pass++) bvh->BuildHQ( triangles, verts / 3 );
 	buildTime = t.elapsed() / 3.0f;
+	TestPrimaryRays( _BVH, smallBatch, Nsmall, 3, &avgCost );
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
+	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
 
 #endif
 
@@ -512,8 +521,9 @@ int main()
 	t.reset();
 	for (int pass = 0; pass < 3; pass++) bvh->BuildHQAVX( triangles, verts / 3 );
 	buildTime = t.elapsed() / 3.0f;
+	TestPrimaryRays( _BVH, smallBatch, Nsmall, 3, &avgCost );
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f\n", bvh->usedNodes, bvh->SAHCost() );
+	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
 
 #endif
 
@@ -665,6 +675,7 @@ int main()
 #if defined TRAVERSE_OPTIMIZED_ST || defined TRAVERSE_4WAY_OPTIMIZED
 
 	printf( "Optimized BVH performance - Optimizing... " );
+	float prevSAH = bvh->SAHCost();
 	if (!bvh_verbose)
 	{
 		bvh_verbose = new BVH_Verbose();
@@ -673,7 +684,8 @@ int main()
 	t.reset();
 	bvh_verbose->Optimize( 1000000 ); // optimize the raw SBVH
 	bvh->ConvertFrom( *bvh_verbose );
-	printf( "done (%.2fs). New: %i nodes, SAH=%.2f\n", t.elapsed(), bvh->NodeCount(), bvh->SAHCost() );
+	TestPrimaryRays( _BVH, smallBatch, Nsmall, 3, &avgCost );
+	printf( "done (%.2fs). New: %i nodes, SAH=%.2f to %.2f, rayCost=%.2f\n", t.elapsed(), bvh->NodeCount(), prevSAH, bvh->SAHCost(), avgCost );
 
 #endif
 
