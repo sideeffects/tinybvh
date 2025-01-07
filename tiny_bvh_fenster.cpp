@@ -3,7 +3,7 @@
 #define SCRHEIGHT 600
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
-#define LOADSCENE
+// #define LOADSCENE
 
 #define TINYBVH_IMPLEMENTATION
 #include "tiny_bvh.h"
@@ -20,11 +20,12 @@ int* depths = 0;
 bvhvec4* triangles = 0;
 const char scene[] = "cryteksponza.bin";
 #else
-ALIGNED( 16 ) bvhvec4 triangles[259 /* level 3 */ * 6 * 2 * 49 * 3]{};
+ALIGNED( 16 ) bvhvec4 vertices[259 /* level 3 */ * 6 * 2 * 49 * 3]{};
+ALIGNED( 16 ) uint32_t indices[259 /* level 3 */ * 6 * 2 * 49 * 3]{};
 #endif
-int verts = 0;
+int verts = 0, inds = 0;
 
-// setup view pyramid for a pinhole camera: 
+// setup view pyramid for a pinhole camera:
 // eye, p1 (top-left), p2 (top-right) and p3 (bottom-left)
 #ifdef LOADSCENE
 static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
@@ -45,15 +46,38 @@ void sphere_flake( float x, float y, float z, float s, int d = 0 )
 	for (int i = 0; i < 384; i++) p[i] = normalize( p[i] - ofs ) * s + pos;
 	for (int i = 0, side = 0; side < 6; side++, i += 8)
 		for (int u = 0; u < 7; u++, i++) for (int v = 0; v < 7; v++, i++)
-			triangles[verts++] = p[i], triangles[verts++] = p[i + 8],
-			triangles[verts++] = p[i + 1], triangles[verts++] = p[i + 1],
-			triangles[verts++] = p[i + 9], triangles[verts++] = p[i + 8];
+			vertices[verts++] = p[i], vertices[verts++] = p[i + 8],
+			vertices[verts++] = p[i + 1], vertices[verts++] = p[i + 1],
+			vertices[verts++] = p[i + 9], vertices[verts++] = p[i + 8];
 	if (d < 3) sphere_flake( x + s * 1.55f, y, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x - s * 1.5f, y, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x, y + s * 1.5f, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x, x - s * 1.5f, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x, y, z + s * 1.5f, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x, y, z - s * 1.5f, s * 0.5f, d + 1 );
+}
+
+void sphere_flake_indexed( float x, float y, float z, float s, int d = 0 )
+{
+	// procedural tesselated sphere flake object
+#define P(F,a,b,c) p[i+F*64]={(float)a ,(float)b,(float)c}
+	bvhvec3 p[384], pos( x, y, z ), ofs( 3.5 );
+	for (int i = 0, u = 0; u < 8; u++) for (int v = 0; v < 8; v++, i++)
+		P( 0, u, v, 0 ), P( 1, u, 0, v ), P( 2, 0, u, v ),
+		P( 3, u, v, 7 ), P( 4, u, 7, v ), P( 5, 7, u, v );
+	for (int i = 0; i < 384; i++)
+		p[i] = vertices[verts + i] = normalize( p[i] - ofs ) * s + pos;
+	for (int i = verts, side = 0; side < 6; side++, i += 8, verts += 64)
+		for (int u = 0; u < 7; u++, i++) for (int v = 0; v < 7; v++, i++)
+			indices[inds++] = i, indices[inds++] = i + 8,
+			indices[inds++] = i + 1, indices[inds++] = i + 1,
+			indices[inds++] = i + 9, indices[inds++] = i + 8;
+	if (d < 3) sphere_flake_indexed( x + s * 1.55f, y, z, s * 0.5f, d + 1 );
+	if (d < 3) sphere_flake_indexed( x - s * 1.5f, y, z, s * 0.5f, d + 1 );
+	if (d < 3) sphere_flake_indexed( x, y + s * 1.5f, z, s * 0.5f, d + 1 );
+	if (d < 3) sphere_flake_indexed( x, x - s * 1.5f, z, s * 0.5f, d + 1 );
+	if (d < 3) sphere_flake_indexed( x, y, z + s * 1.5f, s * 0.5f, d + 1 );
+	if (d < 3) sphere_flake_indexed( x, y, z - s * 1.5f, s * 0.5f, d + 1 );
 }
 
 void Init()
@@ -71,11 +95,15 @@ void Init()
 	s.close();
 #else
 	// generate a sphere flake scene
-	sphere_flake( 0, 0, 0, 1.5f );
+	// sphere_flake( 0, 0, 0, 1.5f ); // regular sphere flake
+	sphere_flake_indexed( 0, 0, 0, 1.5f ); // indexed sphere flake
 #endif
 
 	// build a BVH over the scene
-	bvh.Build( triangles, verts / 3 );
+	if (inds > 0)
+		bvh.BuildHQ( vertices, indices, inds / 3 );
+	else
+		bvh.BuildHQ( vertices, verts / 3 );
 
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
@@ -152,9 +180,11 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++, i++) if (rays[i].hit.t < 10000)
 		{
 			int pixel_x = tx * 4 + x, pixel_y = ty * 4 + y, primIdx = rays[i].hit.prim;
-			bvhvec3 v0 = triangles[primIdx * 3 + 0];
-			bvhvec3 v1 = triangles[primIdx * 3 + 1];
-			bvhvec3 v2 = triangles[primIdx * 3 + 2];
+			int v0idx = primIdx * 3, v1idx = v0idx + 1, v2idx = v0idx + 2;
+			if (inds) v0idx = indices[v0idx], v1idx = indices[v1idx], v2idx = indices[v2idx];
+			bvhvec3 v0 = vertices[v0idx];
+			bvhvec3 v1 = vertices[v1idx];
+			bvhvec3 v2 = vertices[v2idx];
 			bvhvec3 N = normalize( cross( v1 - v0, v2 - v0 ) );
 			int c = (int)(255.9f * fabs( dot( N, L ) ));
 			buf[pixel_x + pixel_y * SCRWIDTH] = c + (c << 8) + (c << 16);
@@ -164,7 +194,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	}
 
 	tinybvh::free64( rays );
-	tinybvh::free64(depths);
+	tinybvh::free64( depths );
 }
 
 void Shutdown()

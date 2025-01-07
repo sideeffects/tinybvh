@@ -60,8 +60,8 @@ bvhvec4* triangles = 0;
 int verts = 0;
 float traceTime, buildTime, * refDist = 0, * refDistFull = 0;
 unsigned refOccluded[3] = {}, * refOccl[3] = {};
-int Nfull, Nsmall;
-Ray* fullBatch[3], *smallBatch[3];
+unsigned Nfull, Nsmall;
+Ray* fullBatch[3], * smallBatch[3];
 Ray* shadowBatch[3];
 #ifdef DOUBLE_PRECISION_SUPPORT
 RayEx* doubleBatch[3];
@@ -114,7 +114,7 @@ float TestPrimaryRays( uint32_t layout, unsigned N, unsigned passes, float* avgC
 	// Primary rays: coherent batch of rays from a pinhole camera. One ray per
 	// pixel, organized in tiles to further increase coherence.
 	Timer t;
-	for( int view = 0; view < 3; view++ )
+	for (int view = 0; view < 3; view++)
 	{
 		Ray* batch = N == Nsmall ? smallBatch[view] : fullBatch[view];
 		for (unsigned i = 0; i < N; i++) batch[i].hit.t = 1e30f;
@@ -145,12 +145,12 @@ float TestPrimaryRays( uint32_t layout, unsigned N, unsigned passes, float* avgC
 
 #ifdef DOUBLE_PRECISION_SUPPORT
 
-float TestPrimaryRaysEx( unsigned N, unsigned passes, float* avgCost = 0  )
+float TestPrimaryRaysEx( unsigned N, unsigned passes, float* avgCost = 0 )
 {
 	// Primary rays: coherent batch of rays from a pinhole camera.
 	// Double-precision version.
 	Timer t;
-	for( int view = 0; view < 3; view++ )
+	for (int view = 0; view < 3; view++)
 	{
 		RayEx* batch = doubleBatch[view];
 		for (unsigned i = 0; i < N; i++) batch[i].t = 1e30f;
@@ -386,7 +386,7 @@ int main()
 	// organized in 4x4 pixel tiles, 16 samples per pixel, so 256 rays per tile.
 	// one set for each camera position / direction.
 
-	for( int i = 0; i < 3; i++ )
+	for (int i = 0; i < 3; i++)
 	{
 		Nfull = Nsmall = 0;
 		fullBatch[i] = (Ray*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * 16 * sizeof( Ray ) );
@@ -571,11 +571,11 @@ int main()
 
 	// setup proper shadow ray batch
 	traceTime = TestPrimaryRays( _DEFAULT, Nsmall, 1 ); // just to generate intersection points
-	for( int view = 0; view < 3; view++ ) 
+	for (int view = 0; view < 3; view++)
 	{
 		shadowBatch[view] = (Ray*)tinybvh::malloc64( sizeof( Ray ) * Nsmall );
 		const tinybvh::bvhvec3 lightPos( 0, 0, 0 );
-		for (int i = 0; i < Nsmall; i++)
+		for (unsigned i = 0; i < Nsmall; i++)
 		{
 			float t = tinybvh::tinybvh_min( 1000.0f, smallBatch[view][i].hit.t );
 			bvhvec3 I = smallBatch[view][i].O + t * smallBatch[view][i].D;
@@ -584,7 +584,7 @@ int main()
 		}
 		// get reference shadow ray query result
 		refOccluded[view] = 0, refOccl[view] = new unsigned[Nsmall];
-		for (int i = 0; i < Nsmall; i++)
+		for (unsigned i = 0; i < Nsmall; i++)
 			refOccluded[view] += (refOccl[view][i] = ref_bvh->IsOccluded( shadowBatch[view][i] ) ? 1 : 0);
 	}
 
@@ -594,7 +594,7 @@ int main()
 	printf( "- WALD_32BYTE - primary: " );
 	traceTime = TestPrimaryRays( _DEFAULT, Nsmall, 3 );
 	refDist = new float[Nsmall];
-	for (int i = 0; i < Nsmall; i++) refDist[i] = smallBatch[0][i].hit.t;
+	for (unsigned i = 0; i < Nsmall; i++) refDist[i] = smallBatch[0][i].hit.t;
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	traceTime = TestShadowRays( _DEFAULT, Nsmall, 3 );
 	printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
@@ -740,12 +740,12 @@ int main()
 	const int batchCount = Nfull / 10000;
 	batchIdx = threadCount;
 	std::vector<std::thread> threads;
-	for (int i = 0; i < Nfull; i++) fullBatch[0][i].hit.t = 1e30f;
+	for (unsigned i = 0; i < Nfull; i++) fullBatch[0][i].hit.t = 1e30f;
 	for (uint32_t i = 0; i < threadCount; i++)
 		threads.emplace_back( &IntersectBvhWorkerThread, batchCount, fullBatch[0], i );
 	for (auto& thread : threads) thread.join();
 	refDistFull = new float[Nfull];
-	for (int i = 0; i < Nfull; i++) refDistFull[i] = fullBatch[0][i].hit.t;
+	for (unsigned i = 0; i < Nfull; i++) refDistFull[i] = fullBatch[0][i].hit.t;
 
 #ifdef GPU_2WAY
 
@@ -963,7 +963,7 @@ int main()
 	printf( "- Default BVH - primary: " );
 	struct RTCRayHit* rayhits = (RTCRayHit*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * 16 * sizeof( RTCRayHit ) );
 	// copy our rays to Embree format
-	for (int i = 0; i < Nfull; i++)
+	for (unsigned i = 0; i < Nfull; i++)
 	{
 		rayhits[i].ray.org_x = fullBatch[0][i].O.x, rayhits[i].ray.org_y = fullBatch[0][i].O.y, rayhits[i].ray.org_z = fullBatch[0][i].O.z;
 		rayhits[i].ray.dir_x = fullBatch[0][i].D.x, rayhits[i].ray.dir_y = fullBatch[0][i].D.y, rayhits[i].ray.dir_z = fullBatch[0][i].D.z;
@@ -979,7 +979,7 @@ int main()
 	}
 	traceTime = t.elapsed() / 3.0f;
 	// retrieve intersection results
-	for (int i = 0; i < Nfull; i++)
+	for (unsigned i = 0; i < Nfull; i++)
 	{
 		fullBatch[0][i].hit.t = rayhits[i].ray.tfar;
 		fullBatch[0][i].hit.u = rayhits[i].hit.u, fullBatch[0][i].hit.u = rayhits[i].hit.v;
