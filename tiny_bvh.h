@@ -121,7 +121,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	2
-#define TINY_BVH_VERSION_SUB	0
+#define TINY_BVH_VERSION_SUB	1
 
 // ============================================================================
 //
@@ -181,6 +181,12 @@ inline void* malloc64( size_t size, void* = nullptr )
 inline void free64( void* ptr, void* = nullptr ) { free( ptr ); }
 }
 #endif
+#endif
+
+#ifdef _MSC_VER
+#define __FORCEINLINE __forceinline
+#else
+#define __FORCEINLINE __attribute__((always_inline)) inline
 #endif
 
 namespace tinybvh {
@@ -524,10 +530,10 @@ public:
 	// Common methods
 	void CopyBasePropertiesFrom( const BVHBase& original );	// copy flags from one BVH to another
 protected:
-	void IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t triIdx ) const;
-	void IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const;
-	bool TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const;
-	bool IndexedTriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const;
+	__FORCEINLINE void IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t triIdx ) const;
+	__FORCEINLINE void IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const;
+	__FORCEINLINE bool TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const;
+	__FORCEINLINE bool IndexedTriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const;
 	static float IntersectAABB( const Ray& ray, const bvhvec3& aabbMin, const bvhvec3& aabbMax );
 	static void PrecomputeTriangle( const bvhvec4slice& vert, uint32_t triIndex, float* T );
 	static float SA( const bvhvec3& aabbMin, const bvhvec3& aabbMax );
@@ -1895,24 +1901,15 @@ bool BVH::IsOccluded( const Ray& ray ) const
 	{
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++)
+			if (vertIdx)
 			{
-				// Moeller-Trumbore ray/triangle intersection algorithm
-				const uint32_t vertIdx = triIdx[node->leftFirst + i] * 3;
-				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
-				const bvhvec3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
-				const bvhvec3 h = cross( ray.D, edge2 );
-				const float a = dot( edge1, h );
-				if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
-				const float f = 1 / a;
-				const bvhvec3 s = ray.O - bvhvec3( verts[vertIdx] );
-				const float u = f * dot( s, h );
-				if (u < 0 || u > 1) continue;
-				const bvhvec3 q = cross( s, edge1 );
-				const float v = f * dot( ray.D, q );
-				if (v < 0 || u + v > 1) continue;
-				const float t = f * dot( edge2, q );
-				if (t > 0 && t < ray.hit.t) return true; // no need to look further
+				for (uint32_t i = 0; i < node->triCount; i++)
+					if (IndexedTriOccludes( ray, verts, vertIdx, triIdx[node->leftFirst + i] )) return true;
+			}
+			else
+			{
+				for (uint32_t i = 0; i < node->triCount; i++)
+					if (TriOccludes( ray, verts, triIdx[node->leftFirst + i] )) return true;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
@@ -3981,26 +3978,12 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++)
-			{
-				cost += C_INT;
-				const uint32_t tidx = triIdx[node->firstTri + i], vertIdx = tidx * 3;
-				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
-				const bvhvec3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
-				const bvhvec3 h = cross( ray.D, edge2 );
-				const float a = dot( edge1, h );
-				if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
-				const float f = 1 / a;
-				const bvhvec3 s = ray.O - bvhvec3( verts[vertIdx] );
-				const float u = f * dot( s, h );
-				if (u < 0 || u > 1) continue;
-				const bvhvec3 q = cross( s, edge1 );
-				const float v = f * dot( ray.D, q );
-				if (v < 0 || u + v > 1) continue;
-				const float t = f * dot( edge2, q );
-				if (t < 0 || t > ray.hit.t) continue;
-				ray.hit.t = t, ray.hit.u = u, ray.hit.v = v, ray.hit.prim = tidx;
-			}
+			if (bvh.vertIdx)
+				for (uint32_t i = 0; i < node->triCount; i++)
+					IntersectTriIndexed( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] );
+			else
+				for (uint32_t i = 0; i < node->triCount; i++)
+					IntersectTri( ray, verts, triIdx[node->firstTri + i] );
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -4072,23 +4055,15 @@ bool BVH_SoA::IsOccluded( const Ray& ray ) const
 	{
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++)
+			if (bvh.vertIdx)
 			{
-				const uint32_t tidx = triIdx[node->firstTri + i], vertIdx = tidx * 3;
-				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
-				const bvhvec3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
-				const bvhvec3 h = cross( ray.D, edge2 );
-				const float a = dot( edge1, h );
-				if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
-				const float f = 1 / a;
-				const bvhvec3 s = ray.O - bvhvec3( verts[vertIdx] );
-				const float u = f * dot( s, h );
-				if (u < 0 || u > 1) continue;
-				const bvhvec3 q = cross( s, edge1 );
-				const float v = f * dot( ray.D, q );
-				if (v < 0 || u + v > 1) continue;
-				const float t = f * dot( edge2, q );
-				if (t >= 0 && t <= ray.hit.t) return true;
+				for (uint32_t i = 0; i < node->triCount; i++)
+					if (IndexedTriOccludes( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] )) return true;
+			}
+			else
+			{
+				for (uint32_t i = 0; i < node->triCount; i++)
+					if (TriOccludes( ray, verts, triIdx[node->firstTri + i] )) return true;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
