@@ -159,6 +159,7 @@ Plans, ordered by priority:
 # tinybvh in the Wild
 A list of projects using tinybvh:
 * [unity-tinybvh](https://github.com/andr3wmac/unity-tinybvh): An example implementation for tinybvh in Unity and a foundation for building compute based raytracing solutions, by Andrew MacIntyre.
+* [TrenchBroomBFG](https://github.com/RobertBeckebans/TrenchBroomBFG): "The goal of TrenchBroomBFG is to make mapping for Doom 3 (BFG) as easy as it is for Quake". By Robert Beckebans.
 
 # tinybvh Rust bindings
 The tinybvh library can now also be used from Rust, with the [Rust bindings](https://docs.rs/tinybvh-rs/latest/tinybvh_rs) provided by David Peicho.
