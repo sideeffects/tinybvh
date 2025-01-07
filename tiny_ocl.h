@@ -315,7 +315,8 @@ private:
 	inline static cl_command_queue queue, queue2;
 	inline static char* log = 0;
 	inline static bool isNVidia = false, isAMD = false, isIntel = false, isOther = false;
-	inline static bool isAmpere = false, isTuring = false, isPascal = false, isAda = false, isHopper = false;
+	inline static bool isAmpere = false, isTuring = false, isPascal = false;
+	inline static bool isAda = false, isBlackwell = false, isRubin = false, isHopper = false;
 	inline static int vendorLines = 0;
 	inline static std::vector<Kernel*> loadedKernels;
 public:
@@ -965,8 +966,11 @@ bool Kernel::InitCL()
 		isNVidia = true;
 		if (strstr( d, "rtx" ))
 		{
-			// detect Ampere GPUs
+			// detect Blackwell
+			if (strstr( d, "5050" ) || strstr( d, "5060" ) || strstr( d, "5070" ) || strstr( d, "5080" ) || strstr( d, "5090" )) isBlackwell = isAda = true;
+			// detect Lovelace
 			if (strstr( d, "4050" ) || strstr( d, "4060" ) || strstr( d, "4070" ) || strstr( d, "4080" ) || strstr( d, "4090" )) isAda = true;
+			// detect Ampere GPUs
 			if (strstr( d, "3050" ) || strstr( d, "3060" ) || strstr( d, "3070" ) || strstr( d, "3080" ) || strstr( d, "3090" )) isAmpere = true;
 			if (strstr( d, "a2000" ) || strstr( d, "a3000" ) || strstr( d, "a4000" ) || strstr( d, "a5000" ) || strstr( d, "a6000" )) isAmpere = true;
 			// detect Turing GPUs
@@ -997,7 +1001,8 @@ bool Kernel::InitCL()
 			if (strstr( d, "titan x" )) isPascal = true;
 		}
 	}
-	else if (strstr( d, "amd" ) || strstr( d, "ellesmere" ) || strstr( d, "gfx1100" ) || strstr( d, "gfx1031" ) || strstr( d, "AMD" )) // JdW
+	else if (strstr( d, "amd" ) || strstr( d, "ellesmere" ) || strstr( d, "AMD" ) || strstr( d, "RDNA" ) ||
+		strstr( d, "gfx11" ) || strstr( d, "gfx10" ) || strstr( d, "gfx9" ) || strstr( d, "gfx8" ))
 	{
 		isAMD = true;
 	}
@@ -1014,10 +1019,12 @@ bool Kernel::InitCL()
 	if (isNVidia)
 	{
 		printf( "NVIDIA, " );
-		if (isAmpere) printf( "AMPERE class.\n" );
+		if (isRubin) printf( "RUBIN class.\n" );
+		else if (isBlackwell) printf( "BLACKWELL class.\n" );
+		else if (isAda) printf( "ADA LOVELACE class.\n" );
+		else if (isAmpere) printf( "AMPERE class.\n" );
 		else if (isTuring) printf( "TURING class.\n" );
 		else if (isPascal) printf( "PASCAL class.\n" );
-		else if (isAda) printf( "ADA class.\n" );
 		else printf( "PRE-PASCAL hardware (warning: slow).\n" );
 	}
 	else if (isAMD)
