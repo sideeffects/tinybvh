@@ -790,6 +790,7 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Refit( const uint32_t nodeIdx = 0 );
 	void ConvertFrom( const BVH& original );
 	void SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims );
 	// BVH data
@@ -1836,19 +1837,40 @@ void BVH::Refit( const uint32_t nodeIdx )
 	FATAL_ERROR_IF( !refittable, "BVH::Refit( .. ), refitting an SBVH." );
 	FATAL_ERROR_IF( bvhNode == 0, "BVH::Refit( .. ), bvhNode == 0." );
 	FATAL_ERROR_IF( may_have_holes, "BVH::Refit( .. ), bvh may have holes." );
-	FATAL_ERROR_IF( bvh_over_indices, "BVH::Refit( .. ), bvh used indexed tris." );
 	for (int32_t i = usedNodes - 1; i >= 0; i--)
 	{
 		BVHNode& node = bvhNode[i];
 		if (node.isLeaf()) // leaf: adjust to current triangle vertex positions
 		{
 			bvhvec4 aabbMin( BVH_FAR ), aabbMax( -BVH_FAR );
-			for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
+			if (vertIdx)
 			{
-				const uint32_t vertIdx = triIdx[first + j] * 3;
-				aabbMin = tinybvh_min( aabbMin, verts[vertIdx] ), aabbMax = tinybvh_max( aabbMax, verts[vertIdx] );
-				aabbMin = tinybvh_min( aabbMin, verts[vertIdx + 1] ), aabbMax = tinybvh_max( aabbMax, verts[vertIdx + 1] );
-				aabbMin = tinybvh_min( aabbMin, verts[vertIdx + 2] ), aabbMax = tinybvh_max( aabbMax, verts[vertIdx + 2] );
+				for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
+				{
+					const uint32_t vidx = triIdx[first + j] * 3;
+					const uint32_t i0 = vertIdx[vidx], i1 = vertIdx[vidx + 1], i2 = vertIdx[vidx + 2];
+					const bvhvec4 v0 = verts[i0], v1 = verts[i1], v2 = verts[i2];
+					const bvhvec4 t1 = tinybvh_min( v0, aabbMin );
+					const bvhvec4 t2 = tinybvh_max( v0, aabbMax );
+					const bvhvec4 t3 = tinybvh_min( v1, v2 );
+					const bvhvec4 t4 = tinybvh_max( v1, v2 );
+					aabbMin = tinybvh_min( t1, t3 );
+					aabbMax = tinybvh_max( t2, t4 );
+				}
+			}
+			else
+			{
+				for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
+				{
+					const uint32_t vidx = triIdx[first + j] * 3;
+					const bvhvec4 v0 = verts[vidx], v1 = verts[vidx + 1], v2 = verts[vidx + 2];
+					const bvhvec4 t1 = tinybvh_min( v0, aabbMin );
+					const bvhvec4 t2 = tinybvh_max( v0, aabbMax );
+					const bvhvec4 t3 = tinybvh_min( v1, v2 );
+					const bvhvec4 t4 = tinybvh_max( v1, v2 );
+					aabbMin = tinybvh_min( t1, t3 );
+					aabbMax = tinybvh_max( t2, t4 );
+				}
 			}
 			node.aabbMin = aabbMin, node.aabbMax = aabbMax;
 			continue;
@@ -2710,6 +2732,49 @@ template<int M> void MBVH<M>::BuildHQ( const bvhvec4slice& vertices, const uint3
 	bvh.BuildHQ( vertices, indices, prims );
 	ConvertFrom( bvh );
 	bvh_over_indices = true;
+}
+
+template<int M> void MBVH<M>::Refit( const uint32_t nodeIdx )
+{
+	MBVHNode& node = mbvhNode[nodeIdx];
+	if (node.isLeaf())
+	{
+		bvhvec3 aabbMin( BVH_FAR ), aabbMax( -BVH_FAR );
+		if (bvh.vertIdx)
+		{
+			for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
+			{
+				const uint32_t vidx = bvh.triIdx[first + j] * 3;
+				const uint32_t i0 = bvh.vertIdx[vidx], i1 = bvh.vertIdx[vidx + 1], i2 = bvh.vertIdx[vidx + 2];
+				const bvhvec3 v0 = bvh.verts[i0], v1 = bvh.verts[i1], v2 = bvh.verts[i2];
+				aabbMin = tinybvh_min( aabbMin, tinybvh_min( tinybvh_min( v0, v1 ), v2 ) );
+				aabbMax = tinybvh_max( aabbMax, tinybvh_max( tinybvh_max( v0, v1 ), v2 ) );
+			}
+		}
+		else
+		{
+			for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
+			{
+				const uint32_t vidx = bvh.triIdx[first + j] * 3;
+				const bvhvec3 v0 = bvh.verts[vidx], v1 = bvh.verts[vidx + 1], v2 = bvh.verts[vidx + 2];
+				aabbMin = tinybvh_min( aabbMin, tinybvh_min( tinybvh_min( v0, v1 ), v2 ) );
+				aabbMax = tinybvh_max( aabbMax, tinybvh_max( tinybvh_max( v0, v1 ), v2 ) );
+			}
+		}
+		node.aabbMin = aabbMin, node.aabbMax = aabbMax;
+	}
+	else
+	{
+		for( unsigned i = 0; i < node.childCount; i++ ) Refit( node.child[i] );
+		MBVHNode& firstChild = mbvhNode[node.child[0]];
+		bvhvec3 bmin = firstChild.aabbMin, bmax = firstChild.aabbMax;
+		for( unsigned i = 1; i < node.childCount; i++ )
+		{
+			MBVHNode& child = mbvhNode[node.child[i]];
+			bmin = tinybvh_min( bmin, child.aabbMin );
+			bmax = tinybvh_max( bmax, child.aabbMax );
+		}
+	}
 }
 
 template<int M> void MBVH<M>::ConvertFrom( const BVH& original )
