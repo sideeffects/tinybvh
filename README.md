@@ -72,7 +72,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.2.1
+# Version 1.2.2
 
 Version 1.1.0 introduced a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. You can simply instantiate the desired layout; conversion (and data ownership) is then handled properly by the library. Examples:
 
@@ -126,6 +126,7 @@ This version of the library includes the following functionality:
 * Optional user-defined memory allocation, by [Thierry Cantenot](https://github.com/tcantenot)
 * Vertex array can now have a custom stride, by [David Peicho](https://github.com/DavidPeicho)
 * Vertex array can now be indexed
+* Custom primitives can be intersected via callbacks (new in 1.2.2)
 * Clear data ownership and intuitive management via the new and simplified API, with lots of help from David Peicho
 * You can now also BYOVT ('bring your own vector types'), thanks [Tijmen Verhoef](https://github.com/nemjit001)
 * 'SpeedTest' tool that times and validates all (well, most) traversal kernels.
