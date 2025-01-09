@@ -11,11 +11,11 @@
 
 // tests to perform
 // #define BUILD_MIDPOINT
-// #define BUILD_REFERENCE
-// #define BUILD_DOUBLE
+#define BUILD_REFERENCE
+#define BUILD_DOUBLE
 #define BUILD_AVX
 #define BUILD_NEON
-// #define BUILD_SBVH
+#define BUILD_SBVH
 #define REFIT_BVH2
 #define REFIT_MBVH4
 #define REFIT_MBVH8
@@ -529,7 +529,7 @@ int main()
 	{
 		BVH tmpBVH;
 		tmpBVH.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++) 
+		for (int pass = 0; pass < 10; pass++)
 		{
 			if (pass == 1) t.reset();
 			tmpBVH.Refit();
@@ -548,7 +548,7 @@ int main()
 	{
 		MBVH<4> tmpBVH4;
 		tmpBVH4.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++) 
+		for (int pass = 0; pass < 10; pass++)
 		{
 			if (pass == 1) t.reset();
 			tmpBVH4.Refit();
@@ -567,7 +567,7 @@ int main()
 	{
 		MBVH<8> tmpBVH8;
 		tmpBVH8.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++) 
+		for (int pass = 0; pass < 10; pass++)
 		{
 			if (pass == 1) t.reset();
 			tmpBVH8.Refit();
