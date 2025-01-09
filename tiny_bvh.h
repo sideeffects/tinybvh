@@ -662,10 +662,14 @@ public:
 	void Build( const bvhdbl3* vertices, const uint32_t primCount );
 	double SAHCost( const uint64_t nodeIdx = 0 ) const;
 	int32_t Intersect( RayEx& ray ) const;
+	bool IsOccluded( const RayEx& ray ) const;
 	bvhdbl3* verts = 0;				// pointer to input primitive array, double-precision, 3x24 bytes per tri.
 	Fragment* fragment = 0;			// input primitive bounding boxes, double-precision.
 	BVHNode* bvhNode = 0;			// BVH node, double precision format.
 	uint64_t* triIdx = 0;			// primitive index array for double-precision bvh.
+	// Custom geometry intersection callback
+	void (*customIntersect)(RayEx&, uint64_t) = 0;
+	bool (*customIsOccluded)(const RayEx&, uint64_t) = 0;
 };
 
 #endif
@@ -5559,7 +5563,12 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+			if (customEnabled && customIntersect != 0)
+			{
+				for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+					(*customIntersect)(ray, triIdx[node->leftFirst + i]);
+			}
+			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 			{
 				const uint64_t idx = triIdx[node->leftFirst + i];
 				const uint64_t vertIdx = idx * 3;
@@ -5600,6 +5609,58 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 		}
 	}
 	return cost;
+}
+
+bool BVH_Double::IsOccluded( const RayEx& ray ) const
+{
+	BVHNode* node = &bvhNode[0], * stack[64];
+	uint32_t stackPtr = 0;
+	while (1)
+	{
+		if (node->isLeaf())
+		{
+			if (customEnabled && customIntersect != 0)
+			{
+				for (uint32_t i = 0; i < node->triCount; i++)
+					(*customIsOccluded)(ray, triIdx[node->leftFirst + i]);
+			}
+			else for (uint32_t i = 0; i < node->triCount; i++)
+			{
+				const uint64_t idx = triIdx[node->leftFirst + i];
+				const uint64_t vertIdx = idx * 3;
+				const bvhdbl3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
+				const bvhdbl3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
+				const bvhdbl3 h = cross( ray.D, edge2 );
+				const double a = dot( edge1, h );
+				if (fabs( a ) < 0.0000001) continue; // ray parallel to triangle
+				const double f = 1 / a;
+				const bvhdbl3 s = ray.O - bvhdbl3( verts[vertIdx] );
+				const double u = f * dot( s, h );
+				if (u < 0 || u > 1) continue;
+				const bvhdbl3 q = cross( s, edge1 );
+				const double v = f * dot( ray.D, q );
+				if (v < 0 || u + v > 1) continue;
+				const double t = f * dot( edge2, q );
+				if (t > 0 && t < ray.t) return true;
+			}
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
+			continue;
+		}
+		BVHNode* child1 = &bvhNode[node->leftFirst];
+		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
+		double dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
+		if (dist1 == BVH_DBL_FAR /* missed both child nodes */)
+		{
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
+		}
+		else /* hit at least one node */
+		{
+			node = child1; /* continue with the nearest */
+			if (dist2 != BVH_DBL_FAR) stack[stackPtr++] = child2; /* push far child */
+		}
+	}
+	return false;
 }
 
 // IntersectAABB, double precision
