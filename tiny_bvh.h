@@ -2549,8 +2549,10 @@ int32_t BVH_GPU::Intersect( Ray& ray ) const
 		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			if (bvh.vertIdx) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+			if (indexedEnabled && bvh.vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 				IntersectTriIndexed( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] );
+			else if (customEnabled && bvh.customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+				(*bvh.customIntersect)(ray, triIdx[node->firstTri + i]);
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 				IntersectTri( ray, verts, triIdx[node->firstTri + i] );
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -4071,12 +4073,12 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			if (bvh.vertIdx)
-				for (uint32_t i = 0; i < node->triCount; i++)
-					IntersectTriIndexed( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] );
-			else
-				for (uint32_t i = 0; i < node->triCount; i++)
-					IntersectTri( ray, verts, triIdx[node->firstTri + i] );
+			if (indexedEnabled && bvh.vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+				IntersectTriIndexed( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] );
+			else if (customEnabled && bvh.customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+				(*bvh.customIntersect)(ray, triIdx[node->firstTri + i]);
+			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+				IntersectTri( ray, verts, triIdx[node->firstTri + i] );
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -4148,10 +4150,15 @@ bool BVH_SoA::IsOccluded( const Ray& ray ) const
 	{
 		if (node->isLeaf())
 		{
-			if (bvh.vertIdx)
+			if (indexedEnabled && bvh.vertIdx != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
 					if (IndexedTriOccludes( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] )) return true;
+			}
+			else if (customEnabled && bvh.customIsOccluded != 0)
+			{
+				for (uint32_t i = 0; i < node->triCount; i++)
+					if ((*bvh.customIsOccluded)(ray, triIdx[node->firstTri + i])) return true;
 			}
 			else
 			{
