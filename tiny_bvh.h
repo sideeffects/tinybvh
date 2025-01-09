@@ -99,7 +99,10 @@ THE SOFTWARE.
 
 // Features
 #define DOUBLE_PRECISION_SUPPORT
-//#define TINYBVH_USE_CUSTOM_VECTOR_TYPES
+// #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
+// #define TINYBVH_NO_SIMD
+#define ENABLE_INDEXED_GEOMETRY
+#define ENABLE_CUSTOM_GEOMETRY
 
 // CWBVH triangle format: doesn't seem to help on GPU?
 // #define CWBVH_COMPRESSED_TRIS
@@ -110,6 +113,7 @@ THE SOFTWARE.
 #define FALLBACK_SHADOW_QUERY( s ) { Ray r = s; float d = s.hit.t; Intersect( r ); return r.hit.t < d; }
 
 // include fast AVX BVH builder
+#ifndef TINYBVH_NO_SIMD
 #if defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__)
 #define BVH_USEAVX
 #include "immintrin.h" // for __m128 and __m256
@@ -117,11 +121,12 @@ THE SOFTWARE.
 #define BVH_USENEON
 #include "arm_neon.h"
 #endif
+#endif // TINYBVH_NO_SIMD
 
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	2
-#define TINY_BVH_VERSION_SUB	1
+#define TINY_BVH_VERSION_SUB	2
 
 // ============================================================================
 //
@@ -624,6 +629,9 @@ public:
 	BVHNode* bvhNode = 0;			// BVH node pool, Wald 32-byte format. Root is always in node 0.
 	uint32_t newNodePtr = 0;		// used during build to keep track of next free node in pool.
 	Fragment* fragment = 0;			// input primitive bounding boxes.
+	// Custom geometry intersection callback
+	void (*customIntersect)(Ray&, unsigned) = 0;
+	bool (*customIsOccluded)(const Ray&, unsigned) = 0;
 };
 
 #ifdef DOUBLE_PRECISION_SUPPORT
@@ -996,6 +1004,19 @@ public:
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#endif
+
+// Some constexpr stuff to produce nice-looking branches in
+// *::Intersect with proper dead code elinimation.
+#ifdef ENABLE_INDEXED_GEOMETRY
+static constexpr bool indexedEnabled = true;
+#else
+static constexpr bool indexedEnabled = false;
+#endif
+#ifdef ENABLE_CUSTOM_GEOMETRY
+static constexpr bool customEnabled = true;
+#else
+static constexpr bool customEnabled = false;
 #endif
 
 namespace tinybvh {
@@ -1891,8 +1912,10 @@ int32_t BVH::Intersect( Ray& ray ) const
 		cost += C_TRAV;
 		if (node->isLeaf())
 		{
-			if (vertIdx) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+			if (indexedEnabled && vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 				IntersectTriIndexed( ray, verts, vertIdx, triIdx[node->leftFirst + i] );
+			else if (customEnabled && customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+				(*customIntersect)(ray, triIdx[node->leftFirst + i]);
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 				IntersectTri( ray, verts, triIdx[node->leftFirst + i] );
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -1923,10 +1946,15 @@ bool BVH::IsOccluded( const Ray& ray ) const
 	{
 		if (node->isLeaf())
 		{
-			if (vertIdx)
+			if (indexedEnabled && vertIdx != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
 					if (IndexedTriOccludes( ray, verts, vertIdx, triIdx[node->leftFirst + i] )) return true;
+			}
+			else if (customEnabled && customIsOccluded != 0)
+			{
+				for (uint32_t i = 0; i < node->triCount; i++)
+					if ((*customIsOccluded)(ray, triIdx[node->leftFirst + i])) return true;
 			}
 			else
 			{
@@ -2765,10 +2793,10 @@ template<int M> void MBVH<M>::Refit( const uint32_t nodeIdx )
 	}
 	else
 	{
-		for( unsigned i = 0; i < node.childCount; i++ ) Refit( node.child[i] );
+		for (unsigned i = 0; i < node.childCount; i++) Refit( node.child[i] );
 		MBVHNode& firstChild = mbvhNode[node.child[0]];
 		bvhvec3 bmin = firstChild.aabbMin, bmax = firstChild.aabbMax;
-		for( unsigned i = 1; i < node.childCount; i++ )
+		for (unsigned i = 1; i < node.childCount; i++)
 		{
 			MBVHNode& child = mbvhNode[node.child[i]];
 			bmin = tinybvh_min( bmin, child.aabbMin );
