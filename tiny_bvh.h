@@ -1382,11 +1382,11 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 	else FATAL_ERROR_IF( !rebuildable, "BVH::Build( .. ), bvh not rebuildable." );
 	verts = vertices, idxCount = triCount = primCount;
 	// prepare fragments
+	FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareBuild( .. ), empty vertex slice." );
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount, root.aabbMin = bvhvec3( BVH_FAR ), root.aabbMax = bvhvec3( -BVH_FAR );
 	if (!indices)
 	{
-		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareBuild( .. ), primCount == 0." );
 		FATAL_ERROR_IF( prims != 0, "BVH::PrepareBuild( .. ), indices == 0." );
 		// building a BVH over triangles specified as three 16-byte vertices each.
 		for (uint32_t i = 0; i < triCount; i++)
@@ -1401,7 +1401,6 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 	}
 	else
 	{
-		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareBuild( .. ), empty vertex slice." );
 		FATAL_ERROR_IF( prims == 0, "BVH::PrepareBuild( .. ), prims == 0." );
 		// building a BVH over triangles consisting of vertices indexed by 'indices'.
 		for (uint32_t i = 0; i < triCount; i++)
