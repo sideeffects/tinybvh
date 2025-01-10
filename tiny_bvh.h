@@ -923,9 +923,8 @@ public:
 class BLASInstance
 {
 public:
+	BLASInstance() = default;
 	BLASInstance( BVH* bvh ) : blas( bvh ) {}
-	void Update();					// Update the world bounds based on the current transform.
-	bvhaabb worldBounds;			// World-space AABB over the transformed blas root node.
 	float transform[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }; // identity
 	BVH* blas = 0;					// Bottom-level acceleration structure.
 	bvhvec3 TransformPoint( const bvhvec3& v ) const;
@@ -1086,21 +1085,6 @@ void BVHBase::CopyBasePropertiesFrom( const BVHBase& original )
 	this->idxCount = original.idxCount;
 }
 
-void BLASInstance::Update()
-{
-	// transform the eight corners of the root node aabb using the instance
-	// transform and calculate the worldspace aabb over these.
-	worldBounds.minBounds = bvhvec3( BVH_FAR ), worldBounds.maxBounds = bvhvec3( -BVH_FAR );
-	bvhvec3 bmin = blas->bvhNode[0].aabbMin, bmax = blas->bvhNode[0].aabbMax;
-	for (int32_t i = 0; i < 8; i++)
-	{
-		const bvhvec3 p( i & 1 ? bmax.x : bmin.x, i & 2 ? bmax.y : bmin.y, i & 4 ? bmax.z : bmin.z );
-		const bvhvec3 t = TransformPoint( p );
-		worldBounds.minBounds = tinybvh_min( worldBounds.minBounds, t );
-		worldBounds.maxBounds = tinybvh_max( worldBounds.maxBounds, t );
-	}
-}
-
 // BVH implementation
 // ----------------------------------------------------------------------------
 
@@ -1214,31 +1198,6 @@ int32_t BVH::PrimCount( const uint32_t nodeIdx ) const
 	// Determine the total number of primitives / fragments in leaf nodes.
 	const BVHNode& n = bvhNode[nodeIdx];
 	return n.isLeaf() ? n.triCount : (PrimCount( n.leftFirst ) + PrimCount( n.leftFirst + 1 ));
-}
-
-// BVH builder entry point for arrays of aabbs.
-void BVH::BuildTLAS( const bvhaabb* aabbs, const uint32_t aabbCount )
-{
-	// the aabb array must be cacheline aligned.
-	FATAL_ERROR_IF( aabbCount == 0, "BVH::BuildTLAS( .. ), aabbCount == 0." );
-	FATAL_ERROR_IF( ((long long)(void*)aabbs & 31) != 0, "BVH::Build( bvhaabb* ), array not cacheline aligned." );
-	// take the array and process it
-	fragment = (Fragment*)aabbs;
-	triCount = aabbCount;
-	// build the BVH
-	Build( (bvhvec4*)0, aabbCount ); // TODO: for very large scenes, use BuildAVX. Mind fragment sign flip!
-}
-
-void BVH::BuildTLAS( const BLASInstance* bvhs, const uint32_t instCount )
-{
-	FATAL_ERROR_IF( instCount == 0, "BVH::BuildTLAS( .. ), instCount == 0." );
-	if (!fragment) fragment = (Fragment*)AlignedAlloc( instCount );
-	else FATAL_ERROR_IF( instCount != triCount, "BVH::BuildTLAS( .. ), blas count changed." );
-	// copy relevant data from instance array
-	triCount = instCount;
-	for (uint32_t i = 0; i < instCount; i++)
-		fragment[i].bmin = bvhs[i].worldBounds.minBounds, fragment[i].primIdx = i,
-		fragment[i].bmax = bvhs[i].worldBounds.maxBounds, fragment[i].clipped = 0;
 }
 
 // Basic single-function BVH builder, using mid-point splits.
@@ -1362,6 +1321,48 @@ void BVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t
 	Build();
 	bvh_over_indices = true;
 }
+
+void BVH::BuildTLAS( const BLASInstance* bvhs, const uint32_t instCount )
+{
+	FATAL_ERROR_IF( instCount == 0, "BVH::BuildTLAS( .. ), instCount == 0." );
+	triCount = idxCount = instCount;
+	const uint32_t spaceNeeded = instCount * 2; // upper limit
+	if (allocatedNodes < spaceNeeded)
+	{
+		AlignedFree( bvhNode );
+		AlignedFree( triIdx );
+		AlignedFree( fragment );
+		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
+		allocatedNodes = spaceNeeded;
+		memset( &bvhNode[1], 0, 32 );	// node 1 remains unused, for cache line alignment.
+		triIdx = (uint32_t*)AlignedAlloc( instCount * sizeof( uint32_t ) );
+		fragment = (Fragment*)AlignedAlloc( instCount * sizeof( Fragment ) );
+	}
+	// copy relevant data from instance array
+	BVHNode& root = bvhNode[0];
+	root.leftFirst = 0, root.triCount = instCount, root.aabbMin = bvhvec3( BVH_FAR ), root.aabbMax = bvhvec3( -BVH_FAR );
+	for (uint32_t i = 0; i < instCount; i++)
+	{
+		// transform the eight corners of the root node aabb using the instance
+		// transform and calculate the worldspace aabb over those.
+		bvhvec3 minBounds = bvhvec3( BVH_FAR ), maxBounds = bvhvec3( -BVH_FAR );
+		bvhvec3 bmin = bvhs[i].blas->bvhNode[0].aabbMin, bmax = bvhs[i].blas->bvhNode[0].aabbMax;
+		for (int32_t j = 0; j < 8; j++)
+		{
+			const bvhvec3 p( j & 1 ? bmax.x : bmin.x, j & 2 ? bmax.y : bmin.y, j & 4 ? bmax.z : bmin.z );
+			const bvhvec3 t = bvhs[i].TransformPoint( p );
+			minBounds = tinybvh_min( minBounds, t ), maxBounds = tinybvh_max( maxBounds, t );
+		}
+		fragment[i].bmin = minBounds, fragment[i].primIdx = i;
+		fragment[i].bmax = maxBounds, fragment[i].clipped = 0;
+		root.aabbMin = tinybvh_min( root.aabbMin, minBounds );
+		root.aabbMax = tinybvh_max( root.aabbMax, maxBounds ), triIdx[i] = i;
+	}
+	// start build
+	newNodePtr = 2;
+	Build();
+}
+
 void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims )
 {
 	uint32_t primCount = prims > 0 ? prims : vertices.count / 3;

@@ -9,9 +9,11 @@
 
 using namespace tinybvh;
 
-BVH bvh;
-int frameIdx = 0, verts = 0;
+BVH bvh, blas, tlas;
+BLASInstance inst[3];
+int frameIdx = 0, verts = 0, bverts = 0;
 bvhvec4* triangles = 0;
+bvhvec4* bunny = 0;
 
 // setup view pyramid for a pinhole camera
 static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
@@ -26,6 +28,20 @@ void Init()
 	verts *= 3, triangles = (bvhvec4*)malloc64( verts * 16 );
 	s.read( (char*)triangles, verts * 16 );
 	bvh.Build( triangles, verts / 3 );
+	// load bunny
+	std::fstream b{ "./testdata/bunny.bin", s.binary | s.in };
+	b.read( (char*)&bverts, 4 );
+	bverts *= 3, bunny = (bvhvec4*)malloc64( bverts * 16 );
+	b.read( (char*)bunny, verts * 16 );
+	blas.Build( bunny, bverts / 3 );
+	// build a TLAS
+	inst[0] = BLASInstance( &bvh ); // static geometry
+	inst[1] = BLASInstance( &blas );
+	inst[1].transform[3 /* i.e., x translation */] = 4;
+	inst[2] = BLASInstance( &blas );
+	inst[2].transform[3 /* i.e., x translation */] = -4;
+	tlas.BuildTLAS( inst, 3 );
+	int w = 0;
 }
 
 bool UpdateCamera( float delta_time_s, fenster& f )
