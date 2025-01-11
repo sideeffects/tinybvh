@@ -40,8 +40,7 @@ void Init()
 	inst[1].transform[3 /* i.e., x translation */] = 4;
 	inst[2] = BLASInstance( &blas );
 	inst[2].transform[3 /* i.e., x translation */] = -4;
-	tlas.BuildTLAS( inst, 3 );
-	int w = 0;
+	tlas.Build( inst, 3 );
 }
 
 bool UpdateCamera( float delta_time_s, fenster& f )
@@ -79,7 +78,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 			float u = (float)(tx * 4 + x) / SCRWIDTH, v = (float)(ty * 4 + y) / SCRHEIGHT;
 			bvhvec3 D = normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
 			Ray ray( eye, D, 1e30f );
-			bvh.Intersect( ray );
+			tlas.Intersect( ray );
 			if (ray.hit.t < 10000)
 			{
 				int pixel_x = tx * 4 + x, pixel_y = ty * 4 + y, primIdx = ray.hit.prim;
