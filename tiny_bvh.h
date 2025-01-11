@@ -85,6 +85,15 @@ THE SOFTWARE.
 #define HQBVHBINS 32
 #define AVXBINS 8 // must stay at 8.
 
+// TLAS setting
+// Note: Instance index is encoded in the top bits of the prim idx field.
+// Max number of instances in TLAS: 2 ^ TLAS_BITS
+// Max number of primitives per BLAS: 2 ^ (32 - TLAS_BITS)
+#define TLAS_BITS 10 // max 1024 instances of 4M triangles each
+// Derived; for convenience:
+#define INST_IDX_SHFT (32 - TLAS_BITS)
+#define PRIM_IDX_MASK ((1 << INST_IDX_SHFT) - 1)
+
 // SAH BVH building: Heuristic parameters
 // CPU builds: C_INT = 1, C_TRAV = 1 seems optimal.
 #define C_INT	1
@@ -468,7 +477,7 @@ struct Ray
 	}
 	ALIGNED( 16 ) bvhvec3 O; uint32_t dummy1;
 	ALIGNED( 16 ) bvhvec3 D; uint32_t dummy2;
-	ALIGNED( 16 ) bvhvec3 rD; uint32_t dummy3;
+	ALIGNED( 16 ) bvhvec3 rD; uint32_t instIdx = 0;
 	ALIGNED( 16 ) Intersection hit;
 };
 
@@ -1967,12 +1976,14 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 			for (uint32_t i = 0; i < node->triCount; i++)
 			{
 				// BLAS traversal
-				BLASInstance& inst = instList[triIdx[node->leftFirst + i]];
-				BVH* blas = inst.blas;
+				const uint32_t instIdx = triIdx[node->leftFirst + i];
+				const BLASInstance& inst = instList[instIdx];
+				const BVH* blas = inst.blas;
 				// 1. Transform ray with the inverse of the instance transform
 				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
 				tmp.D = inst.TransformVector( ray.D, inst.invTransform );
 				tmp.rD = tinybvh_safercp( tmp.D );
+				tmp.instIdx = instIdx << (32 - TLAS_BITS);
 				tmp.hit = ray.hit;
 				// 2. Traverse BLAS with the transformed ray
 				cost += blas->Intersect( tmp );
@@ -5860,7 +5871,8 @@ void BVHBase::IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t 
 	if (t > 0 && t < ray.hit.t)
 	{
 		// register a hit: ray is shortened to t
-		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v, ray.hit.prim = idx;
+		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
+		ray.hit.prim = idx + ray.instIdx;
 	}
 }
 
