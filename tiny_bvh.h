@@ -93,6 +93,7 @@ THE SOFTWARE.
 // Derived; for convenience:
 #define INST_IDX_SHFT (32 - TLAS_BITS)
 #define PRIM_IDX_MASK ((1 << INST_IDX_SHFT) - 1)
+#define PRIM_IDX_MASK_DBL 0x00000000ffffffff
 
 // SAH BVH building: Heuristic parameters
 // CPU builds: C_INT = 1, C_TRAV = 1 seems optimal.
@@ -483,6 +484,13 @@ struct Ray
 
 #ifdef DOUBLE_PRECISION_SUPPORT
 
+struct IntersectionEx
+{
+	// Double-precision hit record.
+	double t, u, v;	// distance along ray & barycentric coordinates of the intersection
+	uint64_t prim;	// primitive index
+};
+
 struct RayEx
 {
 	// Double-precision ray definition.
@@ -494,11 +502,11 @@ struct RayEx
 		double rl = 1.0 / sqrt( D.x * D.x + D.y * D.y + D.z * D.z );
 		D.x *= rl, D.y *= rl, D.z *= rl;
 		rD.x = 1.0 / D.x, rD.y = 1.0 / D.y, rD.z = 1.0 / D.z;
-		u = v = 0, t = tmax;
+		hit.u = hit.v = 0, hit.t = tmax;
 	}
 	bvhdbl3 O, D, rD;
-	double t, u, v;
-	uint64_t primIdx;
+	IntersectionEx hit;
+	uint64_t instIdx = 0;
 };
 
 #endif
@@ -682,6 +690,8 @@ public:
 	double SAHCost( const uint64_t nodeIdx = 0 ) const;
 	int32_t Intersect( RayEx& ray ) const;
 	bool IsOccluded( const RayEx& ray ) const;
+	bool IsOccludedTLAS( const RayEx& ray ) const;
+	int32_t IntersectTLAS( RayEx& ray ) const;
 	bvhdbl3* verts = 0;				// pointer to input primitive array, double-precision, 3x24 bytes per tri.
 	Fragment* fragment = 0;			// input primitive bounding boxes, double-precision.
 	BVHNode* bvhNode = 0;			// BVH node, double precision format.
@@ -5729,6 +5739,7 @@ double BVH_Double::SAHCost( const uint64_t nodeIdx ) const
 // Traverse the default BVH layout, double-precision.
 int32_t BVH_Double::Intersect( RayEx& ray ) const
 {
+	if (instList) return IntersectTLAS( ray );
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0, cost = 0;
 	while (1)
@@ -5758,11 +5769,62 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 				const double v = f * dot( ray.D, q );
 				if (v < 0 || u + v > 1) continue;
 				const double t = f * dot( edge2, q );
-				if (t > 0 && t < ray.t)
+				if (t > 0 && t < ray.hit.t)
 				{
 					// register a hit: ray is shortened to t
-					ray.t = t, ray.u = u, ray.v = v, ray.primIdx = idx;
+					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
+					ray.hit.prim = idx + ray.instIdx;
 				}
+			}
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
+			continue;
+		}
+		BVHNode* child1 = &bvhNode[node->leftFirst];
+		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
+		double dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
+		if (dist1 == BVH_DBL_FAR /* missed both child nodes */)
+		{
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
+		}
+		else /* hit at least one node */
+		{
+			node = child1; /* continue with the nearest */
+			if (dist2 != BVH_DBL_FAR) stack[stackPtr++] = child2; /* push far child */
+		}
+	}
+	return cost;
+}
+
+// Traverse a double-precision TLAS.
+int32_t BVH_Double::IntersectTLAS( RayEx& ray ) const
+{
+	BVHNode* node = &bvhNode[0], * stack[64];
+	uint32_t stackPtr = 0, cost = 0;
+	while (1)
+	{
+		cost += C_TRAV;
+		if (node->isLeaf())
+		{
+			RayEx tmp;
+			for (uint32_t i = 0; i < node->triCount; i++)
+			{
+				// BLAS traversal
+				const uint64_t instIdx = triIdx[node->leftFirst + i];
+				BLASInstanceEx& inst = instList[instIdx];
+				BVH_Double* blas = inst.blas;
+				// 1. Transform ray with the inverse of the instance transform
+				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
+				tmp.D = inst.TransformVector( ray.D, inst.invTransform );
+				tmp.rD.x = tmp.D.x > 1e-24 ? (1.0 / tmp.D.x) : (tmp.D.x < -1e-24 ? (1.0 / tmp.D.x) : BVH_DBL_FAR);
+				tmp.rD.y = tmp.D.y > 1e-24 ? (1.0 / tmp.D.y) : (tmp.D.y < -1e-24 ? (1.0 / tmp.D.y) : BVH_DBL_FAR);
+				tmp.rD.z = tmp.D.z > 1e-24 ? (1.0 / tmp.D.z) : (tmp.D.z < -1e-24 ? (1.0 / tmp.D.z) : BVH_DBL_FAR);
+				tmp.instIdx = instIdx << 32UL;
+				tmp.hit = ray.hit;
+				// 2. Traverse BLAS with the transformed ray
+				cost += blas->Intersect( tmp );
+				// 3. Restore ray
+				ray.hit = tmp.hit;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
@@ -5786,6 +5848,7 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 
 bool BVH_Double::IsOccluded( const RayEx& ray ) const
 {
+	if (instList) return IsOccludedTLAS( ray );
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
 	while (1)
@@ -5814,7 +5877,50 @@ bool BVH_Double::IsOccluded( const RayEx& ray ) const
 				const double v = f * dot( ray.D, q );
 				if (v < 0 || u + v > 1) continue;
 				const double t = f * dot( edge2, q );
-				if (t > 0 && t < ray.t) return true;
+				if (t > 0 && t < ray.hit.t) return true;
+			}
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
+			continue;
+		}
+		BVHNode* child1 = &bvhNode[node->leftFirst];
+		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
+		double dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
+		if (dist1 == BVH_DBL_FAR /* missed both child nodes */)
+		{
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
+		}
+		else /* hit at least one node */
+		{
+			node = child1; /* continue with the nearest */
+			if (dist2 != BVH_DBL_FAR) stack[stackPtr++] = child2; /* push far child */
+		}
+	}
+	return false;
+}
+
+bool BVH_Double::IsOccludedTLAS( const RayEx& ray ) const
+{
+	BVHNode* node = &bvhNode[0], * stack[64];
+	uint32_t stackPtr = 0;
+	RayEx tmp;
+	while (1)
+	{
+		if (node->isLeaf())
+		{
+			for (uint32_t i = 0; i < node->triCount; i++)
+			{
+				// BLAS traversal
+				BLASInstanceEx& inst = instList[triIdx[node->leftFirst + i]];
+				BVH_Double* blas = inst.blas;
+				// 1. Transform ray with the inverse of the instance transform
+				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
+				tmp.D = inst.TransformVector( ray.D, inst.invTransform );
+				tmp.rD.x = tmp.D.x > 1e-24 ? (1.0 / tmp.D.x) : (tmp.D.x < -1e-24 ? (1.0 / tmp.D.x) : BVH_DBL_FAR);
+				tmp.rD.y = tmp.D.y > 1e-24 ? (1.0 / tmp.D.y) : (tmp.D.y < -1e-24 ? (1.0 / tmp.D.y) : BVH_DBL_FAR);
+				tmp.rD.z = tmp.D.z > 1e-24 ? (1.0 / tmp.D.z) : (tmp.D.z < -1e-24 ? (1.0 / tmp.D.z) : BVH_DBL_FAR);
+				// 2. Traverse BLAS with the transformed ray
+				if (blas->IsOccluded( tmp )) return true;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
@@ -5848,7 +5954,7 @@ double BVH_Double::BVHNode::Intersect( const RayEx& ray ) const
 	double tz1 = (aabbMin.z - ray.O.z) * ray.rD.z, tz2 = (aabbMax.z - ray.O.z) * ray.rD.z;
 	tmin = tinybvh_max( tmin, tinybvh_min( tz1, tz2 ) );
 	tmax = tinybvh_min( tmax, tinybvh_max( tz1, tz2 ) );
-	if (tmax >= tmin && tmin < ray.t && tmax >= 0) return tmin; else return BVH_DBL_FAR;
+	if (tmax >= tmin && tmin < ray.hit.t && tmax >= 0) return tmin; else return BVH_DBL_FAR;
 }
 
 #endif

@@ -156,7 +156,7 @@ float TestPrimaryRaysEx( unsigned N, unsigned passes, float* avgCost = 0 )
 	for (int view = 0; view < 3; view++)
 	{
 		RayEx* batch = doubleBatch[view];
-		for (unsigned i = 0; i < N; i++) batch[i].t = 1e30f;
+		for (unsigned i = 0; i < N; i++) batch[i].hit.t = 1e30f;
 	}
 	uint32_t travCost = 0;
 	for (unsigned pass = 0; pass < passes + 1; pass++)
@@ -176,7 +176,7 @@ void ValidateTraceResultEx( float* ref, unsigned N, unsigned line )
 	double batchSum = 0;
 	for (unsigned i = 0; i < N; i += 4)
 		refSum += ref[i] == 1e30f ? 100 : ref[i],
-		batchSum += doubleBatch[0][i].t == 1e300 ? 100 : doubleBatch[0][i].t;
+		batchSum += doubleBatch[0][i].hit.t == 1e300 ? 100 : doubleBatch[0][i].hit.t;
 	if (fabs( refSum - (float)batchSum ) / refSum < 0.0001f) return;
 	fprintf( stderr, "Validation failed on line %i.\n", line );
 	exit( 1 );
