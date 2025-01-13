@@ -177,7 +177,7 @@ inline void free64( void* ptr, void* = nullptr ) { _aligned_free( ptr ); }
 }
 #else // EMSCRIPTEN / gcc / clang
 #define ALIGNED( x ) __attribute__( ( aligned( x ) ) )
-#if defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__)
+#if !defined(TINYBVH_NO_SIMD) && (defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__))
 #include <xmmintrin.h>
 namespace tinybvh {
 inline void* malloc64( size_t size, void* = nullptr )
