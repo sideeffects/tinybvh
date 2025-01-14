@@ -4,7 +4,7 @@
 #define TILESIZE 20
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
-#define DOUBLE_PRECISION_TEST
+// #define DOUBLE_PRECISION_TEST
 
 #define TINYBVH_IMPLEMENTATION
 #include "tiny_bvh.h"
@@ -14,6 +14,7 @@
 using namespace tinybvh;
 
 BVH bvh, blas, tlas;
+BVHBase* bvhList[] = { &bvh, &blas };
 BLASInstance inst[3];
 int frameIdx = 0, verts = 0, bverts = 0;
 bvhvec4* triangles = 0;
@@ -30,6 +31,7 @@ bvhdbl3* trianglesEx = 0;
 bvhdbl3* bunnyEx = 0;
 BLASInstanceEx instEx[3];
 BVH_Double bvhEx, blasEx, tlasEx;
+BVH_Double* bvhExList[] = { &bvhEx, &blasEx };
 
 void Init()
 {
@@ -49,11 +51,11 @@ void Init()
 	blas.Build( bunny, bverts / 3 );
 
 	// build a TLAS
-	inst[0] = BLASInstance( &bvh ); // static geometry
-	inst[1] = BLASInstance( &blas );
+	inst[0] = BLASInstance( 0 ); // static geometry
+	inst[1] = BLASInstance( 1 );
 	inst[1].transform[0] = inst[1].transform[5] = inst[1].transform[10] = 0.5f; // scale
 	inst[1].transform[3 /* i.e., x translation */] = 4;
-	inst[2] = BLASInstance( &blas );
+	inst[2] = BLASInstance( 1 );
 	inst[2].transform[0] = inst[2].transform[5] = inst[2].transform[10] = 0.5f; // scale
 	inst[2].transform[3 /* i.e., x translation */] = -4;
 	// tlas.Build( inst, 3 ); // postponed to ::Tick, as we'll want to do this each frame.
@@ -67,8 +69,8 @@ void Init()
 	// build double-precision TLAS
 	bvhEx.Build( trianglesEx, verts / 3 );
 	blasEx.Build( bunnyEx, bverts / 3 );
-	instEx[0] = BLASInstanceEx( &bvhEx );
-	instEx[1] = instEx[2] = BLASInstanceEx( &blasEx );
+	instEx[0] = BLASInstanceEx( 0 );
+	instEx[1] = instEx[2] = BLASInstanceEx( 1 );
 	instEx[1].transform[0] = instEx[1].transform[5] = instEx[1].transform[10] = 0.5; // scale
 	instEx[2].transform[0] = instEx[2].transform[5] = instEx[2].transform[10] = 0.5; // scale
 	instEx[1].transform[3] = 4, instEx[2].transform[3] = -4;
@@ -127,7 +129,8 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				uint32_t primIdx = ray.hit.prim & PRIM_IDX_MASK;
 				uint32_t instIdx = (uint32_t)ray.hit.prim >> INST_IDX_SHFT;
 			#endif
-				bvhvec4slice& instTris = inst[instIdx].blas->verts;
+				BVH* blas = (BVH*)tlas.blasList[inst[instIdx].blasIdx];
+				bvhvec4slice& instTris = blas->verts;
 				bvhvec3 v0 = instTris[primIdx * 3];
 				bvhvec3 v1 = instTris[primIdx * 3 + 1];
 				bvhvec3 v2 = instTris[primIdx * 3 + 2];
@@ -149,8 +152,8 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	for (int i = 0; i < SCRWIDTH * SCRHEIGHT; i++) buf[i] = 0xaaaaff;
 
 	// update TLAS
-	tlas.Build( inst, 3 );		// regular
-	tlasEx.Build( instEx, 3 );	// double-precision
+	tlas.Build( inst, 3, bvhList, 2 );			// regular
+	tlasEx.Build( instEx, 3, bvhExList, 2 );	// double-precision
 
 	// render tiles
 	tileIdx = threadCount;
