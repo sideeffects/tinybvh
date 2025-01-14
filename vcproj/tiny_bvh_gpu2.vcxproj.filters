@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="..\tiny_bvh_gpu2.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\tiny_bvh.h" />
+    <ClInclude Include="..\tiny_ocl.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\traverse.cl" />
+    <None Include="..\tools.cl" />
+    <None Include="..\traverse_bvh2.cl" />
+    <None Include="..\traverse_bvh4.cl" />
+    <None Include="..\traverse_cwbvh.cl" />
+    <None Include="..\wavefront2.cl" />
+  </ItemGroup>
+</Project>

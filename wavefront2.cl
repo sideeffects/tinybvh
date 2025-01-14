@@ -1,5 +1,5 @@
-// basic gpu-side path tracing (wavefront)
-// Used by tiny_bvh_gpu.cpp
+// gpu-side path tracing (wavefront) with TLAS/BLAS support.
+// Used by tiny_bvh_gpu2.cpp.
 
 #pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
 
@@ -12,11 +12,27 @@
 #define MATERIAL_LIGHT		1	// material emits light - end of path
 #define MATERIAL_SPECULAR	2	// material is pure specular
 
+struct TLASNode
+{
+	float xmin, ymin, zmin /* careful: OpenCL float3 is 16 bytes! */; uint leftFirst;
+	float xmax, ymax, zmax; uint triCount;
+};
+
+struct BLASInstance
+{
+	float16 transform;
+	float16 invTransform;
+	float xmin, ymin, zmin; uint blasIdx;
+	float xmax, ymax, zmax; uint dummy;
+};
+
 // rendering parameters
 float4 eye, C, p0, p1, p2;
 uint frameIdx, width, height, dummy3;
 global float4* cwbvhNodes;
 global float4* cwbvhTris;
+global struct TLASNode* tlasNodes;
+global struct BLASInstance* instances;
 global uint* blueNoise;
 global volatile int extendTasks, shadeTasks, connectTasks; // atomic counters
 const float3 lightColor = (float3)(25,25,22);
@@ -51,7 +67,9 @@ struct Potential
 // atomic counter management - prepare for primary ray wavefront
 void kernel SetRenderData( int _primaryRayCount,
 	float4 _eye, float4 _p0, float4 _p1, float4 _p2, uint _frameIdx, uint _width, uint _height,
-	global float4* _cwbvhNodes, global float4* _cwbvhTris, global uint* _blueNoise
+	global float4* _cwbvhNodes, global float4* _cwbvhTris, 
+	global struct TLASNode* _tlasNodes, global struct BLASInstance* _instances, 
+	global uint* _blueNoise
 )
 {
 	if (get_global_id( 0 ) != 0) return;
@@ -61,6 +79,8 @@ void kernel SetRenderData( int _primaryRayCount,
 	// set BVH pointers
 	cwbvhNodes = _cwbvhNodes;
 	cwbvhTris = _cwbvhTris;
+	tlasNodes = _tlasNodes;
+	instances = _instances;
 	blueNoise = _blueNoise;
 	// initialize atomic counters
 	extendTasks = shadeTasks = _primaryRayCount;
