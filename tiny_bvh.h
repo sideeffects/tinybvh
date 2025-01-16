@@ -1415,9 +1415,12 @@ void BVH::Build( BLASInstance* instances, const uint32_t instCount, BVHBase** bl
 	root.leftFirst = 0, root.triCount = instCount, root.aabbMin = bvhvec3( BVH_FAR ), root.aabbMax = bvhvec3( -BVH_FAR );
 	for (uint32_t i = 0; i < instCount; i++)
 	{
-		uint32_t blasIdx = instList[i].blasIdx;
-		BVH* blas = (BVH*)blasList[blasIdx];
-		instList[i].Update( blas );
+		if (blasList) // if a null pointer is passed, we'll assume the BLASInstances have been updated elsewhere.
+		{
+			uint32_t blasIdx = instList[i].blasIdx;
+			BVH* blas = (BVH*)blasList[blasIdx];
+			instList[i].Update( blas );
+		}
 		fragment[i].bmin = instList[i].aabbMin, fragment[i].primIdx = i;
 		fragment[i].bmax = instList[i].aabbMax, fragment[i].clipped = 0;
 		root.aabbMin = tinybvh_min( root.aabbMin, instList[i].aabbMin );
@@ -5593,9 +5596,12 @@ void BVH_Double::Build( BLASInstanceEx* bvhs, const uint64_t instCount, BVH_Doub
 	root.leftFirst = 0, root.triCount = instCount, root.aabbMin = bvhdbl3( BVH_DBL_FAR ), root.aabbMax = bvhdbl3( -BVH_DBL_FAR );
 	for (uint64_t i = 0; i < instCount; i++)
 	{
-		uint64_t blasIdx = instList[i].blasIdx;
-		BVH_Double* blas = blasList[blasIdx];
-		instList[i].Update( blas );
+		if (blasList) // if a null pointer is passed, we'll assume the BLASInstances have been updated elsewhere.
+		{
+			uint64_t blasIdx = instList[i].blasIdx;
+			BVH_Double* blas = blasList[blasIdx];
+			instList[i].Update( blas );
+		}
 		fragment[i].bmin = instList[i].aabbMin, fragment[i].primIdx = i, fragment[i].bmax = instList[i].aabbMax;
 		root.aabbMin = tinybvh_min( root.aabbMin, instList[i].aabbMin );
 		root.aabbMax = tinybvh_max( root.aabbMax, instList[i].aabbMax ), triIdx[i] = i;
