@@ -7,7 +7,7 @@
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
 #define DRAGONS 100
-// #define AUTOCAM
+#define AUTOCAM
 
 // This application uses tinybvh - And this file will include the implementation.
 #define TINYBVH_IMPLEMENTATION
