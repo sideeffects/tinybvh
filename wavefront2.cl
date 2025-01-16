@@ -12,31 +12,32 @@
 #define MATERIAL_LIGHT		1	// material emits light - end of path
 #define MATERIAL_SPECULAR	2	// material is pure specular
 
-struct TLASNode
-{
-	float xmin, ymin, zmin /* careful: OpenCL float3 is 16 bytes! */; uint leftFirst;
-	float xmax, ymax, zmax; uint triCount;
-};
-
 struct BLASInstance
 {
-	float16 transform;
-	float16 invTransform;
+	float transform[16];
+	float invTransform[16];
 	float xmin, ymin, zmin; uint blasIdx;
-	float xmax, ymax, zmax; uint dummy;
+	float xmax, ymax, zmax; uint dummy[9];
 };
 
 // rendering parameters
 float4 eye, C, p0, p1, p2;
 uint frameIdx, width, height, dummy3;
-global float4* cwbvhNodes;
-global float4* cwbvhTris;
-global struct TLASNode* tlasNodes;
+global float4* bistroNodes;
+global float4* bistroTris;
+global float4* bistroVerts;
+global float4* dragonNodes;
+global float4* dragonTris;
+global float4* dragonVerts;
+global struct BVHNodeAlt* tlasNodes;
+global uint* tlasIndices;
 global struct BLASInstance* instances;
 global uint* blueNoise;
 global volatile int extendTasks, shadeTasks, connectTasks; // atomic counters
 const float3 lightColor = (float3)(25,25,22);
 const float3 lightPos = (float3)(-22, 12, 2);
+
+#include "traverse_tlas.cl" // needs access to above arrays for now.
 
 // Blue noise interface for fixed 128x128x8 dataset.
 float2 Noise( const uint x, const uint y, const uint page /* 0..7 */ )
@@ -67,8 +68,9 @@ struct Potential
 // atomic counter management - prepare for primary ray wavefront
 void kernel SetRenderData( int _primaryRayCount,
 	float4 _eye, float4 _p0, float4 _p1, float4 _p2, uint _frameIdx, uint _width, uint _height,
-	global float4* _cwbvhNodes, global float4* _cwbvhTris, 
-	global struct TLASNode* _tlasNodes, global struct BLASInstance* _instances, 
+	global float4* _bistroNodes, global float4* _bistroTris, global float4* _bistroVerts, 
+	global float4* _dragonNodes, global float4* _dragonTris, global float4* _dragonVerts, 
+	global struct BVHNodeAlt* _tlasNodes, global uint* _tlasIndices, global struct BLASInstance* _instances, 
 	global uint* _blueNoise
 )
 {
@@ -77,9 +79,14 @@ void kernel SetRenderData( int _primaryRayCount,
 	eye = _eye, p0 = _p0, p1 = _p1, p2 = _p2;
 	frameIdx = _frameIdx, width = _width, height = _height;
 	// set BVH pointers
-	cwbvhNodes = _cwbvhNodes;
-	cwbvhTris = _cwbvhTris;
+	bistroNodes = _bistroNodes;
+	bistroTris = _bistroTris;
+	bistroVerts = _bistroVerts;
+	dragonNodes = _dragonNodes;
+	dragonTris = _dragonTris;
+	dragonVerts = _dragonVerts;
 	tlasNodes = _tlasNodes;
+	tlasIndices = _tlasIndices;
 	instances = _instances;
 	blueNoise = _blueNoise;
 	// initialize atomic counters
@@ -123,13 +130,8 @@ void kernel Extend( global struct PathState* raysIn )
 		if (pathId < 0) break; // someone else could have decreased it before us.
 		const float4 O4 = raysIn[pathId].O;
 		const float4 D4 = raysIn[pathId].D;
-	#ifdef SIMD_AABBTEST
 		const float4 rD4 = native_recip( D4 );
-		raysIn[pathId].hit = traverse_cwbvh( cwbvhNodes, cwbvhTris, O4, D4, rD4, 1e30f );
-	#else
-		const float3 rD = native_recip( D4.xyz );
-		raysIn[pathId].hit = traverse_cwbvh( cwbvhNodes, cwbvhTris, O4.xyz, D4.xyz, rD, 1e30f );
-	#endif
+		raysIn[pathId].hit = traverse_tlas( tlasNodes, tlasIndices, O4, D4, rD4, 1e30f );
 	}
 }
 
@@ -147,7 +149,7 @@ void kernel UpdateCounters1() { if (get_global_id( 0 ) == 0) extendTasks = 0; }
 // extension rays and shadow rays.
 void kernel Shade( global float4* accumulator,
 	global struct PathState* raysIn, global struct PathState* raysOut,
-	global struct Potential* shadowOut, global float4* verts, uint sampleIdx )
+	global struct Potential* shadowOut, uint sampleIdx )
 {
 	while (1)
 	{
@@ -175,8 +177,11 @@ void kernel Shade( global float4* accumulator,
 			continue;
 		}
 		// fetch geometry at intersection point
-		uint vertIdx = as_uint( hit.w ) * 3;
-		float4 v0 = verts[vertIdx];
+		uint primIdx = as_uint( hit.w );
+		uint instIdx = primIdx >> 24;
+		uint vertIdx = (primIdx & 0xffffff) * 3;
+		const global float4* vdata = instIdx == 16 ? bistroVerts : dragonVerts;  
+		float4 v0 = vdata[vertIdx];
 		uint materialType = as_uint( v0.w ) >> 24;
 		float brdfPDF = T4.w;
 		float3 D = D4.xyz;
@@ -215,7 +220,7 @@ void kernel Shade( global float4* accumulator,
 			r2 = RandomFloat( &seed ), r3 = RandomFloat( &seed );
 		}
 		// prepare data for bounce
-		float3 vert0 = v0.xyz, vert1 = verts[vertIdx + 1].xyz, vert2 = verts[vertIdx + 2].xyz;
+		float3 vert0 = v0.xyz, vert1 = vdata[vertIdx + 1].xyz, vert2 = vdata[vertIdx + 2].xyz;
 		float3 I = O4.xyz + t * D;
 		float3 N = fast_normalize( cross( vert1 - vert0, vert2 - vert0 ) );
 		if (dot( N, D ) > 0) N *= -1;
@@ -282,13 +287,8 @@ void kernel Connect( global float4* accumulator, global struct Potential* shadow
 		const int rayId = atomic_dec( &connectTasks ) - 1;
 		if (rayId < 0) break;
 		const float4 T4 = shadowIn[rayId].T, O4 = shadowIn[rayId].O, D4 = shadowIn[rayId].D;
-	#ifdef SIMD_AABBTEST
 		const float4 rD4 = native_recip( D4 );
-		if (isoccluded_cwbvh( cwbvhNodes, cwbvhTris, O4, D4, rD4, D4.w )) continue;
-	#else
-		const float3 rD = native_recip( D4.xyz );
-		if (isoccluded_cwbvh( cwbvhNodes, cwbvhTris, O4.xyz, D4.xyz, rD, D4.w )) continue;
-	#endif
+		if (isoccluded_tlas( tlasNodes, tlasIndices, O4, D4, rD4, D4.w )) continue;
 		accumulator[as_uint( O4.w )] += T4;
 	}
 }

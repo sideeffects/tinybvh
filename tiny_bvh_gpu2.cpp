@@ -20,17 +20,17 @@ using namespace tinybvh;
 
 // Application variables
 
-static BVH8_CWBVH bvh, blas;
-static BVHBase* blasList[] = { &bvh, &blas };
-static BVH tlas;
+static BVH8_CWBVH bistro, dragon;
+static BVHBase* blasList[] = { &bistro, &dragon };
+static BVH_GPU tlas;
 static BLASInstance instance[17];
-static bvhvec4* tris = 0, * dragonTris = 0;
+static bvhvec4* verts = 0, * dragonVerts = 0;
 static int triCount = 0, dragonTriCount = 0, frameIdx = 0, spp = 0;
 static Kernel* init, * clear, * rayGen, * extend, * shade;
 static Kernel* updateCounters1, * updateCounters2, * traceShadows, * finalize;
-static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections, * triData;
-static Buffer* cwbvhNodes = 0, * cwbvhTris = 0, * noise = 0;
-static Buffer* tlasNodes = 0, * blasInstances = 0;
+static Buffer* pixels, * accumulator, * raysIn, * raysOut, * connections;
+static Buffer* bistroNodes = 0, * bistroTris = 0, * bistroVerts, * dragonNodes = 0, * dragonTris = 0, * drVerts, * noise = 0;
+static Buffer* tlasNodes = 0, * tlasIndices = 0, * blasInstances = 0;
 static size_t computeUnits;
 static uint32_t* blueNoise = new uint32_t[128 * 128 * 8];
 
@@ -65,17 +65,17 @@ void AddMesh( const char* file, float scale = 1, bvhvec3 pos = {}, int c = 0, in
 {
 	std::fstream s{ file, s.binary | s.in }; s.read( (char*)&N, 4 );
 	bvhvec4* data = (bvhvec4*)tinybvh::malloc64( (N + triCount) * 48 );
-	if (tris) memcpy( data, tris, triCount * 48 ), tinybvh::free64( tris );
-	tris = data, s.read( (char*)tris + triCount * 48, N * 48 ), triCount += N;
-	for (int* b = (int*)tris + (triCount - N) * 12, i = 0; i < N * 3; i++)
+	if (verts) memcpy( data, verts, triCount * 48 ), tinybvh::free64( verts );
+	verts = data, s.read( (char*)verts + triCount * 48, N * 48 ), triCount += N;
+	for (int* b = (int*)verts + (triCount - N) * 12, i = 0; i < N * 3; i++)
 		*(bvhvec3*)b = *(bvhvec3*)b * scale + pos, b[3] = c ? c : b[3], b += 4;
 }
 void AddQuad( const bvhvec3 pos, const float w, const float d, int c )
 {
 	bvhvec4* data = (bvhvec4*)tinybvh::malloc64( (triCount + 2) * 48 );
-	if (tris) memcpy( data + 6, tris, triCount * 48 ), tinybvh::free64( tris );
+	if (verts) memcpy( data + 6, verts, triCount * 48 ), tinybvh::free64( verts );
 	data[0] = bvhvec3( -w, 0, -d ), data[1] = bvhvec3( w, 0, -d );
-	data[2] = bvhvec3( w, 0, d ), data[3] = bvhvec3( -w, 0, -d ), tris = data;
+	data[2] = bvhvec3( w, 0, d ), data[3] = bvhvec3( -w, 0, -d ), verts = data;
 	data[4] = bvhvec3( w, 0, d ), data[5] = bvhvec3( -w, 0, d ), triCount += 2;
 	for (int i = 0; i < 6; i++) data[i] = 0.5f * data[i] + pos, data[i].w = *(float*)&c;
 }
@@ -119,13 +119,20 @@ void Init()
 
 	// load dragon mesh
 	AddMesh( "./testdata/dragon.bin", 1, bvhvec3( 0 ) );
-	swap( tris, dragonTris );
+	swap( verts, dragonVerts );
 	swap( triCount, dragonTriCount );
-	blas.Build( dragonTris, dragonTriCount );
+	dragon.Build( dragonVerts, dragonTriCount );
 
 	// create dragon instances
 	for (int x = 0; x < 4; x++) for (int y = 0; y < 4; y++)
+	{
 		instance[x + y * 4] = BLASInstance( 1 /* the dragon */ );
+		BLASInstance& i = instance[x + y * 4];
+		i.transform[0] = i.transform[5] = i.transform[10] = 0.25f;
+		i.transform[3] = (float)x * 4 - 18;
+		i.transform[7] = 14;
+		i.transform[11] = (float)y * 4 - 18;
+	}
 
 	// load vertex data for static scenery
 	AddQuad( bvhvec3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
@@ -133,21 +140,29 @@ void Init()
 	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
 
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-	bvh.Build( tris, triCount );
+	bistro.Build( verts, triCount );
 	instance[16] = BLASInstance( 0 /* static geometry */ );
 	tlas.Build( instance, 17, blasList, 2 );
 
 	// create OpenCL buffers for BVH data
-	tlasNodes = new Buffer( tlas.allocatedNodes /* could change! */ * sizeof( BVH::BVHNode ), tlas.bvhNode );
+	tlasNodes = new Buffer( tlas.allocatedNodes /* could change! */ * sizeof( BVH_GPU::BVHNode ), tlas.bvhNode );
+	tlasIndices = new Buffer( tlas.bvh.idxCount * sizeof( uint32_t ), tlas.bvh.triIdx );
 	tlasNodes->CopyToDevice();
-	blasInstances = new Buffer( sizeof( instance ), instance );
+	tlasIndices->CopyToDevice();
+	blasInstances = new Buffer( 17 * sizeof( BLASInstance ), instance );
 	blasInstances->CopyToDevice();
-	cwbvhNodes = new Buffer( bvh.usedBlocks * sizeof( bvhvec4 ), bvh.bvh8Data );
-	cwbvhTris = new Buffer( bvh.idxCount * 3 * sizeof( bvhvec4 ), bvh.bvh8Tris );
-	cwbvhNodes->CopyToDevice();
-	cwbvhTris->CopyToDevice();
-	triData = new Buffer( triCount * 3 * sizeof( bvhvec4 ), tris );
-	triData->CopyToDevice();
+	bistroNodes = new Buffer( bistro.usedBlocks * sizeof( bvhvec4 ), bistro.bvh8Data );
+	bistroTris = new Buffer( bistro.idxCount * 3 * sizeof( bvhvec4 ), bistro.bvh8Tris );
+	bistroVerts = new Buffer( triCount * 3 * sizeof( bvhvec4 ), verts );
+	dragonNodes = new Buffer( dragon.usedBlocks * sizeof( bvhvec4 ), dragon.bvh8Data );
+	dragonTris = new Buffer( dragon.idxCount * 3 * sizeof( bvhvec4 ), dragon.bvh8Tris );
+	drVerts = new Buffer( dragonTriCount * 3 * sizeof( bvhvec4 ), dragonVerts );
+	dragonNodes->CopyToDevice();
+	dragonTris->CopyToDevice();
+	drVerts->CopyToDevice();
+	bistroNodes->CopyToDevice();
+	bistroTris->CopyToDevice();
+	bistroVerts->CopyToDevice();
 
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera_gpu.bin", t.binary | t.in };
@@ -199,7 +214,8 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	// wavefront step 0: render on the GPU
 	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2,
 		frameIdx, SCRWIDTH, SCRHEIGHT,
-		cwbvhNodes, cwbvhTris, tlasNodes, blasInstances,
+		bistroNodes, bistroTris, bistroVerts, dragonNodes, dragonTris, drVerts,
+		tlasNodes, tlasIndices, blasInstances,
 		noise
 	);
 	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
@@ -211,7 +227,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		extend->SetArguments( raysIn );
 		extend->Run( computeUnits * 64 * 16, 64 );
 		updateCounters1->Run( 1 );
-		shade->SetArguments( accumulator, raysIn, raysOut, connections, triData, spp - 1 );
+		shade->SetArguments( accumulator, raysIn, raysOut, connections, spp - 1 );
 		shade->Run( computeUnits * 64 * 16, 64 );
 		updateCounters2->Run( 1 );
 	}
