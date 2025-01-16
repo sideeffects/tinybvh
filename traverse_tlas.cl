@@ -90,7 +90,7 @@ bool isoccluded_tlas( global struct BVHNodeAlt* tlasNode, global unsigned* idx, 
 			const unsigned firstTri = as_uint( rmax.w );
 			for (unsigned i = 0; i < triCount; i++)
 			{
-				const uint instIdx = 0; // idx[firstTri + i];
+				const uint instIdx = idx[firstTri + i];
 				const struct BLASInstance* inst = instances + instIdx;
 				const float4 Oblas = (float4)( TransformPoint( O4.xyz, inst->invTransform ), 1 );
 				const float4 Dblas = (float4)( TransformVector( D4.xyz, inst->invTransform ), 0 );
@@ -98,9 +98,9 @@ bool isoccluded_tlas( global struct BVHNodeAlt* tlasNode, global unsigned* idx, 
 				const global float4* blasNodes = instIdx == 0 ? bistroNodes : dragonNodes;
 				const global float4* blasTris = instIdx == 0 ? bistroTris : dragonTris;
 			#ifdef SIMD_AABBTEST
-				if (isoccluded_cwbvh( blasNodes, blasTris, Oblas, Dblas, rDblas, D4.w )) continue;
+				if (isoccluded_cwbvh( blasNodes, blasTris, Oblas, Dblas, rDblas, D4.w )) return true;
 			#else
-				if (isoccluded_cwbvh( blasNodes, blasTris, Oblas.xyz, Dblas.xyz, rDblas.xyz, D4.w )) continue;
+				if (isoccluded_cwbvh( blasNodes, blasTris, Oblas.xyz, Dblas.xyz, rDblas.xyz, D4.w )) return true;
 			#endif
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];

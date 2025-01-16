@@ -2,12 +2,12 @@
 // using a TLAS. TinyOCL is used to render on the GPU using OpenCL.
 
 #define FENSTER_APP_IMPLEMENTATION
-#define SCRWIDTH 1024
-#define SCRHEIGHT 640
+#define SCRWIDTH 1280
+#define SCRHEIGHT 720
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
 #define DRAGONS 100
-#define AUTOCAM
+// #define AUTOCAM
 
 // This application uses tinybvh - And this file will include the implementation.
 #define TINYBVH_IMPLEMENTATION
