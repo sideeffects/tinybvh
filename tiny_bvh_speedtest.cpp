@@ -16,6 +16,9 @@
 #define BUILD_AVX
 #define BUILD_NEON
 #define BUILD_SBVH
+#define REFIT_BVH2
+#define REFIT_MBVH4
+#define REFIT_MBVH8
 // #define BUILD_AVX_SBVH
 #define TRAVERSE_2WAY_ST
 #define TRAVERSE_ALT2WAY_ST
@@ -58,7 +61,7 @@ using namespace tinybvh;
 bvhvec4* triangles = 0;
 #include <fstream>
 int verts = 0;
-float traceTime, buildTime, * refDist = 0, * refDistFull = 0;
+float traceTime, buildTime, refitTime, * refDist = 0, * refDistFull = 0;
 unsigned refOccluded[3] = {}, * refOccl[3] = {};
 unsigned Nfull, Nsmall;
 Ray* fullBatch[3], * smallBatch[3];
@@ -153,7 +156,7 @@ float TestPrimaryRaysEx( unsigned N, unsigned passes, float* avgCost = 0 )
 	for (int view = 0; view < 3; view++)
 	{
 		RayEx* batch = doubleBatch[view];
-		for (unsigned i = 0; i < N; i++) batch[i].t = 1e30f;
+		for (unsigned i = 0; i < N; i++) batch[i].hit.t = 1e30f;
 	}
 	uint32_t travCost = 0;
 	for (unsigned pass = 0; pass < passes + 1; pass++)
@@ -173,7 +176,7 @@ void ValidateTraceResultEx( float* ref, unsigned N, unsigned line )
 	double batchSum = 0;
 	for (unsigned i = 0; i < N; i += 4)
 		refSum += ref[i] == 1e30f ? 100 : ref[i],
-		batchSum += doubleBatch[0][i].t == 1e300 ? 100 : doubleBatch[0][i].t;
+		batchSum += doubleBatch[0][i].hit.t == 1e300 ? 100 : doubleBatch[0][i].hit.t;
 	if (fabs( refSum - (float)batchSum ) / refSum < 0.0001f) return;
 	fprintf( stderr, "Validation failed on line %i.\n", line );
 	exit( 1 );
@@ -513,6 +516,66 @@ int main()
 	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
 	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
+
+#endif
+
+	// measure single-core bvh construction time - warming caches
+	printf( "BVH refitting speed\n" );
+
+#ifdef REFIT_BVH2
+
+	// measure single-core bvh refit time
+	printf( "- BVH2 refitting: " );
+	{
+		BVH tmpBVH;
+		tmpBVH.Build( triangles, verts / 3 );
+		for (int pass = 0; pass < 10; pass++)
+		{
+			if (pass == 1) t.reset();
+			tmpBVH.Refit();
+		}
+		refitTime = t.elapsed() / 9.0f;
+	}
+	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
+	printf( "- SAH=%.2f\n", bvh->SAHCost() );
+
+#endif
+
+#ifdef REFIT_MBVH4
+
+	// measure single-core mbvh refit time
+	printf( "- BVH4 refitting: " );
+	{
+		MBVH<4> tmpBVH4;
+		tmpBVH4.Build( triangles, verts / 3 );
+		for (int pass = 0; pass < 10; pass++)
+		{
+			if (pass == 1) t.reset();
+			tmpBVH4.Refit();
+		}
+		refitTime = t.elapsed() / 9.0f;
+	}
+	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
+	printf( "- SAH=%.2f\n", bvh->SAHCost() );
+
+#endif
+
+#ifdef REFIT_MBVH8
+
+	// measure single-core mbvh refit time
+	printf( "- BVH8 refitting: " );
+	{
+		MBVH<8> tmpBVH8;
+		tmpBVH8.Build( triangles, verts / 3 );
+		for (int pass = 0; pass < 10; pass++)
+		{
+			if (pass == 1) t.reset();
+			tmpBVH8.Refit();
+		}
+		refitTime = t.elapsed() / 9.0f;
+	}
+	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
+	printf( "- SAH=%.2f\n", bvh->SAHCost() );
 
 #endif
 

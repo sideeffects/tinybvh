@@ -3,7 +3,7 @@
 #define SCRHEIGHT 600
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
-// #define LOADSCENE
+#define LOADSCENE
 
 #define TINYBVH_IMPLEMENTATION
 #include "tiny_bvh.h"
@@ -17,7 +17,8 @@ Ray* rays = 0;
 int* depths = 0;
 
 #ifdef LOADSCENE
-bvhvec4* triangles = 0;
+bvhvec4* vertices = 0;
+uint32_t* indices = 0;
 const char scene[] = "cryteksponza.bin";
 #else
 ALIGNED( 16 ) bvhvec4 vertices[259 /* level 3 */ * 6 * 2 * 49 * 3]{};
@@ -90,8 +91,8 @@ void Init()
 	s.seekp( 0 );
 	s.read( (char*)&verts, 4 );
 	printf( "Loading triangle data (%i tris).\n", verts );
-	verts *= 3, triangles = (bvhvec4*)malloc64( verts * 16 );
-	s.read( (char*)triangles, verts * 16 );
+	verts *= 3, vertices = (bvhvec4*)malloc64( verts * 16 );
+	s.read( (char*)vertices, verts * 16 );
 	s.close();
 #else
 	// generate a sphere flake scene
@@ -192,9 +193,6 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 			// buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
 		}
 	}
-
-	tinybvh::free64( rays );
-	tinybvh::free64( depths );
 }
 
 void Shutdown()

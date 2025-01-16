@@ -27,7 +27,7 @@ static int triCount = 0, frameIdx = 0, spp = 0;
 static bvhvec3 accumulator[SCRWIDTH * SCRHEIGHT];
 static std::atomic<int> tileIdx( 0 );
 
-// Multi-therading
+// Multi-threading
 static unsigned threadCount = std::thread::hardware_concurrency();
 
 // Setup view pyramid for a pinhole camera:
