@@ -33,8 +33,8 @@ float4 traverse_tlas( global struct BVHNodeAlt* tlasNode, global unsigned* idx, 
 				const float4 Oblas = (float4)( TransformPoint( O4.xyz, inst->invTransform ), 1 );
 				const float4 Dblas = (float4)( TransformVector( D4.xyz, inst->invTransform ), 0 );
 				const float4 rDblas = (float4)( 1 / Dblas.x, 1 / Dblas.y, 1 / Dblas.z, 1 );
-				const global float4* blasNodes = instIdx == 16 ? bistroNodes : dragonNodes;
-				const global float4* blasTris = instIdx == 16 ? bistroTris : dragonTris;
+				const global float4* blasNodes = instIdx == 0 ? bistroNodes : dragonNodes;
+				const global float4* blasTris = instIdx == 0 ? bistroTris : dragonTris;
 			#ifdef SIMD_AABBTEST
 				const float4 h = traverse_cwbvh( blasNodes, blasTris, Oblas, Dblas, rDblas, hit.x );
 			#else
@@ -95,8 +95,8 @@ bool isoccluded_tlas( global struct BVHNodeAlt* tlasNode, global unsigned* idx, 
 				const float4 Oblas = (float4)( TransformPoint( O4.xyz, inst->invTransform ), 1 );
 				const float4 Dblas = (float4)( TransformVector( D4.xyz, inst->invTransform ), 0 );
 				const float4 rDblas = (float4)( 1 / Dblas.x, 1 / Dblas.y, 1 / Dblas.z, 1 );
-				const global float4* blasNodes = instIdx == 16 ? bistroNodes : dragonNodes;
-				const global float4* blasTris = instIdx == 16 ? bistroTris : dragonTris;
+				const global float4* blasNodes = instIdx == 0 ? bistroNodes : dragonNodes;
+				const global float4* blasTris = instIdx == 0 ? bistroTris : dragonTris;
 			#ifdef SIMD_AABBTEST
 				if (isoccluded_cwbvh( blasNodes, blasTris, Oblas, Dblas, rDblas, D4.w )) continue;
 			#else

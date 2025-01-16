@@ -180,7 +180,8 @@ void kernel Shade( global float4* accumulator,
 		uint primIdx = as_uint( hit.w );
 		uint instIdx = primIdx >> 24;
 		uint vertIdx = (primIdx & 0xffffff) * 3;
-		const global float4* vdata = instIdx == 16 ? bistroVerts : dragonVerts;  
+		const global float4* vdata = instIdx == 0 ? bistroVerts : dragonVerts;
+		const global struct BLASInstance* inst = instances + instIdx;
 		float4 v0 = vdata[vertIdx];
 		uint materialType = as_uint( v0.w ) >> 24;
 		float brdfPDF = T4.w;
@@ -222,9 +223,15 @@ void kernel Shade( global float4* accumulator,
 		// prepare data for bounce
 		float3 vert0 = v0.xyz, vert1 = vdata[vertIdx + 1].xyz, vert2 = vdata[vertIdx + 2].xyz;
 		float3 I = O4.xyz + t * D;
-		float3 N = fast_normalize( cross( vert1 - vert0, vert2 - vert0 ) );
+		float3 N = fast_normalize( TransformVector( cross( vert1 - vert0, vert2 - vert0 ), inst->transform ) );
 		if (dot( N, D ) > 0) N *= -1;
-		float3 materialColor = rgb32_to_vec3( as_uint( v0.w ) );
+		float3 materialColor;
+		if (instIdx == 0) materialColor = rgb32_to_vec3( as_uint( v0.w ) ); else
+		{
+			if (instIdx == 66) materialColor = (float3)( 1, 1, 0 ), materialType = MATERIAL_SPECULAR;
+			else if (instIdx & 1) materialColor = (float3)( 0.13f, 0.13f, 0.16f ), materialType = MATERIAL_SPECULAR; 
+			else materialColor = (float3)( 1.0f );
+		}
 		float3 BRDF = materialColor * INVPI; // lambert BRDF: albedo / pi
 		// direct illumination: next event estimation
 		if (materialType != MATERIAL_SPECULAR)
