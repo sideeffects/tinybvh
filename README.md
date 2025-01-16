@@ -9,7 +9,7 @@ Single-header OpenCL library, which helps you select and initialize a device. It
 * Vendor and architecture detection and propagation to #defines in OpenCL code
 * ..And many other things.
 
-![Bistro](images/bistro.png)
+![Bistro](images/invasion.png)
 
 To use tinyocl, just include ````tiny_ocl.h````; this will automatically cause linking with ````OpenCL.lib```` in the 'external' folder, which in turn passes on work to vendor-specific driver code. But all that is not your problem!
 
