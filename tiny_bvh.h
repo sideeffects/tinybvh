@@ -589,7 +589,7 @@ public:
 	BVH( const bvhvec4* vertices, const uint32_t primCount ) { Build( vertices, primCount ); }
 	BVH( const bvhvec4slice& vertices ) { Build( vertices ); }
 	~BVH();
-	void ConvertFrom( const BVH_Verbose& original );
+	void ConvertFrom( const BVH_Verbose& original, bool compact = true );
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	int32_t NodeCount() const;
 	int32_t PrimCount( const uint32_t nodeIdx = 0 ) const;
@@ -737,11 +737,12 @@ public:
 	void Build( const bvhvec4slice& vertices );
 	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Build( BLASInstance* instances, const uint32_t instCount, BVHBase** blasses, const uint32_t blasCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-	void ConvertFrom( const BVH& original );
+	void ConvertFrom( const BVH& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
 	// BVH data
@@ -772,7 +773,7 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-	void ConvertFrom( const BVH& original );
+	void ConvertFrom( const BVH& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
 	// BVH data
@@ -797,7 +798,7 @@ public:
 	BVH_Verbose( BVHContext ctx = {} ) { context = ctx; }
 	BVH_Verbose( const BVH& original ) { /* DEPRECATED */ ConvertFrom( original ); }
 	~BVH_Verbose() { AlignedFree( bvhNode ); }
-	void ConvertFrom( const BVH& original );
+	void ConvertFrom( const BVH& original, bool compact = true );
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	int32_t NodeCount() const;
 	int32_t PrimCount( const uint32_t nodeIdx = 0 ) const;
@@ -845,7 +846,7 @@ public:
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void Refit( const uint32_t nodeIdx = 0 );
-	void ConvertFrom( const BVH& original );
+	void ConvertFrom( const BVH& original, bool compact = true );
 	void SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims );
 	// BVH data
 	MBVHNode* mbvhNode = 0;			// BVH node for M-wide BVH.
@@ -886,7 +887,7 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-	void ConvertFrom( const MBVH<4>& original );
+	void ConvertFrom( const MBVH<4>& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
 	// BVH data
@@ -921,7 +922,7 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-	void ConvertFrom( const MBVH<4>& original );
+	void ConvertFrom( const MBVH<4>& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
 	// BVH data
@@ -947,7 +948,7 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-	void ConvertFrom( MBVH<8>& original ); // NOTE: Not const; this may change some nodes in the original.
+	void ConvertFrom( MBVH<8>& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
 	// BVH8 data
@@ -972,7 +973,7 @@ public:
 	bvhvec3 aabbMin = bvhvec3( BVH_FAR );
 	uint32_t blasIdx = 0;
 	bvhvec3 aabbMax = bvhvec3( -BVH_FAR );
-	uint32_t dummy = 0;
+	uint32_t dummy[9]; // pad struct to 64 byte
 	void Update( BVHBase * blas );
 	bvhvec3 TransformPoint( const bvhvec3 & v, const float* T ) const;
 	bvhvec3 TransformVector( const bvhvec3 & v, const float* T ) const;
@@ -1208,10 +1209,10 @@ void BVH::BuildDefault( const bvhvec4slice& vertices, const uint32_t* indices, c
 #endif
 }
 
-void BVH::ConvertFrom( const BVH_Verbose& original )
+void BVH::ConvertFrom( const BVH_Verbose& original, bool compact )
 {
 	// allocate space
-	const uint32_t spaceNeeded = original.usedNodes;
+	const uint32_t spaceNeeded = compact ? original.usedNodes : original.allocatedNodes;
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
@@ -2356,7 +2357,7 @@ void BVH::Compact()
 // BVH_Verbose implementation
 // ----------------------------------------------------------------------------
 
-void BVH_Verbose::ConvertFrom( const BVH& original )
+void BVH_Verbose::ConvertFrom( const BVH& original, bool /* unused here */ )
 {
 	// allocate space
 	uint32_t spaceNeeded = original.triCount * (refittable ? 2 : 3); // this one needs space to grow to 2N
@@ -2612,7 +2613,7 @@ void BVH_GPU::Build( const bvhvec4slice& vertices )
 {
 	bvh.context = context;
 	bvh.BuildDefault( vertices );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 }
 
 void BVH_GPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -2627,8 +2628,16 @@ void BVH_GPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
 	bvh.context = context;
 	bvh.BuildDefault( vertices, indices, prims );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 	bvh_over_indices = true;
+}
+
+void BVH_GPU::Build( BLASInstance* instances, const uint32_t instCount, BVHBase** blasses, const uint32_t blasCount )
+{
+	// build a TLAS based on the array of BLASInstance records.
+	bvh.context = context;
+	bvh.Build( instances, instCount, blasses, blasCount );
+	ConvertFrom( bvh, false );
 }
 
 void BVH_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
@@ -2639,7 +2648,7 @@ void BVH_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 void BVH_GPU::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh.BuildHQ( vertices );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 }
 
 void BVH_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -2652,17 +2661,17 @@ void BVH_GPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, ui
 {
 	bvh.context = context;
 	bvh.BuildHQ( vertices, indices, prims );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 	bvh_over_indices = true;
 }
 
-void BVH_GPU::ConvertFrom( const BVH& original )
+void BVH_GPU::ConvertFrom( const BVH& original, bool compact )
 {
 	// get a copy of the original bvh
 	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor.
 	bvh = original;
 	// allocate space
-	const uint32_t spaceNeeded = original.usedNodes;
+	const uint32_t spaceNeeded = compact ? original.usedNodes : original.allocatedNodes;
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
@@ -2769,7 +2778,7 @@ void BVH_SoA::Build( const bvhvec4slice& vertices )
 {
 	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildDefault( vertices );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 }
 
 void BVH_SoA::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -2784,7 +2793,7 @@ void BVH_SoA::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
 	bvh.context = context;
 	bvh.BuildDefault( vertices, indices, prims );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 	bvh_over_indices = true;
 }
 
@@ -2797,7 +2806,7 @@ void BVH_SoA::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildHQ( vertices );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 }
 
 void BVH_SoA::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -2810,17 +2819,17 @@ void BVH_SoA::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, ui
 {
 	bvh.context = context;
 	bvh.BuildHQ( vertices, indices, prims );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 	bvh_over_indices = true;
 }
 
-void BVH_SoA::ConvertFrom( const BVH& original )
+void BVH_SoA::ConvertFrom( const BVH& original, bool compact )
 {
 	// get a copy of the original bvh
 	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor.
 	bvh = original;
 	// allocate space
-	const uint32_t spaceNeeded = bvh.usedNodes;
+	const uint32_t spaceNeeded = compact ? bvh.usedNodes : bvh.allocatedNodes;
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
@@ -2882,7 +2891,7 @@ template<int M> void MBVH<M>::Build( const bvhvec4slice& vertices )
 {
 	bvh.context = context; // properly propagate context to fix issue #66.
 	bvh.BuildDefault( vertices );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, false );
 }
 
 template<int M> void MBVH<M>::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -2897,7 +2906,7 @@ template<int M> void MBVH<M>::Build( const bvhvec4slice& vertices, const uint32_
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
 	bvh.context = context;
 	bvh.BuildDefault( vertices, indices, prims );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, true );
 	bvh_over_indices = true;
 }
 
@@ -2910,7 +2919,7 @@ template<int M> void MBVH<M>::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh.context = context;
 	bvh.BuildHQ( vertices );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, true );
 }
 
 template<int M> void MBVH<M>::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -2923,7 +2932,7 @@ template<int M> void MBVH<M>::BuildHQ( const bvhvec4slice& vertices, const uint3
 {
 	bvh.context = context;
 	bvh.BuildHQ( vertices, indices, prims );
-	ConvertFrom( bvh );
+	ConvertFrom( bvh, true );
 	bvh_over_indices = true;
 }
 
@@ -2971,13 +2980,13 @@ template<int M> void MBVH<M>::Refit( const uint32_t nodeIdx )
 	if (nodeIdx == 0) aabbMin = node.aabbMin, aabbMax = node.aabbMax;
 }
 
-template<int M> void MBVH<M>::ConvertFrom( const BVH& original )
+template<int M> void MBVH<M>::ConvertFrom( const BVH& original, bool compact )
 {
 	// get a copy of the original bvh
 	if (&original != &bvh) ownBVH = false; // bvh isn't ours; don't delete in destructor.
 	bvh = original;
 	// allocate space
-	uint32_t spaceNeeded = original.usedNodes;
+	uint32_t spaceNeeded = compact ? original.usedNodes : original.allocatedNodes;
 	if (M == 8) spaceNeeded += original.usedNodes >> 1; // cwbvh / SplitLeafs
 	if (allocatedNodes < spaceNeeded)
 	{
@@ -3103,7 +3112,7 @@ void BVH4_CPU::Build( const bvhvec4slice& vertices )
 {
 	bvh4.context = context; // properly propagate context to fix issue #66.
 	bvh4.Build( vertices );
-	ConvertFrom( bvh4 );
+	ConvertFrom( bvh4, true );
 }
 
 void BVH4_CPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -3118,7 +3127,7 @@ void BVH4_CPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uin
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
 	bvh4.context = context;
 	bvh4.Build( vertices, indices, prims );
-	ConvertFrom( bvh4 );
+	ConvertFrom( bvh4, true );
 	bvh_over_indices = true;
 }
 
@@ -3131,7 +3140,7 @@ void BVH4_CPU::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh4.context = context;
 	bvh4.BuildHQ( vertices );
-	ConvertFrom( bvh4 );
+	ConvertFrom( bvh4, true );
 }
 
 void BVH4_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -3144,11 +3153,11 @@ void BVH4_CPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, u
 {
 	bvh4.context = context;
 	bvh4.BuildHQ( vertices, indices, prims );
-	ConvertFrom( bvh4 );
+	ConvertFrom( bvh4, true );
 	bvh_over_indices = true;
 }
 
-void BVH4_CPU::ConvertFrom( const MBVH<4>& original )
+void BVH4_CPU::ConvertFrom( const MBVH<4>& original, bool compact )
 {
 	// get a copy of the original bvh4
 	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor.
@@ -3156,7 +3165,7 @@ void BVH4_CPU::ConvertFrom( const MBVH<4>& original )
 	// Convert a 4-wide BVH to a format suitable for CPU traversal.
 	// See Faster Incoherent Ray Traversal Using 8-Wide AVX InstructionsLayout,
 	// Atilla T. Áfra, 2013.
-	uint32_t spaceNeeded = bvh4.usedNodes;
+	uint32_t spaceNeeded = compact ? bvh4.usedNodes : bvh4.allocatedNodes;
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvh4Node );
@@ -3251,7 +3260,7 @@ void BVH4_GPU::Build( const bvhvec4slice& vertices )
 {
 	bvh4.context = context;
 	bvh4.Build( vertices );
-	ConvertFrom( bvh4 );
+	ConvertFrom( bvh4, true );
 }
 
 void BVH4_GPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -3266,7 +3275,7 @@ void BVH4_GPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uin
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
 	bvh4.context = context;
 	bvh4.Build( vertices, indices, prims );
-	ConvertFrom( bvh4 );
+	ConvertFrom( bvh4, true );
 	bvh_over_indices = true;
 }
 
@@ -3279,7 +3288,7 @@ void BVH4_GPU::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh4.context = context;
 	bvh4.BuildHQ( vertices );
-	ConvertFrom( bvh4 );
+	ConvertFrom( bvh4, true );
 }
 
 void BVH4_GPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -3292,11 +3301,11 @@ void BVH4_GPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, u
 {
 	bvh4.context = context;
 	bvh4.BuildHQ( vertices, indices, prims );
-	ConvertFrom( bvh4 );
+	ConvertFrom( bvh4, true );
 	bvh_over_indices = true;
 }
 
-void BVH4_GPU::ConvertFrom( const MBVH<4>& original )
+void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 {
 	// get a copy of the original bvh4
 	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor.
@@ -3309,7 +3318,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original )
 	//           Leaf: 15 bits for tri count, 16 for offset
 	//           Interior: 32 bits for position of child node.
 	// Triangle data ('by value') immediately follows each leaf node.
-	uint32_t blocksNeeded = bvh4.usedNodes * 4; // here, 'block' is 16 bytes.
+	uint32_t blocksNeeded = compact ? (bvh4.usedNodes * 4) : (bvh4.allocatedNodes * 4); // here, 'block' is 16 bytes.
 	blocksNeeded += 6 * triCount; // this layout stores tris in the same buffer.
 	if (allocatedBlocks < blocksNeeded)
 	{
@@ -3584,7 +3593,7 @@ void BVH8_CWBVH::Build( const bvhvec4slice& vertices )
 {
 	bvh8.context = context; // properly propagate context to fix issue #66.
 	bvh8.Build( vertices );
-	ConvertFrom( bvh8 );
+	ConvertFrom( bvh8, true );
 }
 
 void BVH8_CWBVH::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -3599,7 +3608,7 @@ void BVH8_CWBVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, u
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
 	bvh8.context = context;
 	bvh8.Build( vertices, indices, prims );
-	ConvertFrom( bvh8 );
+	ConvertFrom( bvh8, true );
 	bvh_over_indices = true;
 }
 
@@ -3612,7 +3621,7 @@ void BVH8_CWBVH::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh8.context = context; // properly propagate context to fix issue #66.
 	bvh8.BuildHQ( vertices );
-	ConvertFrom( bvh8 );
+	ConvertFrom( bvh8, true );
 }
 
 void BVH8_CWBVH::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -3625,11 +3634,11 @@ void BVH8_CWBVH::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices,
 {
 	bvh8.context = context;
 	bvh8.BuildHQ( vertices, indices, prims );
-	ConvertFrom( bvh8 );
+	ConvertFrom( bvh8, true );
 	bvh_over_indices = true;
 }
 
-void BVH8_CWBVH::ConvertFrom( MBVH<8>& original )
+void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 {
 	// get a copy of the original bvh8
 	if (&original != &bvh8) ownBVH8 = false; // bvh isn't ours; don't delete in destructor.
@@ -4017,6 +4026,7 @@ void BVH::BuildAVX()
 		if (taskCount == 0) break; else nodeIdx = task[--taskCount];
 	}
 	// all done.
+	aabbMin = bvhNode[0].aabbMin, aabbMax = bvhNode[0].aabbMax;
 	refittable = true; // not using spatial splits: can refit this BVH
 	may_have_holes = false; // the AVX builder produces a continuous list of nodes
 	usedNodes = newNodePtr;
