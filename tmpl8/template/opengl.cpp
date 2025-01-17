@@ -6,6 +6,21 @@
 
 extern bool IGP_detected;
 
+void FatalError( const char* fmt, ... )
+{
+	char t[65536];
+	va_list args;
+	va_start( args, fmt );
+	vsnprintf( t, sizeof( t ) - 2, fmt, args );
+	va_end( args );
+#ifdef _MSC_VER
+	MessageBox( NULL, t, "Fatal error", MB_OK );
+#else
+	fprintf( stderr, t );
+#endif
+	while (1) exit( 0 );
+}
+
 // OpenGL helper functions
 void _CheckGL( const char* f, int l )
 {

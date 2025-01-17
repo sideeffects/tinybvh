@@ -350,7 +350,6 @@ void main()
 	}
 	// close down
 	app->Shutdown();
-	Kernel::KillCL();
 	glfwDestroyWindow( window );
 	glfwTerminate();
 }
@@ -603,8 +602,6 @@ void TextFileWrite( const string& text, const char* _File )
 extern "C" {
 #endif
 
-
-
 	int GLAD_GL_VERSION_1_0 = 0;
 	int GLAD_GL_VERSION_1_1 = 0;
 	int GLAD_GL_VERSION_1_2 = 0;
@@ -617,8 +614,6 @@ extern "C" {
 	int GLAD_GL_VERSION_3_1 = 0;
 	int GLAD_GL_VERSION_3_2 = 0;
 	int GLAD_GL_VERSION_3_3 = 0;
-
-
 
 	PFNGLACTIVETEXTUREPROC glad_glActiveTexture = NULL;
 	PFNGLATTACHSHADERPROC glad_glAttachShader = NULL;
@@ -964,7 +959,6 @@ extern "C" {
 	PFNGLVERTEXATTRIBPOINTERPROC glad_glVertexAttribPointer = NULL;
 	PFNGLVIEWPORTPROC glad_glViewport = NULL;
 	PFNGLWAITSYNCPROC glad_glWaitSync = NULL;
-
 
 	static void glad_gl_load_GL_VERSION_1_0( GLADuserptrloadfunc load, void* userptr ) {
 		if (!GLAD_GL_VERSION_1_0) return;
@@ -1350,8 +1344,6 @@ extern "C" {
 		glad_glVertexAttribP4uiv = (PFNGLVERTEXATTRIBP4UIVPROC)load( userptr, "glVertexAttribP4uiv" );
 	}
 
-
-
 	static void glad_gl_free_extensions( char** exts_i ) {
 		if (exts_i != NULL) {
 			unsigned int index;
@@ -1398,10 +1390,10 @@ extern "C" {
 	#endif
 		if (glad_glGetString == NULL) {
 			return 0;
-		}
+	}
 		*out_exts = (const char*)glad_glGetString( GL_EXTENSIONS );
 		return 1;
-	}
+}
 	static int glad_gl_has_extension( const char* exts, char** exts_i, const char* ext ) {
 		if (exts_i) {
 			unsigned int index;
@@ -1515,19 +1507,12 @@ extern "C" {
 
 		if (!glad_gl_find_extensions_gl()) return 0;
 
-
-
 		return version;
 	}
-
 
 	int gladLoadGL( GLADloadfunc load ) {
 		return gladLoadGLUserPtr( glad_gl_get_proc_from_userptr, GLAD_GNUC_EXTENSION( void* ) load );
 	}
-
-
-
-
 
 #ifdef GLAD_GL
 
@@ -1542,7 +1527,6 @@ extern "C" {
 #else
 #include <dlfcn.h>
 #endif
-
 
 	static void* glad_get_dlopen_handle( const char* lib_names[], int length ) {
 		void* handle = NULL;
@@ -1568,8 +1552,8 @@ extern "C" {
 		#endif
 			if (handle != NULL) {
 				return handle;
-			}
 		}
+	}
 
 		return NULL;
 	}
@@ -1582,7 +1566,7 @@ extern "C" {
 			dlclose( handle );
 		#endif
 		}
-	}
+		}
 
 	static GLADapiproc glad_dlsym_handle( void* handle, const char* name ) {
 		if (handle == NULL) {
@@ -1685,8 +1669,6 @@ extern "C" {
 		return version;
 	}
 
-
-
 	void gladLoaderUnloadGL( void ) {
 		if (_glad_GL_loader_handle != NULL) {
 			glad_close_dlopen_handle( _glad_GL_loader_handle );
@@ -1697,7 +1679,7 @@ extern "C" {
 #endif /* GLAD_GL */
 
 #ifdef __cplusplus
-}
+	}
 #endif
 
 // EOF
