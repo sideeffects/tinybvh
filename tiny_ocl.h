@@ -78,6 +78,7 @@ inline void free64( void* ptr, void* = nullptr ) { free( ptr ); }
 #endif
 
 namespace tinyocl {
+
 // Math classes
 struct oclint2
 {
@@ -362,7 +363,10 @@ private:
 public:
 	inline static bool candoInterop = false, clStarted = false;
 };
+
 } // namespace tinybvh
+
+#endif // TINY_OCL_H_
 
 // ============================================================================
 //
@@ -1191,6 +1195,4 @@ void Kernel::Run2D( const oclint2 count, const oclint2 lsize, cl_event* eventToW
 	}
 }
 
-#endif
-
-#endif
+#endif // TINY_OCL_IMPLEMENTATION
