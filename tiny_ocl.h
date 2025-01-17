@@ -38,8 +38,6 @@ THE SOFTWARE.
 #ifndef TINY_OCL_H_
 #define TINY_OCL_H_
 
-#define TINY_OCL_GLINTEROP
-
 #define CL_TARGET_OPENCL_VERSION 300
 #include <cl.h>
 #include <vector>
