@@ -144,7 +144,6 @@ void Init()
 
 	// create OpenCL buffers for wavefront path tracing
 	int N = SCRWIDTH * SCRHEIGHT;
-	pixels = new Buffer( N * sizeof( uint32_t ) );
 	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	connections = new Buffer( N * 3 * sizeof( bvhvec4 ) * 3 );
