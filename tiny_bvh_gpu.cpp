@@ -97,7 +97,7 @@ void Init()
 	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 0 ) );
 	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-	if (!bvh.Load( "cwbvh.bin", triCount ))
+	// if (!bvh.Load( "cwbvh.bin", triCount ))
 	{
 		bvh.Build( tris, triCount );
 		bvh.Save( "cwbvh.bin" ); // cache for next run.
