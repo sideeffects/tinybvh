@@ -136,7 +136,6 @@
   <ItemGroup>
     <ClInclude Include="..\tiny_bvh.h" />
     <ClInclude Include="..\tiny_ocl.h" />
-    <ClInclude Include="cl\tools.cl" />
     <ClInclude Include="game.h" />
     <ClInclude Include="template\common.h" />
     <ClInclude Include="template\opengl.h" />
@@ -146,7 +145,14 @@
     <ClInclude Include="template\tmpl8math.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="cl\kernels.cl" />
+    <None Include="..\tools.cl" />
+    <None Include="..\traverse.cl" />
+    <None Include="..\traverse_bvh2.cl" />
+    <None Include="..\traverse_bvh4.cl" />
+    <None Include="..\traverse_cwbvh.cl" />
+    <None Include="..\traverse_tlas.cl" />
+    <None Include="..\wavefront.cl" />
+    <None Include="..\wavefront2.cl" />
     <None Include="README.md" />
     <None Include="template\LICENSE" />
   </ItemGroup>
