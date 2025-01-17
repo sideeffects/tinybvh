@@ -23,19 +23,19 @@ void Game::Init()
 	updateCounters1 = new Kernel( "wavefront2.cl", "UpdateCounters1" );
 	updateCounters2 = new Kernel( "wavefront2.cl", "UpdateCounters2" );
 	traceShadows = new Kernel( "wavefront2.cl", "Connect" );
-	finalize = new Kernel( "wavefront2.cl", "Finalize" );
+	finalize = new Kernel( "wavefront2.cl", "FinalizeGL" );
+	screen = 0; // this tells the template to not overwrite the render target.
 
 	// we need the 'compute unit' or 'SM' count for wavefront rendering; ask OpenCL for it.
 	clGetDeviceInfo( init->GetDeviceID(), CL_DEVICE_MAX_COMPUTE_UNITS, sizeof( size_t ), &computeUnits, NULL );
 
 	// create OpenCL buffers for wavefront path tracing
 	int N = SCRWIDTH * SCRHEIGHT;
-	pixels = new Buffer( N * sizeof( uint32_t ) );
+	pixels = new Buffer( GetRenderTarget()->ID, 0, Buffer::TARGET );
 	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	connections = new Buffer( N * 3 * sizeof( bvhvec4 ) * 3 );
 	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
-	pixels = new Buffer( N * sizeof( uint32_t ) );
 	LoadBlueNoise();
 	noise = new Buffer( 128 * 128 * 8 * sizeof( uint32_t ), blueNoise );
 	noise->CopyToDevice();
@@ -94,16 +94,57 @@ void Game::Init()
 	bistroNodes->CopyToDevice();
 	bistroTris->CopyToDevice();
 	bistroVerts->CopyToDevice();
+}
 
-	// load camera position / direction from file
-	std::fstream t = std::fstream{ "camera_gpu.bin", t.binary | t.in };
-	if (!t.is_open()) return;
-	t.read( (char*)&rd, sizeof( rd ) );
+// -----------------------------------------------------------
+// Update camera
+// -----------------------------------------------------------
+bool Game::UpdateCamera( float delta_time_s )
+{
+	// playback camera spline
+	static float ct = 0, moved = 1;
+	ct += delta_time_s * 0.25f;
+	if (ct > 10) ct -= 10;
+	splineCam( ct + 1 );
+	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) );
+	bvhvec3 up = 0.8f * cross( rd.view, right ), C = rd.eye + 1.2f * rd.view;
+	rd.p0 = C - right + up, rd.p1 = C + right + up, rd.p2 = C - right - up;
+	return moved > 0;
 }
 
 // -----------------------------------------------------------
 // Main application tick function - Executed once per frame
 // -----------------------------------------------------------
-void Game::Tick( float /* deltaTime */ )
+void Game::Tick( float delta_time )
 {
+	// handle user input and update camera
+	int N = SCRWIDTH * SCRHEIGHT;
+	UpdateCamera( delta_time * 0.001f );
+	clear->SetArguments( accumulator );
+	clear->Run( N );
+	spp = 1;
+	// wavefront step 0: render on the GPU
+	init->SetArguments( N, rd.eye, rd.p0, rd.p1, rd.p2,
+		frameIdx, SCRWIDTH, SCRHEIGHT,
+		bistroNodes, bistroTris, bistroVerts, dragonNodes, dragonTris, drVerts,
+		tlasNodes, tlasIndices, blasInstances,
+		noise
+	);
+	init->Run( 1 ); // init atomic counters, set buffer ptrs etc.
+	rayGen->SetArguments( raysOut, spp * 19191 );
+	rayGen->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
+	for (int i = 0; i < 3; i++)
+	{
+		swap( raysOut, raysIn );
+		extend->SetArguments( raysIn );
+		extend->Run( computeUnits * 64 * 16, 64 );
+		updateCounters1->Run( 1 );
+		shade->SetArguments( accumulator, raysIn, raysOut, connections, spp - 1 );
+		shade->Run( computeUnits * 64 * 16, 64 );
+		updateCounters2->Run( 1 );
+	}
+	traceShadows->SetArguments( accumulator, connections );
+	traceShadows->Run( computeUnits * 64 * 8, 64 );
+	finalize->SetArguments( accumulator, 1.0f / (float)spp++, pixels );
+	finalize->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
 }

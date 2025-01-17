@@ -6,6 +6,7 @@
 
 #pragma comment( linker, "/subsystem:windows /ENTRY:mainCRTStartup" )
 
+#define TINY_OCL_GLINTEROP
 #define TINY_OCL_IMPLEMENTATION
 #include "tiny_ocl.h"
 #define TINYBVH_IMPLEMENTATION
@@ -34,6 +35,7 @@ extern "C"
 #endif
 
 GLFWwindow* window = 0;
+GLFWwindow* GetGLFWWindow() { return window; }
 static bool hasFocus = true, running = true;
 static GLTexture* renderTarget = 0;
 static int scrwidth = 0, scrheight = 0;
