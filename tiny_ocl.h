@@ -29,13 +29,19 @@ THE SOFTWARE.
 // Use this in *one* .c or .cpp
 //   #define TINY_OCL_IMPLEMENTATION
 //   #include "tiny_ocl.h"
+// To enable OpenGL interop, define TINY_OCL_GLINTEROP before the include:
+//   #define TINY_OCL_GLINTEROP
+//   #define TINY_OCL_IMPLEMENTATION
+//   #include "tiny_ocl.h"
 //
 
 #ifndef TINY_OCL_H_
 #define TINY_OCL_H_
 
+#define TINY_OCL_GLINTEROP
+
 #define CL_TARGET_OPENCL_VERSION 300
-#include "cl.h"
+#include <cl.h>
 #include <vector>
 
 // aligned memory allocation
@@ -326,7 +332,7 @@ private:
 	template<class T> void SetArgument( int idx, T value )
 	{
 		CheckCLStarted();
-		if (sizeof( T ) == 12)
+		if constexpr (sizeof( T ) == 12)
 		{
 			// probably int3 / float3; pad to 16 bytes
 			unsigned tmp[4] = {};
@@ -378,6 +384,11 @@ public:
 
 #ifdef _MSC_VER
 #pragma comment( lib, "../external/OpenCL/lib/OpenCL.lib" )
+#endif
+#ifdef TINY_OCL_GLINTEROP
+#include "cl_gl.h"
+#include "cl_ext.h"
+GLFWwindow* GetGLFWWindow(); // we need access to the glfw window..
 #endif
 
 using namespace std;
@@ -574,8 +585,10 @@ Buffer::Buffer( unsigned int N, void* ptr, unsigned int t )
 		textureID = N; // representing texture N
 		if (!Kernel::candoInterop) FatalError( "didn't expect to get here." );
 		int error = 0;
-		// if (t == TARGET) deviceBuffer = clCreateFromGLTexture( Kernel::GetContext(), CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, N, &error );
-		// else deviceBuffer = clCreateFromGLTexture( Kernel::GetContext(), CL_MEM_READ_ONLY, GL_TEXTURE_2D, 0, N, &error );
+	#ifdef TINY_OCL_GLINTEROP
+		if (t == TARGET) deviceBuffer = clCreateFromGLTexture( Kernel::GetContext(), CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, N, &error );
+		else deviceBuffer = clCreateFromGLTexture( Kernel::GetContext(), CL_MEM_READ_ONLY, GL_TEXTURE_2D, 0, N, &error );
+	#endif
 		CHECKCL( error );
 		hostBuffer = 0;
 	}
@@ -971,8 +984,10 @@ bool Kernel::InitCL()
 			{
 				cl_context_properties props[] =
 				{
-					// CL_GL_CONTEXT_KHR, (cl_context_properties)glfwGetWGLContext( window ),
-					// CL_WGL_HDC_KHR, (cl_context_properties)wglGetCurrentDC(),
+				#ifdef TINY_OCL_GLINTEROP
+					CL_GL_CONTEXT_KHR, (cl_context_properties)glfwGetWGLContext( GetGLFWWindow() ),
+					CL_WGL_HDC_KHR, (cl_context_properties)wglGetCurrentDC(),
+				#endif
 					CL_CONTEXT_PLATFORM, (cl_context_properties)platform, 0
 				};
 				// attempt to create a context with the requested features
@@ -1154,9 +1169,11 @@ void Kernel::Run( const size_t count, const size_t localSize, cl_event* eventToW
 	if (acqBuffer)
 	{
 		if (!Kernel::candoInterop) FatalError( "OpenGL interop functionality required but not available." );
-		// CHECKCL( error = clEnqueueAcquireGLObjects( queue, 1, acqBuffer->GetDevicePtr(), 0, 0, 0 ) );
-		// CHECKCL( error = clEnqueueNDRangeKernel( queue, kernel, 1, 0, &count, localSize == 0 ? 0 : &localSize, eventToWaitFor ? 1 : 0, eventToWaitFor, eventToSet ) );
-		// CHECKCL( error = clEnqueueReleaseGLObjects( queue, 1, acqBuffer->GetDevicePtr(), 0, 0, 0 ) );
+	#ifdef TINY_OCL_GLINTEROP
+		CHECKCL( error = clEnqueueAcquireGLObjects( queue, 1, acqBuffer->GetDevicePtr(), 0, 0, 0 ) );
+		CHECKCL( error = clEnqueueNDRangeKernel( queue, kernel, 1, 0, &count, localSize == 0 ? 0 : &localSize, eventToWaitFor ? 1 : 0, eventToWaitFor, eventToSet ) );
+		CHECKCL( error = clEnqueueReleaseGLObjects( queue, 1, acqBuffer->GetDevicePtr(), 0, 0, 0 ) );
+	#endif
 	}
 	else
 	{
@@ -1185,9 +1202,11 @@ void Kernel::Run2D( const oclint2 count, const oclint2 lsize, cl_event* eventToW
 	if (acqBuffer)
 	{
 		if (!Kernel::candoInterop) FatalError( "OpenGL interop functionality required but not available." );
-		// CHECKCL( error = clEnqueueAcquireGLObjects( queue, 1, acqBuffer->GetDevicePtr(), 0, 0, 0 ) );
-		// CHECKCL( error = clEnqueueNDRangeKernel( queue, kernel, 2, 0, workSize, localSize, eventToWaitFor ? 1 : 0, eventToWaitFor, eventToSet ) );
-		// CHECKCL( error = clEnqueueReleaseGLObjects( queue, 1, acqBuffer->GetDevicePtr(), 0, 0, 0 ) );
+	#ifdef TINY_OCL_GLINTEROP
+		CHECKCL( error = clEnqueueAcquireGLObjects( queue, 1, acqBuffer->GetDevicePtr(), 0, 0, 0 ) );
+		CHECKCL( error = clEnqueueNDRangeKernel( queue, kernel, 2, 0, workSize, localSize, eventToWaitFor ? 1 : 0, eventToWaitFor, eventToSet ) );
+		CHECKCL( error = clEnqueueReleaseGLObjects( queue, 1, acqBuffer->GetDevicePtr(), 0, 0, 0 ) );
+	#endif
 	}
 	else
 	{
