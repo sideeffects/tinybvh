@@ -41,6 +41,12 @@
     <ClInclude Include="cl\tools.cl">
       <Filter>kernels</Filter>
     </ClInclude>
+    <ClInclude Include="..\tiny_ocl.h">
+      <Filter>tiny</Filter>
+    </ClInclude>
+    <ClInclude Include="..\tiny_bvh.h">
+      <Filter>tiny</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md">
@@ -59,6 +65,9 @@
     </Filter>
     <Filter Include="kernels">
       <UniqueIdentifier>{96ad1716-f468-46c6-8f16-5accbc19d76c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tiny">
+      <UniqueIdentifier>{914cc8a9-0956-4802-9f67-4943451f44dc}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
