@@ -2,9 +2,6 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="game.cpp" />
-    <ClCompile Include="template\opencl.cpp">
-      <Filter>template</Filter>
-    </ClCompile>
     <ClCompile Include="template\opengl.cpp">
       <Filter>template</Filter>
     </ClCompile>
@@ -20,16 +17,10 @@
     <ClCompile Include="template\tmpl8math.cpp">
       <Filter>template</Filter>
     </ClCompile>
-    <ClCompile Include="template\scene.cpp">
-      <Filter>template</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="game.h" />
     <ClInclude Include="template\common.h">
-      <Filter>template</Filter>
-    </ClInclude>
-    <ClInclude Include="template\opencl.h">
       <Filter>template</Filter>
     </ClInclude>
     <ClInclude Include="template\opengl.h">
@@ -49,9 +40,6 @@
     </ClInclude>
     <ClInclude Include="cl\tools.cl">
       <Filter>kernels</Filter>
-    </ClInclude>
-    <ClInclude Include="template\scene.h">
-      <Filter>template</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
