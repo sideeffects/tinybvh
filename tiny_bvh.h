@@ -205,6 +205,7 @@ inline void free64( void* ptr, void* = nullptr ) { free( ptr ); }
 #endif
 
 namespace tinybvh {
+
 #ifdef _MSC_VER
 // Suppress a warning caused by the union of x,y,.. and cell[..] in vectors.
 // We need this union to address vector components either by name or by index.
@@ -1053,7 +1054,10 @@ public:
 		uint8_t upper_z[6];			// the quantized upper bounds in z-dimension
 	};
 };
+
 } // namespace tinybvh
+
+#endif // TINY_BVH_H_
 
 // ============================================================================
 //
@@ -4120,12 +4124,12 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 				const __m128 minO4 = _mm_sub_ps( *(__m128*) & left->aabbMin, O4 );
 				const __m128 maxO4 = _mm_sub_ps( *(__m128*) & left->aabbMax, O4 );
 				// 1. Early-in test: if first ray hits the node, the packet visits the node
-				const __m128 rD4 = *(__m128*) & packet[first].rD;
-				const __m128 st1 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD4 );
-				const __m128 st2 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD4 );
-				const __m128 vmax4 = _mm_max_ps( st1, st2 ), vmin4 = _mm_min_ps( st1, st2 );
 				bool earlyHit;
 				{
+					const __m128 rD4 = *(__m128*) & packet[first].rD;
+					const __m128 st1 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD4 );
+					const __m128 st2 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD4 );
+					const __m128 vmax4 = _mm_max_ps( st1, st2 ), vmin4 = _mm_min_ps( st1, st2 );
 					const float tmax = tinybvh_min( LANE( vmax4, 0 ), tinybvh_min( LANE( vmax4, 1 ), LANE( vmax4, 2 ) ) );
 					const float tmin = tinybvh_max( LANE( vmin4, 0 ), tinybvh_max( LANE( vmin4, 1 ), LANE( vmin4, 2 ) ) );
 					earlyHit = (tmax >= tmin && tmin < packet[first].hit.t && tmax >= 0);
@@ -4146,22 +4150,22 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 						// 3. Last resort: update first and last, stay in node if first > last
 						for (; leftFirst <= leftLast; leftFirst++)
 						{
-							const __m128 rD = *(__m128*) & packet[leftFirst].rD;
-							const __m128 st3 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD );
-							const __m128 st4 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD );
-							const __m128 vmax = _mm_max_ps( st3, st4 ), vmin = _mm_min_ps( st3, st4 );
-							const float tmax = tinybvh_min( LANE( vmax, 0 ), tinybvh_min( LANE( vmax, 1 ), LANE( vmax, 2 ) ) );
-							const float tmin = tinybvh_max( LANE( vmin, 0 ), tinybvh_max( LANE( vmin, 1 ), LANE( vmin, 2 ) ) );
+							const __m128 rD4 = *(__m128*) & packet[leftFirst].rD;
+							const __m128 st1 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD4 );
+							const __m128 st2 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD4 );
+							const __m128 vmax4 = _mm_max_ps( st1, st2 ), vmin4 = _mm_min_ps( st1, st2 );
+							const float tmax = tinybvh_min( LANE( vmax4, 0 ), tinybvh_min( LANE( vmax4, 1 ), LANE( vmax4, 2 ) ) );
+							const float tmin = tinybvh_max( LANE( vmin4, 0 ), tinybvh_max( LANE( vmin4, 1 ), LANE( vmin4, 2 ) ) );
 							if (tmax >= tmin && tmin < packet[leftFirst].hit.t && tmax >= 0) { distLeft = tmin; break; }
 						}
 						for (; leftLast >= leftFirst; leftLast--)
 						{
-							const __m128 rD = *(__m128*) & packet[leftLast].rD;
-							const __m128 st3 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD );
-							const __m128 st4 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD );
-							const __m128 vmax = _mm_max_ps( st3, st4 ), vmin = _mm_min_ps( st3, st4 );
-							const float tmax = tinybvh_min( LANE( vmax, 0 ), tinybvh_min( LANE( vmax, 1 ), LANE( vmax, 2 ) ) );
-							const float tmin = tinybvh_max( LANE( vmin, 0 ), tinybvh_max( LANE( vmin, 1 ), LANE( vmin, 2 ) ) );
+							const __m128 rD4 = *(__m128*) & packet[leftLast].rD;
+							const __m128 st1 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD4 );
+							const __m128 st2 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD4 );
+							const __m128 vmax4 = _mm_max_ps( st1, st2 ), vmin4 = _mm_min_ps( st1, st2 );
+							const float tmax = tinybvh_min( LANE( vmax4, 0 ), tinybvh_min( LANE( vmax4, 1 ), LANE( vmax4, 2 ) ) );
+							const float tmin = tinybvh_max( LANE( vmin4, 0 ), tinybvh_max( LANE( vmin4, 1 ), LANE( vmin4, 2 ) ) );
 							if (tmax >= tmin && tmin < packet[leftLast].hit.t && tmax >= 0) break;
 						}
 						visitLeft = leftLast >= leftFirst;
@@ -4173,11 +4177,11 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 				const __m128 minO4 = _mm_sub_ps( *(__m128*) & right->aabbMin, O4 );
 				const __m128 maxO4 = _mm_sub_ps( *(__m128*) & right->aabbMax, O4 );
 				// 1. Early-in test: if first ray hits the node, the packet visits the node
-				const __m128 rD4 = *(__m128*) & packet[first].rD;
-				const __m128 st1 = _mm_mul_ps( minO4, rD4 ), st2 = _mm_mul_ps( maxO4, rD4 );
-				const __m128 vmax4 = _mm_max_ps( st1, st2 ), vmin4 = _mm_min_ps( st1, st2 );
 				bool earlyHit;
 				{
+					const __m128 rD4 = *(__m128*) & packet[first].rD;
+					const __m128 st1 = _mm_mul_ps( minO4, rD4 ), st2 = _mm_mul_ps( maxO4, rD4 );
+					const __m128 vmax4 = _mm_max_ps( st1, st2 ), vmin4 = _mm_min_ps( st1, st2 );
 					const float tmax = tinybvh_min( LANE( vmax4, 0 ), tinybvh_min( LANE( vmax4, 1 ), LANE( vmax4, 2 ) ) );
 					const float tmin = tinybvh_max( LANE( vmin4, 0 ), tinybvh_max( LANE( vmin4, 1 ), LANE( vmin4, 2 ) ) );
 					earlyHit = (tmax >= tmin && tmin < packet[first].hit.t && tmax >= 0);
@@ -4198,22 +4202,22 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 						// 3. Last resort: update first and last, stay in node if first > last
 						for (; rightFirst <= rightLast; rightFirst++)
 						{
-							const __m128 rD = *(__m128*) & packet[rightFirst].rD;
-							const __m128 st3 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD );
-							const __m128 st4 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD );
-							const __m128 vmax = _mm_max_ps( st3, st4 ), vmin = _mm_min_ps( st3, st4 );
-							const float tmax1 = tinybvh_min( LANE( vmax, 0 ), tinybvh_min( LANE( vmax, 1 ), LANE( vmax, 2 ) ) );
-							const float tmin1 = tinybvh_max( LANE( vmin, 0 ), tinybvh_max( LANE( vmin, 1 ), LANE( vmin, 2 ) ) );
+							const __m128 rD4 = *(__m128*) & packet[rightFirst].rD;
+							const __m128 st1 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD4 );
+							const __m128 st2 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD4 );
+							const __m128 vmax4 = _mm_max_ps( st1, st2 ), vmin4 = _mm_min_ps( st1, st2 );
+							const float tmax1 = tinybvh_min( LANE( vmax4, 0 ), tinybvh_min( LANE( vmax4, 1 ), LANE( vmax4, 2 ) ) );
+							const float tmin1 = tinybvh_max( LANE( vmin4, 0 ), tinybvh_max( LANE( vmin4, 1 ), LANE( vmin4, 2 ) ) );
 							if (tmax1 >= tmin1 && tmin1 < packet[rightFirst].hit.t && tmax1 >= 0) { distRight = tmin1; break; }
 						}
 						for (; rightLast >= first; rightLast--)
 						{
-							const __m128 rD = *(__m128*) & packet[rightLast].rD;
-							const __m128 st3 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD );
-							const __m128 st4 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD );
-							const __m128 vmax = _mm_max_ps( st3, st4 ), vmin = _mm_min_ps( st3, st4 );
-							const float tmax1 = tinybvh_min( LANE( vmax, 0 ), tinybvh_min( LANE( vmax, 1 ), LANE( vmax, 2 ) ) );
-							const float tmin1 = tinybvh_max( LANE( vmin, 0 ), tinybvh_max( LANE( vmin, 1 ), LANE( vmin, 2 ) ) );
+							const __m128 rD4 = *(__m128*) & packet[rightLast].rD;
+							const __m128 st1 = _mm_mul_ps( _mm_and_ps( minO4, mask4 ), rD4 );
+							const __m128 st2 = _mm_mul_ps( _mm_and_ps( maxO4, mask4 ), rD4 );
+							const __m128 vmax4 = _mm_max_ps( st1, st2 ), vmin4 = _mm_min_ps( st1, st2 );
+							const float tmax1 = tinybvh_min( LANE( vmax4, 0 ), tinybvh_min( LANE( vmax4, 1 ), LANE( vmax4, 2 ) ) );
+							const float tmin1 = tinybvh_max( LANE( vmin4, 0 ), tinybvh_max( LANE( vmin4, 1 ), LANE( vmin4, 2 ) ) );
 							if (tmax1 >= tmin1 && tmin1 < packet[rightLast].hit.t && tmax1 >= 0) break;
 						}
 						visitRight = rightLast >= rightFirst;
@@ -6490,5 +6494,3 @@ void BVH_Verbose::MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32
 #endif
 
 #endif // TINYBVH_IMPLEMENTATION
-
-#endif // TINY_BVH_H_
