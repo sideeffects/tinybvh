@@ -406,7 +406,7 @@ void FatalError( const char* fmt, ... )
 	while (1) exit( 0 );
 }
 
-static string TextFileRead( const char* _File )
+static string ReadTextFile( const char* _File )
 {
 	ifstream s( _File );
 	string str( (istreambuf_iterator<char>( s )), istreambuf_iterator<char>() );
@@ -731,7 +731,7 @@ Kernel::Kernel( const char* file, const char* entryPoint )
 	// load a cl file
 	sourceFile = new char[strlen( file ) + 1];
 	strcpy( sourceFile, file );
-	string csText = TextFileRead( fileName );
+	string csText = ReadTextFile( fileName );
 	if (csText.size() == 0) FatalError( "File %s not found", file );
 	// add vendor defines
 	vendorLines = 0;
@@ -767,7 +767,7 @@ Kernel::Kernel( const char* file, const char* entryPoint )
 		if (end == string::npos) FatalError( "Expected second \" after #include in shader." );
 		string incFile = csText.substr( pos + 1, end - pos - 1 );
 		// load include file content
-		string incText = TextFileRead( incFile.c_str() );
+		string incText = ReadTextFile( incFile.c_str() );
 		includes[Ninc].end = includes[Ninc].start + LineCount( incText );
 		includes[Ninc++].file = incFile;
 		if (incText.size() == 0) FatalError( "#include file not found:\n%s", incFile.c_str() );
