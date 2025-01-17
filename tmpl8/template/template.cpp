@@ -3,9 +3,17 @@
 // IGAD/NHTV/BUAS/UU - Jacco Bikker - 2006-2024
 
 #include "precomp.h"
-#include "game.h"
 
 #pragma comment( linker, "/subsystem:windows /ENTRY:mainCRTStartup" )
+
+#define TINY_OCL_IMPLEMENTATION
+#include "tiny_ocl.h"
+#define TINYBVH_IMPLEMENTATION
+#include "tiny_bvh.h"
+
+using namespace tinybvh;
+using namespace tinyocl;
+#include "game.h"
 
 using namespace Tmpl8;
 
@@ -541,14 +549,6 @@ string TextFileRead( const char* _File )
 	string str( (istreambuf_iterator<char>( s )), istreambuf_iterator<char>() );
 	s.close();
 	return str;
-}
-
-int LineCount( const string s )
-{
-	const char* p = s.c_str();
-	int lines = 0;
-	while (*p) if (*p++ == '\n') lines++;
-	return lines;
 }
 
 void TextFileWrite( const string& text, const char* _File )
@@ -1390,10 +1390,10 @@ extern "C" {
 	#endif
 		if (glad_glGetString == NULL) {
 			return 0;
-	}
+		}
 		*out_exts = (const char*)glad_glGetString( GL_EXTENSIONS );
 		return 1;
-}
+	}
 	static int glad_gl_has_extension( const char* exts, char** exts_i, const char* ext ) {
 		if (exts_i) {
 			unsigned int index;
@@ -1552,8 +1552,8 @@ extern "C" {
 		#endif
 			if (handle != NULL) {
 				return handle;
+			}
 		}
-	}
 
 		return NULL;
 	}
@@ -1566,7 +1566,7 @@ extern "C" {
 			dlclose( handle );
 		#endif
 		}
-		}
+	}
 
 	static GLADapiproc glad_dlsym_handle( void* handle, const char* name ) {
 		if (handle == NULL) {
@@ -1679,7 +1679,7 @@ extern "C" {
 #endif /* GLAD_GL */
 
 #ifdef __cplusplus
-	}
+}
 #endif
 
 // EOF
