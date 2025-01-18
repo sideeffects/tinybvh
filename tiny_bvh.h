@@ -6407,7 +6407,7 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 				{
 					const float f = (r - v0[axis]) / (v1[axis] - v0[axis]);
 					bvhvec3 C;
-					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f; // super paranoid
+					if (std::isfinite( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f; // super paranoid
 					// C = v0 + (r - v0[axis]) / (v1[axis] - v0[axis]) * (v1 - v0);
 					C[axis] = r /* accurate */, hasVerts = true, mn = tinybvh_min( mn, C ), mx = tinybvh_max( mx, C );
 				}
@@ -6424,7 +6424,7 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, const uint32_t splitAxis, const float splitPos, bool& leftOK, bool& rightOK )
 {
 	// method: we will split the fragment against the main split axis into two new fragments.
-	// In case the original fragment was clipped before, the two new fragments will then be 
+	// In case the original fragment was clipped before, the two new fragments will then be
 	// clipped against the bounds of the original.
 	bvhvec3 vin[16], vout[16], vleft[16], vright[16];
 	uint32_t vidx = orig.primIdx * 3, Nin = 3, Nout = 0, Nleft = 0, Nright = 0;
@@ -6438,7 +6438,7 @@ void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, cons
 		{
 			const float f = (splitPos - v0[splitAxis]) / (v1[splitAxis] - v0[splitAxis]);
 			bvhvec3 C;
-			if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+			if (std::isfinite( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
 			C[splitAxis] = splitPos;
 			if (v0left) vleft[Nleft++] = vright[Nright++] = C, vright[Nright++] = v1;
 			else vright[Nright++] = vleft[Nleft++] = C, vleft[Nleft++] = v1;
@@ -6461,7 +6461,7 @@ void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, cons
 				{
 					const float f = (l - v0[a]) / (v1[a] - v0[a]);
 					bvhvec3 C;
-					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+					if (std::isfinite( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
 					C[a] = l /* accurate */, vout[Nout++] = C;
 				}
 				if (v1in) vout[Nout++] = v1;
@@ -6474,7 +6474,7 @@ void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, cons
 				{
 					const float f = (r - v0[a]) / (v1[a] - v0[a]);
 					bvhvec3 C;
-					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+					if (std::isfinite( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
 					C[a] = r /* accurate */, vleft[Nleft++] = C;
 				}
 				if (v1in) vleft[Nleft++] = v1;
@@ -6493,7 +6493,7 @@ void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, cons
 				{
 					const float f = (l - v0[a]) / (v1[a] - v0[a]);
 					bvhvec3 C;
-					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+					if (std::isfinite( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
 					C[a] = l /* accurate */, vout[Nout++] = C;
 				}
 				if (v1in) vout[Nout++] = v1;
@@ -6506,7 +6506,7 @@ void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, cons
 				{
 					const float f = (r - v0[a]) / (v1[a] - v0[a]);
 					bvhvec3 C;
-					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+					if (std::isfinite( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
 					C[a] = r /* accurate */, vright[Nright++] = C;
 				}
 				if (v1in) vright[Nright++] = v1;
