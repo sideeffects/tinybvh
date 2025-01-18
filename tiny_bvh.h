@@ -101,7 +101,7 @@ THE SOFTWARE.
 #define C_TRAV	1
 
 // SBVH: "Unsplitting"
-#define SBVH_UNSPLITTING
+// #define SBVH_UNSPLITTING
 
 // 'Infinity' values
 #define BVH_FAR	1e30f		// actual valid ieee range: 3.40282347E+38
@@ -630,6 +630,7 @@ private:
 	void PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims );
 	void BuildHQ();
 	bool ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim, const uint32_t splitAxis );
+	void SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, const uint32_t splitAxis, const float splitPos, bool& leftOK, bool& rightOK );
 	void RefitUpVerbose( uint32_t nodeIdx );
 	uint32_t FindBestNewPosition( const uint32_t Lid );
 	void ReinsertNodeVerbose( const uint32_t Lid, const uint32_t Nid, const uint32_t origin );
@@ -1655,7 +1656,7 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 			const bvhvec4 v0 = verts[i * 3], v1 = verts[i * 3 + 1], v2 = verts[i * 3 + 2];
 			const bvhvec4 fmin = tinybvh_min( v0, tinybvh_min( v1, v2 ) );
 			const bvhvec4 fmax = tinybvh_max( v0, tinybvh_max( v1, v2 ) );
-			fragment[i].bmin = fmin, fragment[i].bmax = fmax, fragment[i].primIdx = i;
+			fragment[i].bmin = fmin, fragment[i].bmax = fmax, fragment[i].primIdx = i, fragment[i].clipped = 0;
 			root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
 			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
 		}
@@ -1671,7 +1672,7 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 			const bvhvec4 v0 = verts[i0], v1 = verts[i1], v2 = verts[i2];
 			const bvhvec4 fmin = tinybvh_min( v0, tinybvh_min( v1, v2 ) );
 			const bvhvec4 fmax = tinybvh_max( v0, tinybvh_max( v1, v2 ) );
-			fragment[i].bmin = fmin, fragment[i].bmax = fmax, fragment[i].primIdx = i;
+			fragment[i].bmin = fmin, fragment[i].bmax = fmax, fragment[i].primIdx = i, fragment[i].clipped = 0;
 			root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
 			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
 		}
@@ -1875,10 +1876,33 @@ void BVH::BuildHQ()
 						// split straddler
 						Fragment tmpFrag = fragment[fragIdx];
 						Fragment newFrag;
-						if (ClipFrag( tmpFrag, newFrag, tinybvh_max( bestRMin, node.aabbMin ), tinybvh_min( bestRMax, node.aabbMax ), minDim, bestAxis ))
-							fragment[nextFrag] = newFrag, triIdxB[--B] = nextFrag++;
-						if (ClipFrag( tmpFrag, fragment[fragIdx], tinybvh_max( bestLMin, node.aabbMin ), tinybvh_min( bestLMax, node.aabbMax ), minDim, bestAxis ))
-							triIdxB[A++] = fragIdx;
+						if (tmpFrag.clipped == 0)
+						{
+							bool leftOK = false, rightOK = false;
+							float splitPos = bestLMax[bestAxis];
+							SplitFrag( tmpFrag, fragment[fragIdx], fragment[nextFrag], bestAxis, splitPos, leftOK, rightOK );
+							if (leftOK && rightOK)
+							{
+								// split successful
+								triIdxB[A++] = fragIdx;
+								triIdxB[--B] = nextFrag;
+								nextFrag++;
+							}
+							else
+							{
+								// didn't work out; unsplit
+								fragment[fragIdx] = tmpFrag;
+								if (leftOK) triIdxB[A++] = fragIdx;
+								if (rightOK) triIdxB[--B] = fragIdx;
+							}
+						}
+						else
+						{
+							if (ClipFrag( tmpFrag, newFrag, tinybvh_max( bestRMin, node.aabbMin ), tinybvh_min( bestRMax, node.aabbMax ), minDim, bestAxis ))
+								fragment[nextFrag] = newFrag, triIdxB[--B] = nextFrag++;
+							if (ClipFrag( tmpFrag, fragment[fragIdx], tinybvh_max( bestLMin, node.aabbMin ), tinybvh_min( bestLMax, node.aabbMax ), minDim, bestAxis ))
+								triIdxB[A++] = fragIdx;
+						}
 					}
 				}
 				bestLMin = finalLMin, bestLMax = finalLMax;
@@ -6381,7 +6405,10 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 				const bool v0in = v0[axis] <= r + eps, v1in = v1[axis] <= r + eps;
 				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
 				{
-					C = v0 + (r - v0[axis]) / (v1[axis] - v0[axis]) * (v1 - v0);
+					const float f = (r - v0[axis]) / (v1[axis] - v0[axis]);
+					bvhvec3 C;
+					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f; // super paranoid
+					// C = v0 + (r - v0[axis]) / (v1[axis] - v0[axis]) * (v1 - v0);
 					C[axis] = r /* accurate */, hasVerts = true, mn = tinybvh_min( mn, C ), mx = tinybvh_max( mx, C );
 				}
 				if (v1in) hasVerts = true, mn = tinybvh_min( mn, v1 ), mx = tinybvh_max( mx, v1 );
@@ -6391,6 +6418,118 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 		newFrag.primIdx = orig.primIdx, newFrag.clipped = 1;
 		return hasVerts;
 	}
+}
+
+// SplitFrag: cut a fragment in two new fragments.
+void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, const uint32_t splitAxis, const float splitPos, bool& leftOK, bool& rightOK )
+{
+	// method: we will split the fragment against the main split axis into two new fragments.
+	// In case the original fragment was clipped before, the two new fragments will then be 
+	// clipped against the bounds of the original.
+	bvhvec3 vin[16], vout[16], vleft[16], vright[16];
+	uint32_t vidx = orig.primIdx * 3, Nin = 3, Nout = 0, Nleft = 0, Nright = 0;
+	if (!vertIdx) vin[0] = verts[vidx], vin[1] = verts[vidx + 1], vin[2] = verts[vidx + 2];
+	else vin[0] = verts[vertIdx[vidx]], vin[1] = verts[vertIdx[vidx + 1]], vin[2] = verts[vertIdx[vidx + 2]];
+	for (uint32_t v = 0; v < 3; v++)
+	{
+		bvhvec3 v0 = vin[v], v1 = vin[(v + 1) % 3];
+		bool v0left = v0[splitAxis] < splitPos, v1left = v1[splitAxis] < splitPos;
+		if (v0left && v1left) vleft[Nleft++] = v1; else if (!v0left && !v1left) vright[Nright++] = v1; else
+		{
+			const float f = (splitPos - v0[splitAxis]) / (v1[splitAxis] - v0[splitAxis]);
+			bvhvec3 C;
+			if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+			C[splitAxis] = splitPos;
+			if (v0left) vleft[Nleft++] = vright[Nright++] = C, vright[Nright++] = v1;
+			else vright[Nright++] = vleft[Nleft++] = C, vleft[Nleft++] = v1;
+		}
+	}
+	// skip further splitting if Fragment orig wasn't split before.
+	if (orig.clipped != 0)
+	{
+		// clip vleft to remaining axii, emit to Fragment left
+		const float eps = 0.00001f; // hm
+		for (uint32_t a = (splitAxis + 1) % 3; a != splitAxis; a = (a + 1) % 3)
+		{
+			float l = orig.bmin.cell[a], r = orig.bmax.cell[a];
+			Nin = Nleft, Nleft = 0, Nout = 0;
+			for (uint32_t v = 0; v < Nin; v++)
+			{
+				bvhvec3 v0 = vleft[v], v1 = vleft[(v + 1) % Nin];
+				const bool v0in = v0[a] >= l - eps, v1in = v1[a] >= l - eps;
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+				{
+					const float f = (l - v0[a]) / (v1[a] - v0[a]);
+					bvhvec3 C;
+					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+					C[a] = l /* accurate */, vout[Nout++] = C;
+				}
+				if (v1in) vout[Nout++] = v1;
+			}
+			for (uint32_t v = 0; v < Nout; v++)
+			{
+				bvhvec3 v0 = vout[v], v1 = vout[(v + 1) % Nout];
+				const bool v0in = v0[a] <= r + eps, v1in = v1[a] <= r + eps;
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+				{
+					const float f = (r - v0[a]) / (v1[a] - v0[a]);
+					bvhvec3 C;
+					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+					C[a] = r /* accurate */, vleft[Nleft++] = C;
+				}
+				if (v1in) vleft[Nleft++] = v1;
+			}
+		}
+		// clip vright to remaining axii, emit to Fragment left
+		for (uint32_t a = (splitAxis + 1) % 3; a != splitAxis; a = (a + 1) % 3)
+		{
+			float l = orig.bmin.cell[a], r = orig.bmax.cell[a];
+			Nin = Nright, Nright = 0, Nout = 0;
+			for (uint32_t v = 0; v < Nin; v++)
+			{
+				bvhvec3 v0 = vright[v], v1 = vright[(v + 1) % Nin];
+				const bool v0in = v0[a] >= l - eps, v1in = v1[a] >= l - eps;
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+				{
+					const float f = (l - v0[a]) / (v1[a] - v0[a]);
+					bvhvec3 C;
+					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+					C[a] = l /* accurate */, vout[Nout++] = C;
+				}
+				if (v1in) vout[Nout++] = v1;
+			}
+			for (uint32_t v = 0; v < Nout; v++)
+			{
+				bvhvec3 v0 = vout[v], v1 = vout[(v + 1) % Nout];
+				const bool v0in = v0[a] <= r + eps, v1in = v1[a] <= r + eps;
+				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
+				{
+					const float f = (r - v0[a]) / (v1[a] - v0[a]);
+					bvhvec3 C;
+					if (!isnan( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f;
+					C[a] = r /* accurate */, vright[Nright++] = C;
+				}
+				if (v1in) vright[Nright++] = v1;
+			}
+		}
+	}
+	// calculate left and right fragments
+	left.bmin = right.bmin = bvhvec3( BVH_FAR );
+	left.bmax = right.bmax = bvhvec3( -BVH_FAR );
+	for (uint32_t i = 0; i < Nleft; i++)
+	{
+		left.bmin = tinybvh_min( left.bmin, vleft[i] );
+		left.bmax = tinybvh_max( left.bmax, vleft[i] );
+	}
+	for (uint32_t i = 0; i < Nright; i++)
+	{
+		right.bmin = tinybvh_min( right.bmin, vright[i] );
+		right.bmax = tinybvh_max( right.bmax, vright[i] );
+	}
+	left.clipped = right.clipped = 1;
+	left.primIdx = right.primIdx = orig.primIdx;
+	leftOK = Nleft > 0;
+	rightOK = Nright > 0;
 }
 
 // RefitUpVerbose: Update bounding boxes of ancestors of the specified node.
