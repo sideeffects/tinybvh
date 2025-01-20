@@ -3,6 +3,8 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.11.35327.3
 MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tiny_bvh_gpu", "vcproj\tiny_bvh_gpu.vcxproj", "{4B0A219D-68D0-41EA-A0C4-8EB9E6171218}"
+EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tiny_bvh_fenster", "vcproj\tiny_bvh_fenster.vcxproj", "{C668A5EF-8E6A-4060-89C2-ED0AFFF0EE90}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tiny_bvh_renderer", "vcproj\tiny_bvh_renderer.vcxproj", "{103715F7-8E20-4058-B18C-CAF6E36F23B2}"
@@ -12,8 +14,6 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tiny_bvh_minimal", "vcproj\tiny_bvh_minimal.vcxproj", "{0B5C86B2-9438-49E3-BF1A-4E1593BB436D}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tiny_bvh_pt", "vcproj\tiny_bvh_pt.vcxproj", "{430FCECF-7685-40A7-A415-4A0DE487158F}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tiny_bvh_gpu", "vcproj\tiny_bvh_gpu.vcxproj", "{4B0A219D-68D0-41EA-A0C4-8EB9E6171218}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tiny_bvh_custom", "vcproj\tiny_bvh_custom.vcxproj", "{05E87951-A43C-49D9-BC3B-5F6387285D2E}"
 EndProject
