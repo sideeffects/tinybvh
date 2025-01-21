@@ -97,9 +97,9 @@ void Init()
 	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 0 ) );
 	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-	// if (!bvh.Load( "cwbvh.bin", triCount ))
+	if (!bvh.Load( "cwbvh.bin", triCount ))
 	{
-		bvh.Build( tris, triCount );
+		bvh.BuildHQ( tris, triCount );
 		bvh.Save( "cwbvh.bin" ); // cache for next run.
 	}
 	// create OpenCL buffers for BVH data
@@ -167,9 +167,15 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	finalize->Run2D( oclint2( SCRWIDTH, SCRHEIGHT ) );
 	pixels->CopyFromDevice();
 	memcpy( buf, pixels->GetHostPtr(), N * sizeof( uint32_t ) );
+	// trace a ray to the mouse to obtain the index of a primitive
+	float mousex = (float)f.x / SCRWIDTH, mousey = (float)f.y / SCRHEIGHT;
+	bvhvec3 P = rd.p0 + mousex * (rd.p1 - rd.p0) + mousey * (rd.p2 - rd.p0);
+	Ray r( rd.eye, normalize( P - bvhvec3( rd.eye ) ) );
+	bvh.Intersect( r );
+	bvhvec3 I = r.O + r.hit.t * r.D;
 	// print frame time / rate in window title
-	char title[50];
-	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
+	char title[512];
+	sprintf( title, "tiny_bvh - prim %i - [%.2f,%.2f,%.2f] - %.1fms (%.2fHz)", r.hit.prim, I.x, I.y, I.z, delta_time_s * 1000, 1.0f / delta_time_s );
 	fenster_update_title( &f, title );
 }
 
