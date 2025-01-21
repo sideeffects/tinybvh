@@ -1822,18 +1822,8 @@ void BVH::BuildHQ()
 			float noSplitCost = (float)node.triCount * C_INT;
 			if (splitCost >= noSplitCost)
 			{
-				for (int i = 0; i < node.triCount; i++)
-				{
-					uint32_t idx = triIdx[node.leftFirst + i];
-					triIdx[node.leftFirst + i] = fragment[idx].primIdx;
-					/* if (idx == 69796)
-					{
-						bool testx = fragment[idx].bmin.x >= node.aabbMin.x && fragment[idx].bmax.x <= node.aabbMax.x;
-						bool testy = fragment[idx].bmin.y >= node.aabbMin.y && fragment[idx].bmax.y <= node.aabbMax.y;
-						bool testz = fragment[idx].bmin.z >= node.aabbMin.z && fragment[idx].bmax.z <= node.aabbMax.z;
-						int w = 0;
-					} */
-				}
+				for (uint32_t i = 0; i < node.triCount; i++)
+					triIdx[node.leftFirst + i] = fragment[triIdx[node.leftFirst + i]].primIdx;
 				break; // not splitting is better.
 			}
 			// double-buffered partition
@@ -1850,10 +1840,6 @@ void BVH::BuildHQ()
 					const uint32_t fragIdx = triIdxA[src++];
 					const uint32_t bin1 = (uint32_t)tinybvh_max( (fragment[fragIdx].bmin[bestAxis] - nodeMin) * rPlaneDist, 0.0f );
 					const uint32_t bin2 = (uint32_t)tinybvh_max( (fragment[fragIdx].bmax[bestAxis] - nodeMin) * rPlaneDist, 0.0f );
-					if (fragment[fragIdx].primIdx == 69796)
-					{
-						int w = 0;
-					}
 					if (bin2 <= bestPos)
 					{
 						triIdxB[A++] = fragIdx;
@@ -1869,38 +1855,34 @@ void BVH::BuildHQ()
 					else
 					{
 					#ifdef SBVH_UNSPLITTING
-						// unsplitting
-						if (!bvh_over_indices)
+						// unsplitting: 1. Calculate what happens if we add this primitive entirely to the left side
+						if (bestNR > 1)
 						{
-							// 1. Calculate what happens if we add this primitive entirely to the left side
-							if (bestNR > 1)
+							bvhvec3 unsplitLMin = tinybvh_min( finalLMin, fragment[fragIdx].bmin );
+							bvhvec3 unsplitLMax = tinybvh_max( finalLMax, fragment[fragIdx].bmax );
+							float AL = (unsplitLMax - unsplitLMin).halfArea();
+							float AR = (finalRMax - finalRMin).halfArea();
+							float CunsplitLeft = C_TRAV + C_INT * rSAV * (AL * bestNL + AR * (bestNR - 1));
+							if (CunsplitLeft < splitCost)
 							{
-								bvhvec3 unsplitLMin = tinybvh_min( finalLMin, fragment[fragIdx].bmin );
-								bvhvec3 unsplitLMax = tinybvh_max( finalLMax, fragment[fragIdx].bmax );
-								float AL = (unsplitLMax - unsplitLMin).halfArea();
-								float AR = (finalRMax - finalRMin).halfArea();
-								float CunsplitLeft = C_TRAV + C_INT * rSAV * (AL * bestNL + AR * (bestNR - 1));
-								if (CunsplitLeft < splitCost)
-								{
-									bestNR--, splitCost = CunsplitLeft, triIdxB[A++] = fragIdx;
-									finalLMin = unsplitLMin, finalLMax = unsplitLMax;
-									continue;
-								}
+								bestNR--, splitCost = CunsplitLeft, triIdxB[A++] = fragIdx;
+								finalLMin = unsplitLMin, finalLMax = unsplitLMax;
+								continue;
 							}
-							// 2. Calculate what happens if we add this primitive entirely to the right side
-							if (bestNL > 1)
+						}
+						// 2. Calculate what happens if we add this primitive entirely to the right side
+						if (bestNL > 1)
+						{
+							const bvhvec3 unsplitRMin = tinybvh_min( finalRMin, fragment[fragIdx].bmin );
+							const bvhvec3 unsplitRMax = tinybvh_max( finalRMax, fragment[fragIdx].bmax );
+							const float AL = (finalLMax - finalLMin).halfArea();
+							const float AR = (unsplitRMax - unsplitRMin).halfArea();
+							const float CunsplitRight = C_TRAV + C_INT * rSAV * (AL * (bestNL - 1) + AR * bestNR);
+							if (CunsplitRight < splitCost)
 							{
-								bvhvec3 unsplitRMin = tinybvh_min( finalRMin, fragment[fragIdx].bmin );
-								bvhvec3 unsplitRMax = tinybvh_max( finalRMax, fragment[fragIdx].bmax );
-								float AL = (finalLMax - finalLMin).halfArea();
-								float AR = (unsplitRMax - unsplitRMin).halfArea();
-								float CunsplitRight = C_TRAV + C_INT * rSAV * (AL * (bestNL - 1) + AR * bestNR);
-								if (CunsplitRight < splitCost)
-								{
-									bestNL--, splitCost = CunsplitRight, triIdxB[--B] = fragIdx;
-									finalRMin = unsplitRMin, finalRMax = unsplitRMax;
-									continue;
-								}
+								bestNL--, splitCost = CunsplitRight, triIdxB[--B] = fragIdx;
+								finalRMin = unsplitRMin, finalRMax = unsplitRMax;
+								continue;
 							}
 						}
 					#endif
