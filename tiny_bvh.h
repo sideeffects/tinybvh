@@ -89,11 +89,14 @@ THE SOFTWARE.
 // Note: Instance index is encoded in the top bits of the prim idx field.
 // Max number of instances in TLAS: 2 ^ TLAS_BITS
 // Max number of primitives per BLAS: 2 ^ (32 - TLAS_BITS)
-#define TLAS_BITS 10 // max 1024 instances of 4M triangles each
+#define TLAS_BITS 32 // max 1024 instances of 4M triangles each. Set to 32 to store index in separate field.
 // Derived; for convenience:
 #define INST_IDX_SHFT (32 - TLAS_BITS)
-#define PRIM_IDX_MASK ((1 << INST_IDX_SHFT) - 1)
-#define PRIM_IDX_MASK_DBL 0x00000000ffffffff
+#if TLAS_BITS == 32
+#define PRIM_IDX_MASK 0xffffffff // instance index stored separately.
+#else
+#define PRIM_IDX_MASK ((1 << INST_IDX_SHFT) - 1) // instance index stored in top bits of hit.prim.
+#endif
 
 // SAH BVH building: Heuristic parameters
 // CPU builds: C_INT = 1, C_TRAV = 1 seems optimal.
@@ -461,6 +464,9 @@ struct Intersection
 	// squeezing this in the 'prim' field in some way.
 	// Using this data and the original triangle data, all other info for
 	// shading (such as normal, texture color etc.) can be reconstructed.
+#if TLAS_BITS == 32
+	uint32_t inst;	// instance index. Stored in top bits of prim if TLAS_BITS != 32.
+#endif
 	float t, u, v;	// distance along ray & barycentric coordinates of the intersection
 	uint32_t prim;	// primitive index
 };
@@ -478,9 +484,12 @@ struct Ray
 		hit.t = t;
 	}
 	ALIGNED( 16 ) bvhvec3 O; uint32_t dummy1;
-	ALIGNED( 16 ) bvhvec3 D; uint32_t dummy2;
-	ALIGNED( 16 ) bvhvec3 rD; uint32_t instIdx = 0;
-	ALIGNED( 16 ) Intersection hit;
+	ALIGNED( 16 ) bvhvec3 D; uint32_t instIdx = 0;
+	ALIGNED( 16 ) bvhvec3 rD;
+#if TLAS_BITS != 32
+	uint32_t dummy2; // align to 16 bytes if field 'hit' is 16 bytes; otherwise don't.
+#endif
+	Intersection hit;
 };
 
 #ifdef DOUBLE_PRECISION_SUPPORT
@@ -489,7 +498,7 @@ struct IntersectionEx
 {
 	// Double-precision hit record.
 	double t, u, v;	// distance along ray & barycentric coordinates of the intersection
-	uint64_t prim;	// primitive index
+	uint64_t inst, prim; // instance and primitive index
 };
 
 struct RayEx
@@ -1773,12 +1782,9 @@ void BVH::BuildHQ()
 						const int32_t bin1 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmin[a] - nodeMin) * rPlaneDist), 0, HQBVHBINS - 1 );
 						const int32_t bin2 = tinybvh_clamp( (int32_t)((fragment[fragIdx].bmax[a] - nodeMin) * rPlaneDist), 0, HQBVHBINS - 1 );
 						countIn[bin1]++, countOut[bin2]++;
-						if (bin2 == bin1)
-						{
-							// fragment fits in a single bin
-							binaMin[bin1] = tinybvh_min( binaMin[bin1], fragment[fragIdx].bmin );
+						if (bin2 == bin1) // fragment fits in a single bin
+							binaMin[bin1] = tinybvh_min( binaMin[bin1], fragment[fragIdx].bmin ),
 							binaMax[bin1] = tinybvh_max( binaMax[bin1], fragment[fragIdx].bmax );
-						}
 						else for (int32_t j = bin1; j <= bin2; j++)
 						{
 							// clip fragment to each bin it overlaps
@@ -1822,6 +1828,7 @@ void BVH::BuildHQ()
 			float noSplitCost = (float)node.triCount * C_INT;
 			if (splitCost >= noSplitCost)
 			{
+				bvhvec3 nodeMin( BVH_FAR ), nodeMax( -BVH_FAR );
 				for (uint32_t i = 0; i < node.triCount; i++)
 					triIdx[node.leftFirst + i] = fragment[triIdx[node.leftFirst + i]].primIdx;
 				break; // not splitting is better.
@@ -1833,55 +1840,41 @@ void BVH::BuildHQ()
 				// spatial partitioning
 				const float planeDist = (node.aabbMax[bestAxis] - node.aabbMin[bestAxis]) / (HQBVHBINS * 0.9999f);
 				const float rPlaneDist = 1.0f / planeDist, nodeMin = node.aabbMin[bestAxis];
-				bvhvec3 finalLMin = bestLMin, finalLMax = bestLMax;
-				bvhvec3 finalRMin = bestRMin, finalRMax = bestRMax;
 				for (uint32_t i = 0; i < node.triCount; i++)
 				{
 					const uint32_t fragIdx = triIdxA[src++];
 					const uint32_t bin1 = (uint32_t)tinybvh_max( (fragment[fragIdx].bmin[bestAxis] - nodeMin) * rPlaneDist, 0.0f );
 					const uint32_t bin2 = (uint32_t)tinybvh_max( (fragment[fragIdx].bmax[bestAxis] - nodeMin) * rPlaneDist, 0.0f );
-					if (bin2 <= bestPos)
-					{
-						triIdxB[A++] = fragIdx;
-						finalLMin = tinybvh_min( finalLMin, fragment[fragIdx].bmin );
-						finalLMax = tinybvh_max( finalLMax, fragment[fragIdx].bmax );
-					}
-					else if (bin1 > bestPos)
-					{
-						triIdxB[--B] = fragIdx;
-						finalRMin = tinybvh_min( finalRMin, fragment[fragIdx].bmin );
-						finalRMax = tinybvh_max( finalRMax, fragment[fragIdx].bmax );
-					}
-					else
+					if (bin2 <= bestPos) triIdxB[A++] = fragIdx; else if (bin1 > bestPos) triIdxB[--B] = fragIdx; else
 					{
 					#ifdef SBVH_UNSPLITTING
 						// unsplitting: 1. Calculate what happens if we add this primitive entirely to the left side
 						if (bestNR > 1)
 						{
-							bvhvec3 unsplitLMin = tinybvh_min( finalLMin, fragment[fragIdx].bmin );
-							bvhvec3 unsplitLMax = tinybvh_max( finalLMax, fragment[fragIdx].bmax );
+							bvhvec3 unsplitLMin = tinybvh_min( bestLMin, fragment[fragIdx].bmin );
+							bvhvec3 unsplitLMax = tinybvh_max( bestLMax, fragment[fragIdx].bmax );
 							float AL = (unsplitLMax - unsplitLMin).halfArea();
-							float AR = (finalRMax - finalRMin).halfArea();
+							float AR = (bestRMax - bestRMin).halfArea();
 							float CunsplitLeft = C_TRAV + C_INT * rSAV * (AL * bestNL + AR * (bestNR - 1));
 							if (CunsplitLeft < splitCost)
 							{
 								bestNR--, splitCost = CunsplitLeft, triIdxB[A++] = fragIdx;
-								finalLMin = unsplitLMin, finalLMax = unsplitLMax;
+								bestLMin = unsplitLMin, bestLMax = unsplitLMax;
 								continue;
 							}
 						}
 						// 2. Calculate what happens if we add this primitive entirely to the right side
 						if (bestNL > 1)
 						{
-							const bvhvec3 unsplitRMin = tinybvh_min( finalRMin, fragment[fragIdx].bmin );
-							const bvhvec3 unsplitRMax = tinybvh_max( finalRMax, fragment[fragIdx].bmax );
-							const float AL = (finalLMax - finalLMin).halfArea();
+							const bvhvec3 unsplitRMin = tinybvh_min( bestRMin, fragment[fragIdx].bmin );
+							const bvhvec3 unsplitRMax = tinybvh_max( bestRMax, fragment[fragIdx].bmax );
+							const float AL = (bestLMax - bestLMin).halfArea();
 							const float AR = (unsplitRMax - unsplitRMin).halfArea();
 							const float CunsplitRight = C_TRAV + C_INT * rSAV * (AL * (bestNL - 1) + AR * bestNR);
 							if (CunsplitRight < splitCost)
 							{
 								bestNL--, splitCost = CunsplitRight, triIdxB[--B] = fragIdx;
-								finalRMin = unsplitRMin, finalRMax = unsplitRMax;
+								bestRMin = unsplitRMin, bestRMax = unsplitRMax;
 								continue;
 							}
 						}
@@ -1892,38 +1885,20 @@ void BVH::BuildHQ()
 						float splitPos = bestLMax[bestAxis];
 						SplitFrag( fragment[fragIdx], part1, part2, minDim, bestAxis, splitPos, leftOK, rightOK );
 						if (leftOK && rightOK)
-						{
-							// split successful
-							fragment[fragIdx] = part1;
-							fragment[nextFrag] = part2;
-							triIdxB[A++] = fragIdx;
-							triIdxB[--B] = nextFrag;
-							finalLMin = tinybvh_min( finalLMin, fragment[fragIdx].bmin );
-							finalLMax = tinybvh_max( finalLMax, fragment[fragIdx].bmax );
-							finalRMin = tinybvh_min( finalRMin, fragment[nextFrag].bmin );
-							finalRMax = tinybvh_max( finalRMax, fragment[nextFrag].bmax );
-							nextFrag++;
-						}
-						else
-						{
-							// didn't work out; unsplit (rare)
-							if (leftOK)
-							{
-								triIdxB[A++] = fragIdx;
-								finalLMin = tinybvh_min( finalLMin, fragment[fragIdx].bmin );
-								finalLMax = tinybvh_max( finalLMax, fragment[fragIdx].bmax );
-							}
-							else // if (rightOK)
-							{
-								triIdxB[--B] = fragIdx;
-								finalRMin = tinybvh_min( finalRMin, fragment[fragIdx].bmin );
-								finalRMax = tinybvh_max( finalRMax, fragment[fragIdx].bmax );
-							}
-						}
+							fragment[fragIdx] = part1, triIdxB[A++] = fragIdx,
+							fragment[nextFrag] = part2, triIdxB[--B] = nextFrag++;
+						else // didn't work out; unsplit (rare)
+							if (leftOK) triIdxB[A++] = fragIdx; else triIdxB[--B] = fragIdx;
 					}
 				}
-				bestLMin = finalLMin, bestLMax = finalLMax;
-				bestRMin = finalRMin, bestRMax = finalRMax;
+				// for spatial splits, we fully refresh the bounds: clipping is never fully stable..
+				bestLMin = bestRMin = bvhvec3( BVH_FAR ), bestLMax = bestRMax = bvhvec3( -BVH_FAR );
+				for (uint32_t i = sliceStart; i < A; i++)
+					bestLMin = tinybvh_min( bestLMin, fragment[triIdxB[i]].bmin ),
+					bestLMax = tinybvh_max( bestLMax, fragment[triIdxB[i]].bmax );
+				for (uint32_t i = B; i < sliceEnd; i++)
+					bestRMin = tinybvh_min( bestRMin, fragment[triIdxB[i]].bmin ),
+					bestRMax = tinybvh_max( bestRMax, fragment[triIdxB[i]].bmax );
 			}
 			else
 			{
@@ -2248,7 +2223,13 @@ void BVH::Intersect256Rays( Ray* packet ) const
 					if (v < 0 || u + v > 1) continue;
 					const float t = f * dot( edge2, q );
 					if (t <= 0 || t >= ray.hit.t) continue;
-					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v, ray.hit.prim = idx;
+					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
+				#if TLAS_BITS == 32
+					ray.hit.prim = idx;
+					ray.hit.inst = ray.instIdx;
+				#else
+					ray.hit.prim = idx + ray.instIdx;
+				#endif
 				}
 			}
 			if (stackPtr == 0) break; else // pop
@@ -4644,7 +4625,11 @@ inline void IntersectCompactTri( Ray& r, __m128& t4, const float* T )
 	const float u = T[0] * wr.x + T[1] * wr.y + T[2] * wr.z + T[3];
 	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 	const bool hit = u >= 0 && v >= 0 && u + v < 1;
+#if TLAS_BITS == 32
+	if (hit) r.hit = { 0, ta, u, v, *(uint32_t*)&T[15] }, t4 = _mm_set1_ps( ta );
+#else
 	if (hit) r.hit = { ta, u, v, *(uint32_t*)&T[15] }, t4 = _mm_set1_ps( ta );
+#endif
 }
 int32_t BVH4_CPU::Intersect( Ray& ray ) const
 {
@@ -5854,7 +5839,8 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 				{
 					// register a hit: ray is shortened to t
 					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
-					ray.hit.prim = idx + ray.instIdx;
+					ray.hit.prim = idx;
+					ray.hit.inst = ray.instIdx;
 				}
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -6202,7 +6188,11 @@ void BVHBase::IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t 
 	{
 		// register a hit: ray is shortened to t
 		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
+	#if TLAS_BITS == 32
+		ray.hit.prim = idx, ray.hit.inst = ray.instIdx;
+	#else
 		ray.hit.prim = idx + ray.instIdx;
+	#endif
 	}
 }
 
@@ -6228,7 +6218,12 @@ void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const ui
 	if (t > 0 && t < ray.hit.t)
 	{
 		// register a hit: ray is shortened to t
-		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v, ray.hit.prim = idx;
+		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
+	#if TLAS_BITS == 32
+		ray.hit.prim = idx, ray.hit.inst = ray.instIdx;
+	#else
+		ray.hit.prim = idx + ray.instIdx;
+	#endif
 	}
 }
 
