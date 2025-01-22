@@ -6,8 +6,21 @@
 #define SCRHEIGHT 720
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
+#define SCENE 2
+
+#if SCENE == 1
+
+// At GRIDSIZE == 15, make sure to set TLAS_BITS to 12 in tiny_bvh.h.
+#define GRIDSIZE 15
+#define DRAGONS (GRIDSIZE * GRIDSIZE * GRIDSIZE)
+// #define AUTOCAM
+
+#else
+
 #define DRAGONS 100
 #define AUTOCAM
+
+#endif
 
 // This application uses tinybvh - And this file will include the implementation.
 #define TINYBVH_IMPLEMENTATION
@@ -153,6 +166,30 @@ void Init()
 	noise = new Buffer( 128 * 128 * 8 * sizeof( uint32_t ), blueNoise );
 	noise->CopyToDevice();
 
+#if SCENE == 1
+
+	// load dragon mesh
+	AddMesh( "./testdata/dragon.bin", 1, bvhvec3( 0 ) );
+	swap( verts, dragonVerts );
+	swap( triCount, dragonTriCount );
+	dragon.Build( dragonVerts, dragonTriCount );
+
+	// dragon grid
+	for (int b = 1, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
+	{
+		instance[b] = BLASInstance( 1 /* dragon */ );
+		BLASInstance& i = instance[b];
+		i.transform[0] = i.transform[5] = i.transform[10] = 0.07f;
+		i.transform[3] = x, i.transform[7] = y, i.transform[11] = z;
+	}
+
+	// vertex data for static scenery
+	AddQuad( bvhvec3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
+	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 500 ), 0xffffff );
+	bistro.Build( verts, 300 );
+
+#else
+
 	// load dragon mesh
 	AddMesh( "./testdata/dragon.bin", 1, bvhvec3( 0 ) );
 	swap( verts, dragonVerts );
@@ -182,10 +219,14 @@ void Init()
 	AddQuad( bvhvec3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
 	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 0 ) );
 	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
+	bistro.Build( verts, triCount );
+
+#endif
 
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-	bistro.Build( verts, triCount );
 	instance[0] = BLASInstance( 0 /* static geometry */ );
+
+	// finalize scene: build tlas
 	tlas.Build( instance, DRAGONS + 1, blasList, 2 );
 
 	// create OpenCL buffers for BVH data
@@ -195,15 +236,15 @@ void Init()
 	tlasIndices->CopyToDevice();
 	blasInstances = new Buffer( (DRAGONS + 1) * sizeof( BLASInstance ), instance );
 	blasInstances->CopyToDevice();
-	bistroNodes = new Buffer( bistro.usedBlocks * sizeof( bvhvec4 ), bistro.bvh8Data );
-	bistroTris = new Buffer( bistro.idxCount * 3 * sizeof( bvhvec4 ), bistro.bvh8Tris );
-	bistroVerts = new Buffer( triCount * 3 * sizeof( bvhvec4 ), verts );
 	dragonNodes = new Buffer( dragon.usedBlocks * sizeof( bvhvec4 ), dragon.bvh8Data );
 	dragonTris = new Buffer( dragon.idxCount * 3 * sizeof( bvhvec4 ), dragon.bvh8Tris );
 	drVerts = new Buffer( dragonTriCount * 3 * sizeof( bvhvec4 ), dragonVerts );
 	dragonNodes->CopyToDevice();
 	dragonTris->CopyToDevice();
 	drVerts->CopyToDevice();
+	bistroNodes = new Buffer( bistro.usedBlocks * sizeof( bvhvec4 ), bistro.bvh8Data );
+	bistroTris = new Buffer( bistro.idxCount * 3 * sizeof( bvhvec4 ), bistro.bvh8Tris );
+	bistroVerts = new Buffer( triCount * 3 * sizeof( bvhvec4 ), verts );
 	bistroNodes->CopyToDevice();
 	bistroTris->CopyToDevice();
 	bistroVerts->CopyToDevice();

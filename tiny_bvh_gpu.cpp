@@ -97,7 +97,7 @@ void Init()
 	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 0 ) );
 	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-	if (!bvh.Load( "cwbvh.bin", triCount ))
+	if (1) // (!bvh.Load( "cwbvh.bin", triCount ))
 	{
 		bvh.BuildHQ( tris, triCount );
 		bvh.Save( "cwbvh.bin" ); // cache for next run.
@@ -171,7 +171,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	float mousex = (float)f.x / SCRWIDTH, mousey = (float)f.y / SCRHEIGHT;
 	bvhvec3 P = rd.p0 + mousex * (rd.p1 - rd.p0) + mousey * (rd.p2 - rd.p0);
 	Ray r( rd.eye, normalize( P - bvhvec3( rd.eye ) ) );
-	bvh.Intersect( r );
+	bvh.bvh8.bvh.Intersect( r );
 	bvhvec3 I = r.O + r.hit.t * r.D;
 	// print frame time / rate in window title
 	char title[512];
