@@ -307,6 +307,20 @@ public:
 	Surface* screen = 0;
 };
 
+// use template vector types in tinybvh
+#define TINYBVH_USE_CUSTOM_VECTOR_TYPES
+#define NO_DOUBLE_PRECISION_SUPPORT
+namespace tinybvh
+{
+using bvhint2 = int2;
+using bvhint3 = int3;
+using bvhuint2 = uint2;
+using bvhvec2 = float2;
+using bvhvec3 = float3;
+using bvhvec4 = float4;
+// using bvhdbl3 = double3;
+}
+
 #include "tiny_ocl.h"
 #include "tiny_bvh.h"
 

@@ -32,16 +32,16 @@ void Game::Init()
 	// create OpenCL buffers for wavefront path tracing
 	int N = SCRWIDTH * SCRHEIGHT;
 	pixels = new Buffer( GetRenderTarget()->ID, 0, Buffer::TARGET );
-	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
-	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
-	connections = new Buffer( N * 3 * sizeof( bvhvec4 ) * 3 );
-	accumulator = new Buffer( N * sizeof( bvhvec4 ) );
+	raysIn = new Buffer( N * sizeof( float4 ) * 4 );
+	raysOut = new Buffer( N * sizeof( float4 ) * 4 );
+	connections = new Buffer( N * 3 * sizeof( float4 ) * 3 );
+	accumulator = new Buffer( N * sizeof( float4 ) );
 	LoadBlueNoise();
 	noise = new Buffer( 128 * 128 * 8 * sizeof( uint32_t ), blueNoise );
 	noise->CopyToDevice();
 
 	// load dragon mesh
-	AddMesh( "./testdata/dragon.bin", 1, bvhvec3( 0 ) );
+	AddMesh( "./testdata/dragon.bin", 1, float3( 0 ) );
 	swap( verts, dragonVerts );
 	swap( triCount, dragonTriCount );
 	dragon.Build( dragonVerts, dragonTriCount );
@@ -53,10 +53,10 @@ void Game::Init()
 		BLASInstance& i = instance[d + 1];
 		float t = (float)d * 0.17f + 1.0f;
 		float size = 0.1f + 0.075f * RandomFloat();
-		bvhvec3 pos = splinePos( t );
-		bvhvec3 D = -size * normalize( splinePos( t + 0.01f ) - pos );
-		bvhvec3 U( 0, size, 0 );
-		bvhvec3 R( -D.z, 0, D.x );
+		float3 pos = splinePos( t );
+		float3 D = -size * normalize( splinePos( t + 0.01f ) - pos );
+		float3 U( 0, size, 0 );
+		float3 R( -D.z, 0, D.x );
 		pos += R * 20.0f * (RandomFloat() - 0.5f);
 		i.transform[0] = R.x, i.transform[1] = R.y, i.transform[2] = R.z;
 		i.transform[4] = U.x, i.transform[5] = U.y, i.transform[6] = U.z;
@@ -66,9 +66,9 @@ void Game::Init()
 		i.transform[11] = pos.z;
 	}
 	// load vertex data for static scenery
-	AddQuad( bvhvec3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
-	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 0 ) );
-	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
+	AddQuad( float3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
+	AddMesh( "./testdata/bistro_ext_part1.bin", 1, float3( 0 ) );
+	AddMesh( "./testdata/bistro_ext_part2.bin", 1, float3( 0 ) );
 
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
 	bistro.Build( verts, triCount );
@@ -82,12 +82,12 @@ void Game::Init()
 	tlasIndices->CopyToDevice();
 	blasInstances = new Buffer( (DRAGONS + 1) * sizeof( BLASInstance ), instance );
 	blasInstances->CopyToDevice();
-	bistroNodes = new Buffer( bistro.usedBlocks * sizeof( bvhvec4 ), bistro.bvh8Data );
-	bistroTris = new Buffer( bistro.idxCount * 3 * sizeof( bvhvec4 ), bistro.bvh8Tris );
-	bistroVerts = new Buffer( triCount * 3 * sizeof( bvhvec4 ), verts );
-	dragonNodes = new Buffer( dragon.usedBlocks * sizeof( bvhvec4 ), dragon.bvh8Data );
-	dragonTris = new Buffer( dragon.idxCount * 3 * sizeof( bvhvec4 ), dragon.bvh8Tris );
-	drVerts = new Buffer( dragonTriCount * 3 * sizeof( bvhvec4 ), dragonVerts );
+	bistroNodes = new Buffer( bistro.usedBlocks * sizeof( float4 ), bistro.bvh8Data );
+	bistroTris = new Buffer( bistro.idxCount * 3 * sizeof( float4 ), bistro.bvh8Tris );
+	bistroVerts = new Buffer( triCount * 3 * sizeof( float4 ), verts );
+	dragonNodes = new Buffer( dragon.usedBlocks * sizeof( float4 ), dragon.bvh8Data );
+	dragonTris = new Buffer( dragon.idxCount * 3 * sizeof( float4 ), dragon.bvh8Tris );
+	drVerts = new Buffer( dragonTriCount * 3 * sizeof( float4 ), dragonVerts );
 	dragonNodes->CopyToDevice();
 	dragonTris->CopyToDevice();
 	drVerts->CopyToDevice();
@@ -106,8 +106,8 @@ bool Game::UpdateCamera( float delta_time_s )
 	ct += delta_time_s * 0.25f;
 	if (ct > 10) ct -= 10;
 	splineCam( ct + 1 );
-	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) );
-	bvhvec3 up = 0.8f * cross( rd.view, right ), C = rd.eye + 1.2f * rd.view;
+	float3 right = normalize( cross( float3( 0, 1, 0 ), rd.view ) );
+	float3 up = 0.8f * cross( rd.view, right ), C = rd.eye + 1.2f * rd.view;
 	rd.p0 = C - right + up, rd.p1 = C + right + up, rd.p2 = C - right - up;
 	return moved > 0;
 }
