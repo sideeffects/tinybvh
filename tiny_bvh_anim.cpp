@@ -46,14 +46,14 @@ void Init()
 	printf( "Loading triangle data (%i tris).\n", verts );
 	verts *= 3, triangles = (bvhvec4*)malloc64( verts * 16 );
 	s.read( (char*)triangles, verts * 16 );
-	sponza.Build( triangles, verts / 3 );
+	sponza.BuildHQ( triangles, verts / 3 );
 
 	// load bunny
 	std::fstream b{ "./testdata/bunny.bin", s.binary | s.in };
 	b.read( (char*)&bverts, 4 );
 	bverts *= 3, bunny = (bvhvec4*)malloc64( bverts * 16 );
 	b.read( (char*)bunny, verts * 16 );
-	obj.Build( bunny, bverts / 3 );
+	obj.BuildHQ( bunny, bverts / 3 );
 
 	// build a TLAS
 	inst[0] = BLASInstance( 0 /* sponza */ );
