@@ -6397,8 +6397,7 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 		// special case: if this fragment has not been clipped before, only clip against planes on split axis.
 		bool hasVerts = false;
 		bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR ), vout[4], C;
-		const float eps = minDim.cell[axis];
-		if (extent.cell[axis] > eps)
+		if (extent.cell[axis] > minDim.cell[axis])
 		{
 			const float l = bmin[axis], r = bmax[axis];
 			uint32_t Nout = 0;
@@ -6412,22 +6411,28 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 				if (v0in || v1in)
 				{
 					if (v0in ^ v1in)
-						C = v0 + (l - v0[axis]) / (v1[axis] - v0[axis]) * (v1 - v0),
-						C[axis] = l /* accurate */, vout[Nout++] = C;
+					{
+						const float f = tinybvh_clamp( (l - v0[axis]) / (v1[axis] - v0[axis]), 0.0f, 1.0f );
+						C = v0 + f * (v1 - v0), C[axis] = l /* accurate */, vout[Nout++] = C;
+					}
 					if (v1in) vout[Nout++] = v1;
 				}
 				if (v1in || v2in)
 				{
 					if (v1in ^ v2in)
-						C = v1 + (l - v1[axis]) / (v2[axis] - v1[axis]) * (v2 - v1),
-						C[axis] = l /* accurate */, vout[Nout++] = C;
+					{
+						const float f = tinybvh_clamp( (l - v1[axis]) / (v2[axis] - v1[axis]), 0.0f, 1.0f );
+						C = v1 + f * (v2 - v1), C[axis] = l /* accurate */, vout[Nout++] = C;
+					}
 					if (v2in) vout[Nout++] = v2;
 				}
 				if (v2in || v0in)
 				{
 					if (v2in ^ v0in)
-						C = v2 + (l - v2[axis]) / (v0[axis] - v2[axis]) * (v0 - v2),
-						C[axis] = l /* accurate */, vout[Nout++] = C;
+					{
+						const float f = tinybvh_clamp( (l - v2[axis]) / (v0[axis] - v2[axis]), 0.0f, 1.0f );
+						C = v2 + f * (v0 - v2), C[axis] = l /* accurate */, vout[Nout++] = C;
+					}
 					if (v0in) vout[Nout++] = v0;
 				}
 			}
@@ -6437,11 +6442,9 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 				const bool v0in = v0[axis] <= r, v1in = v1[axis] <= r;
 				if (!(v0in || v1in)) continue; else if (v0in ^ v1in)
 				{
-					const float f = (r - v0[axis]) / (v1[axis] - v0[axis]);
-					bvhvec3 C;
-					if (std::isfinite( f )) C = v0 + f * (v1 - v0); else C = (v0 + v1) * 0.5f; // super paranoid
-					// C = v0 + (r - v0[axis]) / (v1[axis] - v0[axis]) * (v1 - v0);
-					C[axis] = r /* accurate */, hasVerts = true, mn = tinybvh_min( mn, C ), mx = tinybvh_max( mx, C );
+					const float f = tinybvh_clamp( (r - v0[axis]) / (v1[axis] - v0[axis]), 0.0f, 1.0f );
+					C = v0 + f * (v1 - v0), C[axis] = r /* accurate */, hasVerts = true;
+					mn = tinybvh_min( mn, C ), mx = tinybvh_max( mx, C );
 				}
 				if (v1in) hasVerts = true, mn = tinybvh_min( mn, v1 ), mx = tinybvh_max( mx, v1 );
 			}
