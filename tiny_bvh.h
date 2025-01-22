@@ -129,7 +129,9 @@ THE SOFTWARE.
 #define BVH_DBL_FAR 1e300	// actual valid ieee range: 1.797693134862315E+308
 
 // Features
+#ifndef NO_DOUBLE_PRECISION_SUPPORT
 #define DOUBLE_PRECISION_SUPPORT
+#endif
 // #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
 // #define TINYBVH_NO_SIMD
 #define ENABLE_INDEXED_GEOMETRY
@@ -371,19 +373,19 @@ inline void operator*=( bvhvec3& a, const float b ) { a.x *= b; a.y *= b; a.z *=
 #endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
 // Vector math: cross and dot.
-static inline bvhvec3 cross( const bvhvec3& a, const bvhvec3& b )
+static inline bvhvec3 tinybvh_cross( const bvhvec3& a, const bvhvec3& b )
 {
 	return bvhvec3( a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x );
 }
-static inline float dot( const bvhvec2& a, const bvhvec2& b ) { return a.x * b.x + a.y * b.y; }
-static inline float dot( const bvhvec3& a, const bvhvec3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-static inline float dot( const bvhvec4& a, const bvhvec4& b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+static inline float tinybvh_dot( const bvhvec2& a, const bvhvec2& b ) { return a.x * b.x + a.y * b.y; }
+static inline float tinybvh_dot( const bvhvec3& a, const bvhvec3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+static inline float tinybvh_dot( const bvhvec4& a, const bvhvec4& b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
 
 // Vector math: common operations.
-static float length( const bvhvec3& a ) { return sqrtf( a.x * a.x + a.y * a.y + a.z * a.z ); }
-static bvhvec3 normalize( const bvhvec3& a )
+static float tinybvh_length( const bvhvec3& a ) { return sqrtf( a.x * a.x + a.y * a.y + a.z * a.z ); }
+static bvhvec3 tinybvh_normalize( const bvhvec3& a )
 {
-	float l = length( a ), rl = l == 0 ? 0 : (1.0f / l);
+	float l = tinybvh_length( a ), rl = l == 0 ? 0 : (1.0f / l);
 	return a * rl;
 }
 
@@ -426,11 +428,11 @@ inline bvhdbl3 operator*=( bvhdbl3& a, const double b ) { return bvhdbl3( a.x * 
 
 #endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
-static inline bvhdbl3 cross( const bvhdbl3& a, const bvhdbl3& b )
+static inline bvhdbl3 tinybvh_cross( const bvhdbl3& a, const bvhdbl3& b )
 {
 	return bvhdbl3( a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x );
 }
-static inline double dot( const bvhdbl3& a, const bvhdbl3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+static inline double tinybvh_dot( const bvhdbl3& a, const bvhdbl3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
 #endif
 
@@ -498,7 +500,7 @@ struct Ray
 	Ray( bvhvec3 origin, bvhvec3 direction, float t = BVH_FAR )
 	{
 		memset( this, 0, sizeof( Ray ) );
-		O = origin, D = normalize( direction ), rD = tinybvh_safercp( D );
+		O = origin, D = tinybvh_normalize( direction ), rD = tinybvh_safercp( D );
 		hit.t = t;
 	}
 	ALIGNED( 16 ) bvhvec3 O; uint32_t dummy1;
@@ -1009,6 +1011,8 @@ public:
 	void InvertTransform();
 };
 
+#ifdef DOUBLE_PRECISION_SUPPORT
+
 // BLASInstanceEx: Double-precision version of BLASInstance.
 class BLASInstanceEx
 {
@@ -1026,6 +1030,8 @@ public:
 	bvhdbl3 TransformVector( const bvhdbl3& v, const double* T ) const;
 	void InvertTransform();
 };
+
+#endif
 
 // Experimental & 'under construction' structs
 
@@ -2204,16 +2210,16 @@ void BVH::Intersect256Rays( Ray* packet ) const
 	const bvhvec3 p1 = packet[51].O + packet[51].D; // top-right
 	const bvhvec3 p2 = packet[204].O + packet[204].D; // bottom-left
 	const bvhvec3 p3 = packet[255].O + packet[255].D; // bottom-right
-	const bvhvec3 plane0 = normalize( cross( p0 - O, p0 - p2 ) ); // left plane
-	const bvhvec3 plane1 = normalize( cross( p3 - O, p3 - p1 ) ); // right plane
-	const bvhvec3 plane2 = normalize( cross( p1 - O, p1 - p0 ) ); // top plane
-	const bvhvec3 plane3 = normalize( cross( p2 - O, p2 - p3 ) ); // bottom plane
+	const bvhvec3 plane0 = tinybvh_normalize( tinybvh_cross( p0 - O, p0 - p2 ) ); // left plane
+	const bvhvec3 plane1 = tinybvh_normalize( tinybvh_cross( p3 - O, p3 - p1 ) ); // right plane
+	const bvhvec3 plane2 = tinybvh_normalize( tinybvh_cross( p1 - O, p1 - p0 ) ); // top plane
+	const bvhvec3 plane3 = tinybvh_normalize( tinybvh_cross( p2 - O, p2 - p3 ) ); // bottom plane
 	const int32_t sign0x = plane0.x < 0 ? 4 : 0, sign0y = plane0.y < 0 ? 5 : 1, sign0z = plane0.z < 0 ? 6 : 2;
 	const int32_t sign1x = plane1.x < 0 ? 4 : 0, sign1y = plane1.y < 0 ? 5 : 1, sign1z = plane1.z < 0 ? 6 : 2;
 	const int32_t sign2x = plane2.x < 0 ? 4 : 0, sign2y = plane2.y < 0 ? 5 : 1, sign2z = plane2.z < 0 ? 6 : 2;
 	const int32_t sign3x = plane3.x < 0 ? 4 : 0, sign3y = plane3.y < 0 ? 5 : 1, sign3z = plane3.z < 0 ? 6 : 2;
-	const float d0 = dot( O, plane0 ), d1 = dot( O, plane1 );
-	const float d2 = dot( O, plane2 ), d3 = dot( O, plane3 );
+	const float d0 = tinybvh_dot( O, plane0 ), d1 = tinybvh_dot( O, plane1 );
+	const float d2 = tinybvh_dot( O, plane2 ), d3 = tinybvh_dot( O, plane3 );
 	// Traverse the tree with the packet
 	int32_t first = 0, last = 255; // first and last active ray in the packet
 	const BVHNode* node = &bvhNode[0];
@@ -2231,15 +2237,15 @@ void BVH::Intersect256Rays( Ray* packet ) const
 				for (int32_t i = first; i <= last; i++)
 				{
 					Ray& ray = packet[i];
-					const bvhvec3 h = cross( ray.D, edge2 );
-					const float a = dot( edge1, h );
+					const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+					const float a = tinybvh_dot( edge1, h );
 					if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
-					const float f = 1 / a, u = f * dot( s, h );
+					const float f = 1 / a, u = f * tinybvh_dot( s, h );
 					if (u < 0 || u > 1) continue;
-					const bvhvec3 q = cross( s, edge1 );
-					const float v = f * dot( ray.D, q );
+					const bvhvec3 q = tinybvh_cross( s, edge1 );
+					const float v = f * tinybvh_dot( ray.D, q );
 					if (v < 0 || u + v > 1) continue;
-					const float t = f * dot( edge2, q );
+					const float t = f * tinybvh_dot( edge2, q );
 					if (t <= 0 || t >= ray.hit.t) continue;
 					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
 				#if INST_IDX_BITS == 32
@@ -2280,7 +2286,8 @@ void BVH::Intersect256Rays( Ray* packet ) const
 					bvhvec3 c1( minmax[sign1x], minmax[sign1y], minmax[sign1z] );
 					bvhvec3 c2( minmax[sign2x], minmax[sign2y], minmax[sign2z] );
 					bvhvec3 c3( minmax[sign3x], minmax[sign3y], minmax[sign3z] );
-					if (dot( c0, plane0 ) > d0 || dot( c1, plane1 ) > d1 || dot( c2, plane2 ) > d2 || dot( c3, plane3 ) > d3)
+					if (tinybvh_dot( c0, plane0 ) > d0 || tinybvh_dot( c1, plane1 ) > d1 ||
+						tinybvh_dot( c2, plane2 ) > d2 || tinybvh_dot( c3, plane3 ) > d3)
 						visitLeft = false;
 					else // 3. Last resort: update first and last, stay in node if first > last
 					{
@@ -2316,7 +2323,8 @@ void BVH::Intersect256Rays( Ray* packet ) const
 					bvhvec3 c1( minmax[sign1x], minmax[sign1y], minmax[sign1z] );
 					bvhvec3 c2( minmax[sign2x], minmax[sign2y], minmax[sign2z] );
 					bvhvec3 c3( minmax[sign3x], minmax[sign3y], minmax[sign3z] );
-					if (dot( c0, plane0 ) > d0 || dot( c1, plane1 ) > d1 || dot( c2, plane2 ) > d2 || dot( c3, plane3 ) > d3)
+					if (tinybvh_dot( c0, plane0 ) > d0 || tinybvh_dot( c1, plane1 ) > d1 ||
+						tinybvh_dot( c2, plane2 ) > d2 || tinybvh_dot( c3, plane3 ) > d3)
 						visitRight = false;
 					else // 3. Last resort: update first and last, stay in node if first > last
 					{
@@ -3565,17 +3573,17 @@ int32_t BVH4_GPU::Intersect( Ray& ray ) const
 				const bvhvec3 edge2 = bvhvec3( bvh4Data[triStart + 2] );
 				const bvhvec3 edge1 = bvhvec3( bvh4Data[triStart + 1] );
 				const bvhvec3 v0 = bvh4Data[triStart + 0];
-				const bvhvec3 h = cross( ray.D, edge2 );
-				const float a = dot( edge1, h );
+				const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+				const float a = tinybvh_dot( edge1, h );
 				if (fabs( a ) < 0.0000001f) continue;
 				const float f = 1 / a;
 				const bvhvec3 s = ray.O - v0;
-				const float u = f * dot( s, h );
+				const float u = f * tinybvh_dot( s, h );
 				if (u < 0 || u > 1) continue;
-				const bvhvec3 q = cross( s, edge1 );
-				const float v = f * dot( ray.D, q );
+				const bvhvec3 q = tinybvh_cross( s, edge1 );
+				const float v = f * tinybvh_dot( ray.D, q );
 				if (v < 0 || u + v > 1) continue;
-				const float d = f * dot( edge2, q );
+				const float d = f * tinybvh_dot( edge2, q );
 				if (d <= 0.0f || d >= ray.hit.t /* i.e., t */) continue;
 				ray.hit.t = d, ray.hit.u = u, ray.hit.v = v;
 				ray.hit.prim = as_uint( bvh4Data[triStart + 0].w );
@@ -3742,7 +3750,7 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 				MBVH<8>::MBVHNode* const child = &bvh8.mbvhNode[orig->child[i]];
 				if (child->triCount > 3 /* must be leaf */) bvh8.SplitBVHLeaf( orig->child[i], 3 );
 				bvhvec3 childCentroid = (child->aabbMin + child->aabbMax) * 0.5f;
-				cost[s][i] = dot( childCentroid - nodeCentroid, ds );
+				cost[s][i] = tinybvh_dot( childCentroid - nodeCentroid, ds );
 			}
 		}
 		while (1)
@@ -4105,16 +4113,16 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 	bvhvec3 p1 = packet[51].O + packet[51].D; // top-right
 	bvhvec3 p2 = packet[204].O + packet[204].D; // bottom-left
 	bvhvec3 p3 = packet[255].O + packet[255].D; // bottom-right
-	bvhvec3 plane0 = normalize( cross( p0 - O, p0 - p2 ) ); // left plane
-	bvhvec3 plane1 = normalize( cross( p3 - O, p3 - p1 ) ); // right plane
-	bvhvec3 plane2 = normalize( cross( p1 - O, p1 - p0 ) ); // top plane
-	bvhvec3 plane3 = normalize( cross( p2 - O, p2 - p3 ) ); // bottom plane
+	bvhvec3 plane0 = tinybvh_normalize( tinybvh_cross( p0 - O, p0 - p2 ) ); // left plane
+	bvhvec3 plane1 = tinybvh_normalize( tinybvh_cross( p3 - O, p3 - p1 ) ); // right plane
+	bvhvec3 plane2 = tinybvh_normalize( tinybvh_cross( p1 - O, p1 - p0 ) ); // top plane
+	bvhvec3 plane3 = tinybvh_normalize( tinybvh_cross( p2 - O, p2 - p3 ) ); // bottom plane
 	int32_t sign0x = plane0.x < 0 ? 4 : 0, sign0y = plane0.y < 0 ? 5 : 1, sign0z = plane0.z < 0 ? 6 : 2;
 	int32_t sign1x = plane1.x < 0 ? 4 : 0, sign1y = plane1.y < 0 ? 5 : 1, sign1z = plane1.z < 0 ? 6 : 2;
 	int32_t sign2x = plane2.x < 0 ? 4 : 0, sign2y = plane2.y < 0 ? 5 : 1, sign2z = plane2.z < 0 ? 6 : 2;
 	int32_t sign3x = plane3.x < 0 ? 4 : 0, sign3y = plane3.y < 0 ? 5 : 1, sign3z = plane3.z < 0 ? 6 : 2;
-	float t0 = dot( O, plane0 ), t1 = dot( O, plane1 );
-	float t2 = dot( O, plane2 ), t3 = dot( O, plane3 );
+	float t0 = tinybvh_dot( O, plane0 ), t1 = tinybvh_dot( O, plane1 );
+	float t2 = tinybvh_dot( O, plane2 ), t3 = tinybvh_dot( O, plane3 );
 	// Traverse the tree with the packet
 	int32_t first = 0, last = 255; // first and last active ray in the packet
 	BVHNode* node = &bvhNode[0];
@@ -4132,15 +4140,15 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 				for (int32_t i = first; i <= last; i++)
 				{
 					Ray& ray = packet[i];
-					const bvhvec3 h = cross( ray.D, edge2 );
-					const float a = dot( edge1, h );
+					const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+					const float a = tinybvh_dot( edge1, h );
 					if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
-					const float f = 1 / a, u = f * dot( s, h );
+					const float f = 1 / a, u = f * tinybvh_dot( s, h );
 					if (u < 0 || u > 1) continue;
-					const bvhvec3 q = cross( s, edge1 );
-					const float v = f * dot( ray.D, q );
+					const bvhvec3 q = tinybvh_cross( s, edge1 );
+					const float v = f * tinybvh_dot( ray.D, q );
 					if (v < 0 || u + v > 1) continue;
-					const float t = f * dot( edge2, q );
+					const float t = f * tinybvh_dot( edge2, q );
 					if (t <= 0 || t >= ray.hit.t) continue;
 					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v, ray.hit.prim = idx;
 				}
@@ -4181,7 +4189,8 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 					bvhvec3 c1( minmax[sign1x], minmax[sign1y], minmax[sign1z] );
 					bvhvec3 c2( minmax[sign2x], minmax[sign2y], minmax[sign2z] );
 					bvhvec3 c3( minmax[sign3x], minmax[sign3y], minmax[sign3z] );
-					if (dot( c0, plane0 ) > t0 || dot( c1, plane1 ) > t1 || dot( c2, plane2 ) > t2 || dot( c3, plane3 ) > t3)
+					if (tinybvh_dot( c0, plane0 ) > t0 || tinybvh_dot( c1, plane1 ) > t1 ||
+						tinybvh_dot( c2, plane2 ) > t2 || tinybvh_dot( c3, plane3 ) > t3)
 						visitLeft = false;
 					else
 					{
@@ -4233,7 +4242,8 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 					bvhvec3 c1( minmax[sign1x], minmax[sign1y], minmax[sign1z] );
 					bvhvec3 c2( minmax[sign2x], minmax[sign2y], minmax[sign2z] );
 					bvhvec3 c3( minmax[sign3x], minmax[sign3y], minmax[sign3z] );
-					if (dot( c0, plane0 ) > t0 || dot( c1, plane1 ) > t1 || dot( c2, plane2 ) > t2 || dot( c3, plane3 ) > t3)
+					if (tinybvh_dot( c0, plane0 ) > t0 || tinybvh_dot( c1, plane1 ) > t1 ||
+						tinybvh_dot( c2, plane2 ) > t2 || tinybvh_dot( c3, plane3 ) > t3)
 						visitRight = false;
 					else
 					{
@@ -4591,20 +4601,20 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 			const bvhvec3 edge2 = bvhvec3( blasTris[triAddr + 0] );
 			const bvhvec3 edge1 = bvhvec3( blasTris[triAddr + 1] );
 			const bvhvec3 v0 = blasTris[triAddr + 2];
-			const bvhvec3 h = cross( ray.D, edge2 );
-			const float a = dot( edge1, h );
+			const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+			const float a = tinybvh_dot( edge1, h );
 			if (fabs( a ) > 0.0000001f)
 			{
 				const float f = 1 / a;
 				const bvhvec3 s = ray.O - v0;
-				const float u = f * dot( s, h );
+				const float u = f * tinybvh_dot( s, h );
 				if (u >= 0 && u <= 1)
 				{
-					const bvhvec3 q = cross( s, edge1 );
-					const float v = f * dot( ray.D, q );
+					const bvhvec3 q = tinybvh_cross( s, edge1 );
+					const float v = f * tinybvh_dot( ray.D, q );
 					if (v >= 0 && u + v <= 1)
 					{
-						const float d = f * dot( edge2, q );
+						const float d = f * tinybvh_dot( edge2, q );
 						if (d > 0.0f && d < tmax)
 						{
 							triangleuv = bvhvec2( u, v ), tmax = d;
@@ -5210,17 +5220,17 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 				const uint32_t tidx = triIdx[node->firstTri + i], vertIdx = tidx * 3;
 				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
 				const bvhvec3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
-				const bvhvec3 h = cross( ray.D, edge2 );
-				const float a = dot( edge1, h );
+				const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+				const float a = tinybvh_dot( edge1, h );
 				if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
 				const float f = 1 / a;
 				const bvhvec3 s = ray.O - bvhvec3( verts[vertIdx] );
-				const float u = f * dot( s, h );
+				const float u = f * tinybvh_dot( s, h );
 				if (u < 0 || u > 1) continue;
-				const bvhvec3 q = cross( s, edge1 );
-				const float v = f * dot( ray.D, q );
+				const bvhvec3 q = tinybvh_cross( s, edge1 );
+				const float v = f * tinybvh_dot( ray.D, q );
 				if (v < 0 || u + v > 1) continue;
-				const float t = f * dot( edge2, q );
+				const float t = f * tinybvh_dot( edge2, q );
 				if (t < 0 || t > ray.hit.t) continue;
 				ray.hit.t = t, ray.hit.u = u, ray.hit.v = v, ray.hit.prim = tidx;
 			}
@@ -5846,17 +5856,17 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 				const uint64_t vertIdx = idx * 3;
 				const bvhdbl3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
 				const bvhdbl3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
-				const bvhdbl3 h = cross( ray.D, edge2 );
-				const double a = dot( edge1, h );
+				const bvhdbl3 h = tinybvh_cross( ray.D, edge2 );
+				const double a = tinybvh_dot( edge1, h );
 				if (fabs( a ) < 0.0000001) continue; // ray parallel to triangle
 				const double f = 1 / a;
 				const bvhdbl3 s = ray.O - bvhdbl3( verts[vertIdx] );
-				const double u = f * dot( s, h );
+				const double u = f * tinybvh_dot( s, h );
 				if (u < 0 || u > 1) continue;
-				const bvhdbl3 q = cross( s, edge1 );
-				const double v = f * dot( ray.D, q );
+				const bvhdbl3 q = tinybvh_cross( s, edge1 );
+				const double v = f * tinybvh_dot( ray.D, q );
 				if (v < 0 || u + v > 1) continue;
-				const double t = f * dot( edge2, q );
+				const double t = f * tinybvh_dot( edge2, q );
 				if (t > 0 && t < ray.hit.t)
 				{
 					// register a hit: ray is shortened to t
@@ -5955,17 +5965,17 @@ bool BVH_Double::IsOccluded( const RayEx& ray ) const
 				const uint64_t vertIdx = idx * 3;
 				const bvhdbl3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
 				const bvhdbl3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
-				const bvhdbl3 h = cross( ray.D, edge2 );
-				const double a = dot( edge1, h );
+				const bvhdbl3 h = tinybvh_cross( ray.D, edge2 );
+				const double a = tinybvh_dot( edge1, h );
 				if (fabs( a ) < 0.0000001) continue; // ray parallel to triangle
 				const double f = 1 / a;
 				const bvhdbl3 s = ray.O - bvhdbl3( verts[vertIdx] );
-				const double u = f * dot( s, h );
+				const double u = f * tinybvh_dot( s, h );
 				if (u < 0 || u > 1) continue;
-				const bvhdbl3 q = cross( s, edge1 );
-				const double v = f * dot( ray.D, q );
+				const bvhdbl3 q = tinybvh_cross( s, edge1 );
+				const double v = f * tinybvh_dot( ray.D, q );
 				if (v < 0 || u + v > 1) continue;
-				const double t = f * dot( edge2, q );
+				const double t = f * tinybvh_dot( edge2, q );
 				if (t > 0 && t < ray.hit.t) return true;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -6195,17 +6205,17 @@ void BVHBase::IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t 
 	const bvhvec4 vert0 = verts[vertIdx];
 	const bvhvec3 edge1 = verts[vertIdx + 1] - vert0;
 	const bvhvec3 edge2 = verts[vertIdx + 2] - vert0;
-	const bvhvec3 h = cross( ray.D, edge2 );
-	const float a = dot( edge1, h );
+	const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+	const float a = tinybvh_dot( edge1, h );
 	if (fabs( a ) < 0.0000001f) return; // ray parallel to triangle
 	const float f = 1 / a;
 	const bvhvec3 s = ray.O - bvhvec3( vert0 );
-	const float u = f * dot( s, h );
+	const float u = f * tinybvh_dot( s, h );
 	if (u < 0 || u > 1) return;
-	const bvhvec3 q = cross( s, edge1 );
-	const float v = f * dot( ray.D, q );
+	const bvhvec3 q = tinybvh_cross( s, edge1 );
+	const float v = f * tinybvh_dot( ray.D, q );
 	if (v < 0 || u + v > 1) return;
-	const float t = f * dot( edge2, q );
+	const float t = f * tinybvh_dot( edge2, q );
 	if (t > 0 && t < ray.hit.t)
 	{
 		// register a hit: ray is shortened to t
@@ -6226,17 +6236,17 @@ void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const ui
 	const bvhvec4 vert0 = verts[i0];
 	const bvhvec3 edge1 = verts[i1] - vert0;
 	const bvhvec3 edge2 = verts[i2] - vert0;
-	const bvhvec3 h = cross( ray.D, edge2 );
-	const float a = dot( edge1, h );
+	const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+	const float a = tinybvh_dot( edge1, h );
 	if (fabs( a ) < 0.0000001f) return; // ray parallel to triangle
 	const float f = 1 / a;
 	const bvhvec3 s = ray.O - bvhvec3( vert0 );
-	const float u = f * dot( s, h );
+	const float u = f * tinybvh_dot( s, h );
 	if (u < 0 || u > 1) return;
-	const bvhvec3 q = cross( s, edge1 );
-	const float v = f * dot( ray.D, q );
+	const bvhvec3 q = tinybvh_cross( s, edge1 );
+	const float v = f * tinybvh_dot( ray.D, q );
 	if (v < 0 || u + v > 1) return;
-	const float t = f * dot( edge2, q );
+	const float t = f * tinybvh_dot( edge2, q );
 	if (t > 0 && t < ray.hit.t)
 	{
 		// register a hit: ray is shortened to t
@@ -6257,17 +6267,17 @@ bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint
 	const bvhvec4 vert0 = verts[vertIdx];
 	const bvhvec3 edge1 = verts[vertIdx + 1] - vert0;
 	const bvhvec3 edge2 = verts[vertIdx + 2] - vert0;
-	const bvhvec3 h = cross( ray.D, edge2 );
-	const float a = dot( edge1, h );
+	const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+	const float a = tinybvh_dot( edge1, h );
 	if (fabs( a ) < 0.0000001f) return false; // ray parallel to triangle
 	const float f = 1 / a;
 	const bvhvec3 s = ray.O - bvhvec3( vert0 );
-	const float u = f * dot( s, h );
+	const float u = f * tinybvh_dot( s, h );
 	if (u < 0 || u > 1) return false;
-	const bvhvec3 q = cross( s, edge1 );
-	const float v = f * dot( ray.D, q );
+	const bvhvec3 q = tinybvh_cross( s, edge1 );
+	const float v = f * tinybvh_dot( ray.D, q );
 	if (v < 0 || u + v > 1) return false;
-	const float t = f * dot( edge2, q );
+	const float t = f * tinybvh_dot( edge2, q );
 	return t > 0 && t < ray.hit.t;
 }
 
@@ -6278,17 +6288,17 @@ bool BVHBase::IndexedTriOccludes( const Ray& ray, const bvhvec4slice& verts, con
 	const bvhvec4 vert0 = verts[i0];
 	const bvhvec3 edge1 = verts[i1] - vert0;
 	const bvhvec3 edge2 = verts[i2] - vert0;
-	const bvhvec3 h = cross( ray.D, edge2 );
-	const float a = dot( edge1, h );
+	const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+	const float a = tinybvh_dot( edge1, h );
 	if (fabs( a ) < 0.0000001f) return false; // ray parallel to triangle
 	const float f = 1 / a;
 	const bvhvec3 s = ray.O - bvhvec3( vert0 );
-	const float u = f * dot( s, h );
+	const float u = f * tinybvh_dot( s, h );
 	if (u < 0 || u > 1) return false;
-	const bvhvec3 q = cross( s, edge1 );
-	const float v = f * dot( ray.D, q );
+	const bvhvec3 q = tinybvh_cross( s, edge1 );
+	const float v = f * tinybvh_dot( ray.D, q );
 	if (v < 0 || u + v > 1) return false;
-	const float t = f * dot( edge2, q );
+	const float t = f * tinybvh_dot( edge2, q );
 	return t > 0 && t < ray.hit.t;
 }
 
@@ -6312,8 +6322,8 @@ float BVHBase::IntersectAABB( const Ray& ray, const bvhvec3& aabbMin, const bvhv
 void BVHBase::PrecomputeTriangle( const bvhvec4slice& vert, uint32_t triIndex, float* T )
 {
 	bvhvec3 v0 = vert[triIndex], v1 = vert[triIndex + 1], v2 = vert[triIndex + 2];
-	bvhvec3 e1 = v1 - v0, e2 = v2 - v0, N = cross( e1, e2 );
-	float x1, x2, n = dot( v0, N ), rN;
+	bvhvec3 e1 = v1 - v0, e2 = v2 - v0, N = tinybvh_cross( e1, e2 );
+	float x1, x2, n = tinybvh_dot( v0, N ), rN;
 	if (fabs( N[0] ) > fabs( N[1] ) && fabs( N[0] ) > fabs( N[2] ))
 	{
 		x1 = v1.y * v0.z - v1.z * v0.y, x2 = v2.y * v0.z - v2.z * v0.y, rN = 1.0f / N.x;
