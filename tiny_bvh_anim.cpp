@@ -7,8 +7,6 @@
 #define GRIDSIZE 45
 #define INSTCOUNT (GRIDSIZE * GRIDSIZE * GRIDSIZE)
 
-// #define DOUBLE_PRECISION_TEST
-
 #define TINYBVH_IMPLEMENTATION
 #include "tiny_bvh.h"
 #include <fstream>
@@ -29,17 +27,8 @@ static unsigned threadCount = std::thread::hardware_concurrency();
 static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
 static bvhvec3 view = normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 
-// double-precision test
-bvhdbl3* trianglesEx = 0;
-bvhdbl3* bunnyEx = 0;
-BLASInstanceEx instEx[INSTCOUNT + 1];
-BVH_Double bvhEx, blasEx, tlasEx;
-BVH_Double* bvhExList[] = { &bvhEx, &blasEx };
-
 void Init()
 {
-	uint32_t test = sizeof( tinybvh::Ray );
-
 	// load raw vertex data for Crytek's Sponza
 	std::fstream s{ "./testdata/cryteksponza.bin", s.binary | s.in };
 	s.read( (char*)&verts, 4 );
@@ -66,26 +55,6 @@ void Init()
 		inst[b].transform[11] = (float)z * 0.2f - GRIDSIZE * 0.1f - 1;
 	}
 	tlas.Build( inst, 1 + INSTCOUNT, bvhList, 2 );
-
-	// convert data to doubles
-	trianglesEx = (bvhdbl3*)malloc64( verts * sizeof( bvhdbl3 ) );
-	for (int i = 0; i < verts; i++) trianglesEx[i] = bvhdbl3( triangles[i] );
-	bunnyEx = (bvhdbl3*)malloc64( bverts * sizeof( bvhdbl3 ) );
-	for (int i = 0; i < bverts; i++) bunnyEx[i] = bvhdbl3( bunny[i] );
-
-	// build double-precision TLAS
-	bvhEx.Build( trianglesEx, verts / 3 );
-	blasEx.Build( bunnyEx, bverts / 3 );
-	instEx[0] = BLASInstanceEx( 0 );
-	for (int b = 0, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
-	{
-		instEx[b] = BLASInstanceEx( 1 /* bunny */ );
-		instEx[b].transform[0] = instEx[b].transform[5] = instEx[b].transform[10] = 0.025; // scale
-		instEx[b].transform[3] = (double)x * 0.3 - GRIDSIZE * 0.15;
-		instEx[b].transform[7] = (double)y * 0.3 - GRIDSIZE * 0.15 + 5;
-		instEx[b].transform[11] = (double)z * 0.3 - GRIDSIZE * 0.15;
-	}
-	tlasEx.Build( instEx, 1 + INSTCOUNT, bvhExList, 2 );
 }
 
 bool UpdateCamera( float delta_time_s, fenster& f )
@@ -123,20 +92,11 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 			// setup primary ray
 			const float u = (float)pixel_x / SCRWIDTH, v = (float)pixel_y / SCRHEIGHT;
 			const bvhvec3 D = normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
-		#ifdef DOUBLE_PRECISION_TEST
-			RayEx ray( eye, D, 1e30f );
-			tlasEx.Intersect( ray );
-		#else
 			Ray ray( eye, D, 1e30f );
 			tlas.Intersect( ray );
-		#endif
 			if (ray.hit.t < 10000)
 			{
 				uint32_t pixel_x = tx * 4 + x, pixel_y = ty * 4 + y;
-			#ifdef DOUBLE_PRECISION_TEST
-				uint64_t primIdx = ray.hit.prim;
-				uint64_t instIdx = ray.hit.inst;
-			#else
 			#if INST_IDX_BITS == 32
 				// instance and primitive index are stored in separate fields
 				uint32_t primIdx = ray.hit.prim;
@@ -145,7 +105,6 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				// instance and primitive index are stored together for compactness
 				uint32_t primIdx = ray.hit.prim & PRIM_IDX_MASK;
 				uint32_t instIdx = (uint32_t)ray.hit.prim >> INST_IDX_SHFT;
-			#endif
 			#endif
 				BVH* blas = (BVH*)tlas.blasList[inst[instIdx].blasIdx];
 				bvhvec4slice& instTris = blas->verts;
@@ -169,30 +128,12 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	// clear the screen with a debug-friendly color
 	for (int i = 0; i < SCRWIDTH * SCRHEIGHT; i++) buf[i] = 0xaaaaff;
 
-	// update TLAS
-	// tlas.Build( inst, 3, bvhList, 2 );			// regular
-	// tlasEx.Build( instEx, 3, bvhExList, 2 );	// double-precision
-
 	// render tiles
 	tileIdx = threadCount;
-#ifdef _DEBUG
-	for (uint32_t i = 0; i < threadCount; i++) TraceWorkerThread( buf, i );
-#else
 	std::vector<std::thread> threads;
 	for (uint32_t i = 0; i < threadCount; i++)
 		threads.emplace_back( &TraceWorkerThread, buf, i );
 	for (auto& thread : threads) thread.join();
-#endif
-
-	// change instance transforms
-	static float a[3] = { 0 };
-	for (int i = 1; i < 3; i++)
-	{
-		inst[i].transform[7] /* y-pos */ = sinf( a[i] ) * 3.0f + 3.5f;
-		instEx[i].transform[7] = sin( (double)a[i] ) * 3 + 3.5;
-		a[i] += 0.1f + (0.01f * (float)i);
-		if (a[i] > 6.2832f) a[i] -= 6.2832f;
-	}
 }
 
 void Shutdown() { /* nothing here. */ }
