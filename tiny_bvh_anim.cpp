@@ -4,6 +4,9 @@
 #define TILESIZE 20
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
+#define GRIDSIZE 45
+#define INSTCOUNT (GRIDSIZE * GRIDSIZE * GRIDSIZE)
+
 // #define DOUBLE_PRECISION_TEST
 
 #define TINYBVH_IMPLEMENTATION
@@ -13,9 +16,9 @@
 
 using namespace tinybvh;
 
-BVH bvh, blas, tlas;
-BVHBase* bvhList[] = { &bvh, &blas };
-BLASInstance inst[3];
+BVH sponza, obj, tlas;
+BVHBase* bvhList[] = { &sponza, &obj };
+BLASInstance inst[INSTCOUNT + 1 /* one extra for sponza */];
 int frameIdx = 0, verts = 0, bverts = 0;
 bvhvec4* triangles = 0;
 bvhvec4* bunny = 0;
@@ -29,36 +32,40 @@ static bvhvec3 view = normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 // double-precision test
 bvhdbl3* trianglesEx = 0;
 bvhdbl3* bunnyEx = 0;
-BLASInstanceEx instEx[3];
+BLASInstanceEx instEx[INSTCOUNT + 1];
 BVH_Double bvhEx, blasEx, tlasEx;
 BVH_Double* bvhExList[] = { &bvhEx, &blasEx };
 
 void Init()
 {
+	uint32_t test = sizeof( tinybvh::Ray );
+
 	// load raw vertex data for Crytek's Sponza
 	std::fstream s{ "./testdata/cryteksponza.bin", s.binary | s.in };
 	s.read( (char*)&verts, 4 );
 	printf( "Loading triangle data (%i tris).\n", verts );
 	verts *= 3, triangles = (bvhvec4*)malloc64( verts * 16 );
 	s.read( (char*)triangles, verts * 16 );
-	bvh.Build( triangles, verts / 3 );
+	sponza.Build( triangles, verts / 3 );
 
 	// load bunny
 	std::fstream b{ "./testdata/bunny.bin", s.binary | s.in };
 	b.read( (char*)&bverts, 4 );
 	bverts *= 3, bunny = (bvhvec4*)malloc64( bverts * 16 );
 	b.read( (char*)bunny, verts * 16 );
-	blas.Build( bunny, bverts / 3 );
+	obj.Build( bunny, bverts / 3 );
 
 	// build a TLAS
-	inst[0] = BLASInstance( 0 ); // static geometry
-	inst[1] = BLASInstance( 1 );
-	inst[1].transform[0] = inst[1].transform[5] = inst[1].transform[10] = 0.5f; // scale
-	inst[1].transform[3 /* i.e., x translation */] = 4;
-	inst[2] = BLASInstance( 1 );
-	inst[2].transform[0] = inst[2].transform[5] = inst[2].transform[10] = 0.5f; // scale
-	inst[2].transform[3 /* i.e., x translation */] = -4;
-	// tlas.Build( inst, 3 ); // postponed to ::Tick, as we'll want to do this each frame.
+	inst[0] = BLASInstance( 0 /* sponza */ );
+	for (int b = 0, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
+	{
+		inst[b] = BLASInstance( 1 /* bunny */ );
+		inst[b].transform[0] = inst[b].transform[5] = inst[b].transform[10] = 0.02f; // scale
+		inst[b].transform[3] = (float)x * 0.2f - GRIDSIZE * 0.1f;
+		inst[b].transform[7] = (float)y * 0.2f - GRIDSIZE * 0.1f + 7;
+		inst[b].transform[11] = (float)z * 0.2f - GRIDSIZE * 0.1f - 1;
+	}
+	tlas.Build( inst, 1 + INSTCOUNT, bvhList, 2 );
 
 	// convert data to doubles
 	trianglesEx = (bvhdbl3*)malloc64( verts * sizeof( bvhdbl3 ) );
@@ -70,11 +77,15 @@ void Init()
 	bvhEx.Build( trianglesEx, verts / 3 );
 	blasEx.Build( bunnyEx, bverts / 3 );
 	instEx[0] = BLASInstanceEx( 0 );
-	instEx[1] = instEx[2] = BLASInstanceEx( 1 );
-	instEx[1].transform[0] = instEx[1].transform[5] = instEx[1].transform[10] = 0.5; // scale
-	instEx[2].transform[0] = instEx[2].transform[5] = instEx[2].transform[10] = 0.5; // scale
-	instEx[1].transform[3] = 4, instEx[2].transform[3] = -4;
-	// tlasEx.Build( instEx, 3 ); // postponed to ::Tick, as we'll want to do this each frame.
+	for (int b = 0, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
+	{
+		instEx[b] = BLASInstanceEx( 1 /* bunny */ );
+		instEx[b].transform[0] = instEx[b].transform[5] = instEx[b].transform[10] = 0.025; // scale
+		instEx[b].transform[3] = (double)x * 0.3 - GRIDSIZE * 0.15;
+		instEx[b].transform[7] = (double)y * 0.3 - GRIDSIZE * 0.15 + 5;
+		instEx[b].transform[11] = (double)z * 0.3 - GRIDSIZE * 0.15;
+	}
+	tlasEx.Build( instEx, 1 + INSTCOUNT, bvhExList, 2 );
 }
 
 bool UpdateCamera( float delta_time_s, fenster& f )
@@ -123,11 +134,18 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 			{
 				uint32_t pixel_x = tx * 4 + x, pixel_y = ty * 4 + y;
 			#ifdef DOUBLE_PRECISION_TEST
-				uint64_t primIdx = ray.hit.prim & PRIM_IDX_MASK_DBL;
-				uint64_t instIdx = ray.hit.prim >> 32UL;
+				uint64_t primIdx = ray.hit.prim;
+				uint64_t instIdx = ray.hit.inst;
 			#else
+			#if TLAS_BITS == 32
+				// instance and primitive index are stored in separate fields
+				uint32_t primIdx = ray.hit.prim;
+				uint32_t instIdx = ray.hit.inst;
+			#else
+				// instance and primitive index are stored together for compactness
 				uint32_t primIdx = ray.hit.prim & PRIM_IDX_MASK;
 				uint32_t instIdx = (uint32_t)ray.hit.prim >> INST_IDX_SHFT;
+			#endif
 			#endif
 				BVH* blas = (BVH*)tlas.blasList[inst[instIdx].blasIdx];
 				bvhvec4slice& instTris = blas->verts;
@@ -137,10 +155,10 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				bvhvec3 N = normalize( cross( v1 - v0, v2 - v0 ) ); // TODO: Transform to world space
 				int c = (int)(255.9f * fabs( dot( N, L ) ));
 				buf[pixelIdx] = c + (c << 8) + (c << 16);
-			}
 		}
-		tile = tileIdx++;
 	}
+		tile = tileIdx++;
+}
 }
 
 void Tick( float delta_time_s, fenster& f, uint32_t* buf )
@@ -152,8 +170,8 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	for (int i = 0; i < SCRWIDTH * SCRHEIGHT; i++) buf[i] = 0xaaaaff;
 
 	// update TLAS
-	tlas.Build( inst, 3, bvhList, 2 );			// regular
-	tlasEx.Build( instEx, 3, bvhExList, 2 );	// double-precision
+	// tlas.Build( inst, 3, bvhList, 2 );			// regular
+	// tlasEx.Build( instEx, 3, bvhExList, 2 );	// double-precision
 
 	// render tiles
 	tileIdx = threadCount;
