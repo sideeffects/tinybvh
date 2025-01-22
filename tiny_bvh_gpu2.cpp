@@ -10,7 +10,7 @@
 
 #if SCENE == 1
 
-// At GRIDSIZE == 15, make sure to set TLAS_BITS to 12 in tiny_bvh.h.
+// At GRIDSIZE == 15, make sure to set INST_IDX_BITS to 12 in tiny_bvh.h.
 #define GRIDSIZE 15
 #define DRAGONS (GRIDSIZE * GRIDSIZE * GRIDSIZE)
 // #define AUTOCAM

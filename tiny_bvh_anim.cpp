@@ -137,7 +137,7 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				uint64_t primIdx = ray.hit.prim;
 				uint64_t instIdx = ray.hit.inst;
 			#else
-			#if TLAS_BITS == 32
+			#if INST_IDX_BITS == 32
 				// instance and primitive index are stored in separate fields
 				uint32_t primIdx = ray.hit.prim;
 				uint32_t instIdx = ray.hit.inst;
@@ -155,10 +155,10 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				bvhvec3 N = normalize( cross( v1 - v0, v2 - v0 ) ); // TODO: Transform to world space
 				int c = (int)(255.9f * fabs( dot( N, L ) ));
 				buf[pixelIdx] = c + (c << 8) + (c << 16);
+			}
 		}
-	}
 		tile = tileIdx++;
-}
+	}
 }
 
 void Tick( float delta_time_s, fenster& f, uint32_t* buf )
