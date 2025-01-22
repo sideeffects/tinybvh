@@ -50,6 +50,14 @@ THE SOFTWARE.
 //	 #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
 //   #include <tiny_bvh.h>
 
+// tinybvh can be further configured using #defines, to be specified before the #include:
+// #define BVHBINS 8        - the number of bins to use in regular BVH construction. Default is 8.
+// #define HQBVHBINS 32     - the number of bins to use in SBVH construction. Default is 8.
+// #define INST_IDX_BITS 10 - the number of bits to use for the instance index. Default is 32,
+//                            which stores the bits in a separate field in tinybvh::Intersection.
+// #define C_INT 1          - the estimated cost of a primitive intersection test. Default is 1.
+// #define C_TRAV 1         - the estimated cost of a traversal step. Default is 1.
+
 // See tiny_bvh_test.cpp for basic usage. In short:
 // instantiate a BVH: tinybvh::BVH bvh;
 // build it: bvh.Build( (tinybvh::bvhvec4*)triangleData, TRIANGLE_COUNT );
@@ -81,27 +89,37 @@ THE SOFTWARE.
 // #define PARANOID
 
 // Binned BVH building: bin count.
+#ifndef BVHBINS
 #define BVHBINS 8
-#define HQBVHBINS 32
+#endif
+#ifndef HQBVHBINS
+#define HQBVHBINS 8
+#endif
 #define AVXBINS 8 // must stay at 8.
 
 // TLAS setting
 // Note: Instance index is encoded in the top bits of the prim idx field.
-// Max number of instances in TLAS: 2 ^ TLAS_BITS
-// Max number of primitives per BLAS: 2 ^ (32 - TLAS_BITS)
-#define TLAS_BITS 32 // max 1024 instances of 4M triangles each. Set to 32 to store index in separate field.
+// Max number of instances in TLAS: 2 ^ INST_IDX_BITS
+// Max number of primitives per BLAS: 2 ^ (32 - INST_IDX_BITS)
+#ifndef INST_IDX_BITS
+#define INST_IDX_BITS 32 // Use 4..~12 to use prim field bits for instance id, or set to 32 to store index in separate field.
+#endif
 // Derived; for convenience:
-#define INST_IDX_SHFT (32 - TLAS_BITS)
-#if TLAS_BITS == 32
+#define INST_IDX_SHFT (32 - INST_IDX_BITS)
+#if INST_IDX_BITS == 32
 #define PRIM_IDX_MASK 0xffffffff // instance index stored separately.
 #else
 #define PRIM_IDX_MASK ((1 << INST_IDX_SHFT) - 1) // instance index stored in top bits of hit.prim.
 #endif
 
 // SAH BVH building: Heuristic parameters
-// CPU builds: C_INT = 1, C_TRAV = 1 seems optimal.
+// CPU traversal: C_INT = 1, C_TRAV = 1 seems optimal.
+#ifndef C_INT
 #define C_INT	1
+#endif
+#ifndef C_TRAV
 #define C_TRAV	1
+#endif
 
 // SBVH: "Unsplitting"
 #define SBVH_UNSPLITTING
@@ -464,8 +482,8 @@ struct Intersection
 	// squeezing this in the 'prim' field in some way.
 	// Using this data and the original triangle data, all other info for
 	// shading (such as normal, texture color etc.) can be reconstructed.
-#if TLAS_BITS == 32
-	uint32_t inst;	// instance index. Stored in top bits of prim if TLAS_BITS != 32.
+#if INST_IDX_BITS == 32
+	uint32_t inst;	// instance index. Stored in top bits of prim if INST_IDX_BITS != 32.
 #endif
 	float t, u, v;	// distance along ray & barycentric coordinates of the intersection
 	uint32_t prim;	// primitive index
@@ -486,7 +504,7 @@ struct Ray
 	ALIGNED( 16 ) bvhvec3 O; uint32_t dummy1;
 	ALIGNED( 16 ) bvhvec3 D; uint32_t instIdx = 0;
 	ALIGNED( 16 ) bvhvec3 rD;
-#if TLAS_BITS != 32
+#if INST_IDX_BITS != 32
 	uint32_t dummy2; // align to 16 bytes if field 'hit' is 16 bytes; otherwise don't.
 #endif
 	Intersection hit;
@@ -2053,7 +2071,7 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
 				tmp.D = inst.TransformVector( ray.D, inst.invTransform );
 				tmp.rD = tinybvh_safercp( tmp.D );
-				tmp.instIdx = instIdx << (32 - TLAS_BITS);
+				tmp.instIdx = instIdx << (32 - INST_IDX_BITS);
 				tmp.hit = ray.hit;
 				// 2. Traverse BLAS with the transformed ray
 				cost += blas->Intersect( tmp );
@@ -2224,7 +2242,7 @@ void BVH::Intersect256Rays( Ray* packet ) const
 					const float t = f * dot( edge2, q );
 					if (t <= 0 || t >= ray.hit.t) continue;
 					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
-				#if TLAS_BITS == 32
+				#if INST_IDX_BITS == 32
 					ray.hit.prim = idx;
 					ray.hit.inst = ray.instIdx;
 				#else
@@ -4625,7 +4643,7 @@ inline void IntersectCompactTri( Ray& r, __m128& t4, const float* T )
 	const float u = T[0] * wr.x + T[1] * wr.y + T[2] * wr.z + T[3];
 	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 	const bool hit = u >= 0 && v >= 0 && u + v < 1;
-#if TLAS_BITS == 32
+#if INST_IDX_BITS == 32
 	if (hit) r.hit = { 0, ta, u, v, *(uint32_t*)&T[15] }, t4 = _mm_set1_ps( ta );
 #else
 	if (hit) r.hit = { ta, u, v, *(uint32_t*)&T[15] }, t4 = _mm_set1_ps( ta );
@@ -5274,7 +5292,7 @@ inline void IntersectCompactTri( Ray& r, float32x4_t& t4, const float* T )
 	const float u = T[0] * wr.x + T[1] * wr.y + T[2] * wr.z + T[3];
 	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 	const bool hit = u >= 0 && v >= 0 && u + v < 1;
-#if TLAS_BITS == 32
+#if INST_IDX_BITS == 32
 	if (hit) r.hit = { 0, ta, u, v, *(uint32_t*)&T[15] }, t4 = vdupq_n_f32( ta );
 #else
 	if (hit) r.hit = { ta, u, v, *(uint32_t*)&T[15] }, t4 = vdupq_n_f32( ta );
@@ -6192,7 +6210,7 @@ void BVHBase::IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t 
 	{
 		// register a hit: ray is shortened to t
 		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
-	#if TLAS_BITS == 32
+	#if INST_IDX_BITS == 32
 		ray.hit.prim = idx, ray.hit.inst = ray.instIdx;
 	#else
 		ray.hit.prim = idx + ray.instIdx;
@@ -6223,7 +6241,7 @@ void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const ui
 	{
 		// register a hit: ray is shortened to t
 		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
-	#if TLAS_BITS == 32
+	#if INST_IDX_BITS == 32
 		ray.hit.prim = idx, ray.hit.inst = ray.instIdx;
 	#else
 		ray.hit.prim = idx + ray.instIdx;
