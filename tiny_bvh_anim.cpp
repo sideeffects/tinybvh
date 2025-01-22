@@ -25,7 +25,7 @@ static unsigned threadCount = std::thread::hardware_concurrency();
 
 // setup view pyramid for a pinhole camera
 static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
-static bvhvec3 view = normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
+static bvhvec3 view = tinybvh_normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 
 void Init()
 {
@@ -59,17 +59,17 @@ void Init()
 
 bool UpdateCamera( float delta_time_s, fenster& f )
 {
-	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) ), up = 0.8f * cross( view, right );
+	bvhvec3 right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), view ) ), up = 0.8f * tinybvh_cross( view, right );
 	float moved = 0, spd = 10.0f * delta_time_s;
 	if (f.keys['A'] || f.keys['D']) eye += right * (f.keys['D'] ? spd : -spd), moved = 1;
 	if (f.keys['W'] || f.keys['S']) eye += view * (f.keys['W'] ? spd : -spd), moved = 1;
 	if (f.keys['R'] || f.keys['F']) eye += up * 2.0f * (f.keys['R'] ? spd : -spd), moved = 1;
-	if (f.keys[20]) view = normalize( view + right * -0.1f * spd ), moved = 1;
-	if (f.keys[19]) view = normalize( view + right * 0.1f * spd ), moved = 1;
-	if (f.keys[17]) view = normalize( view + up * -0.1f * spd ), moved = 1;
-	if (f.keys[18]) view = normalize( view + up * 0.1f * spd ), moved = 1;
+	if (f.keys[20]) view = tinybvh_normalize( view + right * -0.1f * spd ), moved = 1;
+	if (f.keys[19]) view = tinybvh_normalize( view + right * 0.1f * spd ), moved = 1;
+	if (f.keys[17]) view = tinybvh_normalize( view + up * -0.1f * spd ), moved = 1;
+	if (f.keys[18]) view = tinybvh_normalize( view + up * 0.1f * spd ), moved = 1;
 	// recalculate right, up
-	right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) ), up = 0.8f * cross( view, right );
+	right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), view ) ), up = 0.8f * tinybvh_cross( view, right );
 	bvhvec3 C = eye + 1.2f * view;
 	p1 = C - right + up, p2 = C + right + up, p3 = C - right - up;
 	return moved > 0;
@@ -84,14 +84,14 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 	{
 		const int tx = tile % xtiles, ty = tile / xtiles;
 		unsigned seed = (tile + 17) * 171717 + frameIdx * 1023;
-		const bvhvec3 L = normalize( bvhvec3( 1, 2, 3 ) );
+		const bvhvec3 L = tinybvh_normalize( bvhvec3( 1, 2, 3 ) );
 		for (int y = 0; y < TILESIZE; y++) for (int x = 0; x < TILESIZE; x++)
 		{
 			const int pixel_x = tx * TILESIZE + x, pixel_y = ty * TILESIZE + y;
 			const int pixelIdx = pixel_x + pixel_y * SCRWIDTH;
 			// setup primary ray
 			const float u = (float)pixel_x / SCRWIDTH, v = (float)pixel_y / SCRHEIGHT;
-			const bvhvec3 D = normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
+			const bvhvec3 D = tinybvh_normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
 			Ray ray( eye, D, 1e30f );
 			tlas.Intersect( ray );
 			if (ray.hit.t < 10000)
@@ -111,8 +111,8 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				bvhvec3 v0 = instTris[primIdx * 3];
 				bvhvec3 v1 = instTris[primIdx * 3 + 1];
 				bvhvec3 v2 = instTris[primIdx * 3 + 2];
-				bvhvec3 N = normalize( cross( v1 - v0, v2 - v0 ) ); // TODO: Transform to world space
-				int c = (int)(255.9f * fabs( dot( N, L ) ));
+				bvhvec3 N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) ); // TODO: Transform to world space
+				int c = (int)(255.9f * fabs( tinybvh_dot( N, L ) ));
 				buf[pixelIdx] = c + (c << 8) + (c << 16);
 			}
 		}

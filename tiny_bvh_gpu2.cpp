@@ -107,7 +107,7 @@ static void splineCam( float t )
 	rd.eye = 0.5f * (a + (b * t) + (c * t * t) + ((3 * Qp - 3 * Rp + Sp - Pp) * t * t * t));
 	a = 2 * Qt, b = Rt - Pt, c = 2 * Pt - 5 * Qt + 4 * Rt - St;
 	bvhvec3 target = 0.5f * (a + (b * t) + (c * t * t) + ((3 * Qt - 3 * Rt + St - Pt) * t * t * t));
-	rd.view = normalize( target - bvhvec3( rd.eye ) );
+	rd.view = tinybvh_normalize( target - bvhvec3( rd.eye ) );
 }
 static float uniform_rand() { return (float)rand() / (float)RAND_MAX; }
 
@@ -204,7 +204,7 @@ void Init()
 		float t = (float)d * 0.17f + 1.0f;
 		float size = 0.1f + 0.075f * uniform_rand();
 		bvhvec3 pos = splinePos( t );
-		bvhvec3 D = -size * normalize( splinePos( t + 0.01f ) - pos );
+		bvhvec3 D = -size * tinybvh_normalize( splinePos( t + 0.01f ) - pos );
 		bvhvec3 U( 0, size, 0 );
 		bvhvec3 N( -D.z, 0, D.x );
 		pos += N * 20.0f * (uniform_rand() - 0.5f);
@@ -258,7 +258,8 @@ void Init()
 // Keyboard handling
 bool UpdateCamera( float delta_time_s, fenster& f )
 {
-	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) ), up = 0.8f * cross( rd.view, right );
+	bvhvec3 right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), rd.view ) );
+	bvhvec3 up = 0.8f * tinybvh_cross( rd.view, right );
 #ifdef AUTOCAM
 	// playback camera spline
 	static float ct = 0, moved = 1;
@@ -283,13 +284,14 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 	if (f.keys['A'] || f.keys['D']) rd.eye += right * (f.keys['D'] ? spd : -spd), moved = 1;
 	if (f.keys['W'] || f.keys['S']) rd.eye += rd.view * (f.keys['W'] ? spd : -spd), moved = 1;
 	if (f.keys['R'] || f.keys['F']) rd.eye += up * 2.0f * (f.keys['R'] ? spd : -spd), moved = 1;
-	if (f.keys[20]) rd.view = normalize( rd.view + right * -0.1f * spd ), moved = 1;
-	if (f.keys[19]) rd.view = normalize( rd.view + right * 0.1f * spd ), moved = 1;
-	if (f.keys[17]) rd.view = normalize( rd.view + up * -0.1f * spd ), moved = 1;
-	if (f.keys[18]) rd.view = normalize( rd.view + up * 0.1f * spd ), moved = 1;
+	if (f.keys[20]) rd.view = tinybvh_normalize( rd.view + right * -0.1f * spd ), moved = 1;
+	if (f.keys[19]) rd.view = tinybvh_normalize( rd.view + right * 0.1f * spd ), moved = 1;
+	if (f.keys[17]) rd.view = tinybvh_normalize( rd.view + up * -0.1f * spd ), moved = 1;
+	if (f.keys[18]) rd.view = tinybvh_normalize( rd.view + up * 0.1f * spd ), moved = 1;
 #endif
 	// recalculate right, up
-	right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) ), up = 0.8f * cross( rd.view, right );
+	right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), rd.view ) );
+	up = 0.8f * tinybvh_cross( rd.view, right );
 	bvhvec3 C = rd.eye + 1.2f * rd.view;
 	rd.p0 = C - right + up, rd.p1 = C + right + up, rd.p2 = C - right - up;
 	return moved > 0;

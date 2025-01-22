@@ -30,10 +30,10 @@ int verts = 0, inds = 0;
 // eye, p1 (top-left), p2 (top-right) and p3 (bottom-left)
 #ifdef LOADSCENE
 static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
-static bvhvec3 view = normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
+static bvhvec3 view = tinybvh_normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 #else
 static bvhvec3 eye( -3.5f, -1.5f, -6.5f ), p1, p2, p3;
-static bvhvec3 view = normalize( bvhvec3( 3, 1.5f, 5 ) );
+static bvhvec3 view = tinybvh_normalize( bvhvec3( 3, 1.5f, 5 ) );
 #endif
 
 void sphere_flake( float x, float y, float z, float s, int d = 0 )
@@ -44,7 +44,7 @@ void sphere_flake( float x, float y, float z, float s, int d = 0 )
 	for (int i = 0, u = 0; u < 8; u++) for (int v = 0; v < 8; v++, i++)
 		P( 0, u, v, 0 ), P( 1, u, 0, v ), P( 2, 0, u, v ),
 		P( 3, u, v, 7 ), P( 4, u, 7, v ), P( 5, 7, u, v );
-	for (int i = 0; i < 384; i++) p[i] = normalize( p[i] - ofs ) * s + pos;
+	for (int i = 0; i < 384; i++) p[i] = tinybvh_normalize( p[i] - ofs ) * s + pos;
 	for (int i = 0, side = 0; side < 6; side++, i += 8)
 		for (int u = 0; u < 7; u++, i++) for (int v = 0; v < 7; v++, i++)
 			vertices[verts++] = p[i], vertices[verts++] = p[i + 8],
@@ -67,7 +67,7 @@ void sphere_flake_indexed( float x, float y, float z, float s, int d = 0 )
 		P( 0, u, v, 0 ), P( 1, u, 0, v ), P( 2, 0, u, v ),
 		P( 3, u, v, 7 ), P( 4, u, 7, v ), P( 5, 7, u, v );
 	for (int i = 0; i < 384; i++)
-		p[i] = vertices[verts + i] = normalize( p[i] - ofs ) * s + pos;
+		p[i] = vertices[verts + i] = tinybvh_normalize( p[i] - ofs ) * s + pos;
 	for (int i = verts, side = 0; side < 6; side++, i += 8, verts += 64)
 		for (int u = 0; u < 7; u++, i++) for (int v = 0; v < 7; v++, i++)
 			indices[inds++] = i, indices[inds++] = i + 8,
@@ -121,8 +121,8 @@ void Init()
 
 bool UpdateCamera( float delta_time_s, fenster& f )
 {
-	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) );
-	bvhvec3 up = 0.8f * cross( view, right );
+	bvhvec3 right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), view ) );
+	bvhvec3 up = 0.8f * tinybvh_cross( view, right );
 
 	// get camera controls.
 	bool moved = false;
@@ -132,14 +132,14 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 	if (f.keys['S']) eye += view * -1.0f * delta_time_s * 10, moved = true;
 	if (f.keys['R']) eye += up * delta_time_s * 10, moved = true;
 	if (f.keys['F']) eye += up * -1.0f * delta_time_s * 10, moved = true;
-	if (f.keys[20]) view = normalize( view + right * -1.0f * delta_time_s ), moved = true;
-	if (f.keys[19]) view = normalize( view + right * delta_time_s ), moved = true;
-	if (f.keys[17]) view = normalize( view + up * -1.0f * delta_time_s ), moved = true;
-	if (f.keys[18]) view = normalize( view + up * delta_time_s ), moved = true;
+	if (f.keys[20]) view = tinybvh_normalize( view + right * -1.0f * delta_time_s ), moved = true;
+	if (f.keys[19]) view = tinybvh_normalize( view + right * delta_time_s ), moved = true;
+	if (f.keys[17]) view = tinybvh_normalize( view + up * -1.0f * delta_time_s ), moved = true;
+	if (f.keys[18]) view = tinybvh_normalize( view + up * delta_time_s ), moved = true;
 
 	// recalculate right, up
-	right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) );
-	up = 0.8f * cross( view, right );
+	right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), view ) );
+	up = 0.8f * tinybvh_cross( view, right );
 	bvhvec3 C = eye + 2 * view;
 	p1 = C - right + up, p2 = C + right + up, p3 = C - right - up;
 	return moved;
@@ -164,7 +164,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
 		{
 			float u = (float)(tx + x) / SCRWIDTH, v = (float)(ty + y) / SCRHEIGHT;
-			bvhvec3 D = normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
+			bvhvec3 D = tinybvh_normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
 			rays[N++] = Ray( eye, D, 1e30f );
 		}
 	}
@@ -173,7 +173,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	for (int i = 0; i < N; i++) depths[i] = bvh.Intersect( rays[i] );
 
 	// visualize result
-	const bvhvec3 L = normalize( bvhvec3( 1, 2, 3 ) );
+	const bvhvec3 L = tinybvh_normalize( bvhvec3( 1, 2, 3 ) );
 	for (int i = 0, ty = 0; ty < SCRHEIGHT / 4; ty++) for (int tx = 0; tx < SCRWIDTH / 4; tx++)
 	{
 		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++, i++) if (rays[i].hit.t < 10000)
@@ -184,8 +184,8 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 			bvhvec3 v0 = vertices[v0idx];
 			bvhvec3 v1 = vertices[v1idx];
 			bvhvec3 v2 = vertices[v2idx];
-			bvhvec3 N = normalize( cross( v1 - v0, v2 - v0 ) );
-			int c = (int)(255.9f * fabs( dot( N, L ) ));
+			bvhvec3 N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) );
+			int c = (int)(255.9f * fabs( tinybvh_dot( N, L ) ));
 			buf[pixel_x + pixel_y * SCRWIDTH] = c + (c << 8) + (c << 16);
 			// buf[pixel_x + pixel_y * SCRWIDTH] = (primIdx * 0xdeece66d + 0xb) & 0xFFFFFF; // color is hashed primitive index
 			// buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
