@@ -5274,7 +5274,11 @@ inline void IntersectCompactTri( Ray& r, float32x4_t& t4, const float* T )
 	const float u = T[0] * wr.x + T[1] * wr.y + T[2] * wr.z + T[3];
 	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 	const bool hit = u >= 0 && v >= 0 && u + v < 1;
+#if TLAS_BITS == 32
+	if (hit) r.hit = { 0, ta, u, v, *(uint32_t*)&T[15] }, t4 = vdupq_n_f32( ta );
+#else
 	if (hit) r.hit = { ta, u, v, *(uint32_t*)&T[15] }, t4 = vdupq_n_f32( ta );
+#endif
 }
 
 inline int32_t ARMVecMovemask( uint32x4_t v ) {
