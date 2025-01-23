@@ -26,17 +26,18 @@ static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
 static bvhvec3 view = tinybvh_normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 
 // callback for custom geometry: ray/sphere intersection
-void sphereIntersect( tinybvh::RayEx& ray, const uint64_t primID )
+bool sphereIntersect( tinybvh::RayEx& ray, const uint64_t primID )
 {
 	bvhdbl3 oc = ray.O - spheres[primID].pos;
 	double b = tinybvh_dot( oc, ray.D );
 	double r = spheres[primID].r;
 	double c = tinybvh_dot( oc, oc ) - r * r;
 	double t, d = b * b - c;
-	if (d <= 0) return;
+	if (d <= 0) return false;
 	d = sqrt( d ), t = -b - d;
 	bool hit = t < ray.hit.t && t > 0;
 	if (hit) ray.hit.t = t, ray.hit.prim = primID;
+	return hit;
 }
 
 bool sphereIsOccluded( const tinybvh::RayEx& ray, const uint64_t primID )
