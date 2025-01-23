@@ -231,7 +231,7 @@ void Init()
 
 	// create OpenCL buffers for BVH data
 	tlasNodes = new Buffer( tlas.allocatedNodes /* could change! */ * sizeof( BVH_GPU::BVHNode ), tlas.bvhNode );
-	tlasIndices = new Buffer( tlas.bvh.idxCount * sizeof( uint32_t ), tlas.bvh.triIdx );
+	tlasIndices = new Buffer( tlas.bvh.idxCount * sizeof( uint32_t ), tlas.bvh.primIdx );
 	tlasNodes->CopyToDevice();
 	tlasIndices->CopyToDevice();
 	blasInstances = new Buffer( (DRAGONS + 1) * sizeof( BLASInstance ), instance );

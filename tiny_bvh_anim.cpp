@@ -54,7 +54,7 @@ void Init()
 		inst[b].transform[7] = (float)y * 0.2f - GRIDSIZE * 0.1f + 7;
 		inst[b].transform[11] = (float)z * 0.2f - GRIDSIZE * 0.1f - 1;
 	}
-	tlas.Build( inst, 1 + INSTCOUNT, bvhList, 2 );
+	tlas.Build( inst, 1 + INSTCOUNT, bvhList, 2 ); // just move build to Tick if instance transforms are not static.
 }
 
 bool UpdateCamera( float delta_time_s, fenster& f )

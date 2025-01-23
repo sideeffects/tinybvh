@@ -26,7 +26,7 @@ static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
 static bvhvec3 view = tinybvh_normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 
 // callback for custom geometry: ray/sphere intersection
-void sphereIntersect( tinybvh::Ray& ray, unsigned primID )
+void sphereIntersect( tinybvh::Ray& ray, const unsigned primID )
 {
 	bvhvec3 oc = ray.O - spheres[primID].pos;
 	float b = tinybvh_dot( oc, ray.D );
@@ -39,7 +39,7 @@ void sphereIntersect( tinybvh::Ray& ray, unsigned primID )
 	if (hit) ray.hit.t = t, ray.hit.prim = primID;
 }
 
-bool sphereIsOccluded( const tinybvh::Ray& ray, unsigned primID )
+bool sphereIsOccluded( const tinybvh::Ray& ray, const unsigned primID )
 {
 	bvhvec3 oc = ray.O - spheres[primID].pos;
 	float b = tinybvh_dot( oc, ray.D );
@@ -49,6 +49,12 @@ bool sphereIsOccluded( const tinybvh::Ray& ray, unsigned primID )
 	if (d <= 0) return false;
 	d = sqrtf( d ), t = -b - d;
 	return t < ray.hit.t && t > 0;
+}
+
+void sphereAABB( const unsigned primID, bvhvec3& boundsMin, bvhvec3& boundsMax )
+{
+	boundsMin = spheres[primID].pos - bvhvec3( spheres[primID].r );
+	boundsMax = spheres[primID].pos + bvhvec3( spheres[primID].r );
 }
 
 void Init()
@@ -66,25 +72,13 @@ void Init()
 	spheres = new Sphere[verts / 3];
 	for (int i = 0; i < verts / 3; i++)
 	{
-		bvhvec3 v0 = triangles[i * 3 + 0];
-		bvhvec3 v1 = triangles[i * 3 + 1];
-		bvhvec3 v2 = triangles[i * 3 + 2];
-		spheres[i].r = tinybvh_min( 0.05f, tinybvh_min( tinybvh_length( v1 - v0 ), tinybvh_length( v2 - v0 ) ) );
+		bvhvec3 v0 = triangles[i * 3], v1 = triangles[i * 3 + 1], v2 = triangles[i * 3 + 2];
+		spheres[i].r = tinybvh_min( 0.35f, 0.25f * tinybvh_min( tinybvh_length( v1 - v0 ), tinybvh_length( v2 - v0 ) ) );
 		spheres[i].pos = (v0 + v1 + v2) * 0.33333f;
 	}
 
-	// abuse the triangle array to hold sphere bounding boxes
-	for (int i = 0; i < verts / 3; i++)
-	{
-		bvhvec3 aabbMin = spheres[i].pos - bvhvec3( spheres[i].r );
-		bvhvec3 aabbMax = spheres[i].pos + bvhvec3( spheres[i].r );
-		triangles[i * 3 + 0] = aabbMin;
-		triangles[i * 3 + 1] = (aabbMax + aabbMin) * 0.5f;
-		triangles[i * 3 + 2] = aabbMax; // so, a degenerate tri: just a diagonal line.
-	}
-
 	// build the BVH over the aabbs
-	bvh.Build( triangles, verts / 3 );
+	bvh.Build( &sphereAABB, verts / 3 );
 
 	// set custom intersection callbacks
 	bvh.customIntersect = &sphereIntersect;
@@ -138,10 +132,8 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 			if (ray.hit.t < 10000)
 			{
 				int pixel_x = tx * 4 + x, pixel_y = ty * 4 + y, primIdx = ray.hit.prim;
-				bvhvec3 v0 = triangles[primIdx * 3];
-				bvhvec3 v1 = triangles[primIdx * 3 + 1];
-				bvhvec3 v2 = triangles[primIdx * 3 + 2];
-				bvhvec3 N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) );
+				bvhvec3 I = ray.O + ray.hit.t * ray.D;
+				bvhvec3 N = tinybvh_normalize( I - spheres[primIdx].pos );
 				int c = (int)(255.9f * fabs( tinybvh_dot( N, L ) ));
 				buf[pixel_x + pixel_y * SCRWIDTH] = c + (c << 8) + (c << 16);
 			}
