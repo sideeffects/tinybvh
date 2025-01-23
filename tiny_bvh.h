@@ -159,7 +159,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	3
-#define TINY_BVH_VERSION_SUB	0
+#define TINY_BVH_VERSION_SUB	1
 
 // ============================================================================
 //
@@ -388,6 +388,20 @@ static bvhvec3 tinybvh_normalize( const bvhvec3& a )
 	float l = tinybvh_length( a ), rl = l == 0 ? 0 : (1.0f / l);
 	return a * rl;
 }
+bvhvec3 tinybvh_transform_point( const bvhvec3& v, const float* T )
+{
+	const bvhvec3 res(
+		T[0] * v.x + T[1] * v.y + T[2] * v.z + T[3],
+		T[4] * v.x + T[5] * v.y + T[6] * v.z + T[7],
+		T[8] * v.x + T[9] * v.y + T[10] * v.z + T[11] );
+	const float w = T[12] * v.x + T[13] * v.y + T[14] * v.z + T[15];
+	if (w == 1) return res; else return res * (1.f / w);
+}
+bvhvec3 tinybvh_transform_vector( const bvhvec3& v, const float* T )
+{
+	return bvhvec3( T[0] * v.x + T[1] * v.y + T[2] * v.z, T[4] * v.x +
+		T[5] * v.y + T[6] * v.z, T[8] * v.x + T[9] * v.y + T[10] * v.z );
+}
 
 #ifdef DOUBLE_PRECISION_SUPPORT
 // Double-precision math
@@ -431,6 +445,20 @@ static bvhdbl3 tinybvh_normalize( const bvhdbl3& a )
 {
 	double l = tinybvh_length( a ), rl = l == 0 ? 0 : (1.0 / l);
 	return a * rl;
+}
+bvhdbl3 tinybvh_transform_point( const bvhdbl3& v, const double* T )
+{
+	const bvhdbl3 res(
+		T[0] * v.x + T[1] * v.y + T[2] * v.z + T[3],
+		T[4] * v.x + T[5] * v.y + T[6] * v.z + T[7],
+		T[8] * v.x + T[9] * v.y + T[10] * v.z + T[11] );
+	const double w = T[12] * v.x + T[13] * v.y + T[14] * v.z + T[15];
+	if (w == 1) return res; else return res * (1. / w);
+}
+bvhdbl3 tinybvh_transform_vector( const bvhdbl3& v, const double* T )
+{
+	return bvhdbl3( T[0] * v.x + T[1] * v.y + T[2] * v.z, T[4] * v.x +
+		T[5] * v.y + T[6] * v.z, T[8] * v.x + T[9] * v.y + T[10] * v.z );
 }
 
 #endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
@@ -560,6 +588,23 @@ enum TraceDevice : uint32_t { USE_CPU = 1, USE_GPU };
 class BVHBase
 {
 public:
+	enum BVHType : uint32_t
+	{
+		// Every BVHJ class is derived from BVHBase, but we don't use virtual functions, for
+		// performance reasons. For a TLAS over a mix of BVH layouts we do however need this
+		// kind of behavior when transitioning from a TLAS leaf to a BLAS root node.
+		UNDEFINED = 0,
+		LAYOUT_BVH = 1,
+		LAYOUT_BVH_VERBOSE,
+		LAYOUT_BVH_DOUBLE,
+		LAYOUT_BVH_SOA,
+		LAYOUT_BVH_GPU,
+		LAYOUT_MBVH,
+		LAYOUT_BVH4_CPU,
+		LAYOUT_BVH4_GPU,
+		LAYOUT_MBVH8,
+		LAYOUT_CWBVH
+	};
 	struct ALIGNED( 32 ) Fragment
 	{
 		// A fragment stores the bounds of an input primitive. The name 'Fragment' is from
@@ -578,6 +623,7 @@ public:
 	bool bvh_over_aabbs = false;	// a BVH over AABBs is useful for e.g. TLAS traversal.
 	bool bvh_over_indices = false;	// a BVH over indices cannot translate primitive index to vertex index.
 	BVHContext context;				// context used to provide user-defined allocation functions
+	BVHType layout = UNDEFINED;		// BVH layout identifier
 	// Keep track of allocated buffer size to avoid repeated allocation during layout conversion.
 	uint32_t allocatedNodes = 0;	// number of nodes allocated for the BVH.
 	uint32_t usedNodes = 0;			// number of nodes used for the BVH.
@@ -607,7 +653,8 @@ public:
 	friend class BVH_GPU;
 	friend class BVH_SoA;
 	template <int M> friend class MBVH;
-	enum BuildFlags : uint32_t {
+	enum BuildFlags : uint32_t
+	{
 		NONE = 0,			// Default building behavior (binned, SAH-driven).
 		FULLSPLIT = 1		// Split as far as possible, even when SAH doesn't agree.
 	};
@@ -621,10 +668,10 @@ public:
 		float Intersect( const Ray& ray ) const { return BVH::IntersectAABB( ray, aabbMin, aabbMax ); }
 		float SurfaceArea() const { return BVH::SA( aabbMin, aabbMax ); }
 	};
-	BVH( BVHContext ctx = {} ) { context = ctx; }
-	BVH( const BVH_Verbose& original ) { ConvertFrom( original ); }
-	BVH( const bvhvec4* vertices, const uint32_t primCount ) { Build( vertices, primCount ); }
-	BVH( const bvhvec4slice& vertices ) { Build( vertices ); }
+	BVH( BVHContext ctx = {} ) { layout = LAYOUT_BVH; context = ctx; }
+	BVH( const BVH_Verbose& original ) { layout = LAYOUT_BVH; ConvertFrom( original ); }
+	BVH( const bvhvec4* vertices, const uint32_t primCount ) { layout = LAYOUT_BVH; Build( vertices, primCount ); }
+	BVH( const bvhvec4slice& vertices ) { layout = LAYOUT_BVH; Build( vertices ); }
 	~BVH();
 	void ConvertFrom( const BVH_Verbose& original, bool compact = true );
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
@@ -695,7 +742,7 @@ public:
 	uint32_t newNodePtr = 0;		// used during build to keep track of next free node in pool.
 	Fragment* fragment = 0;			// input primitive bounding boxes.
 	// Custom geometry intersection callback
-	void (*customIntersect)(Ray&, const unsigned) = 0;
+	bool (*customIntersect)(Ray&, const unsigned) = 0;
 	bool (*customIsOccluded)(const Ray&, const unsigned) = 0;
 };
 
@@ -723,7 +770,7 @@ public:
 		bvhdbl3 bmin, bmax;			// AABB
 		uint64_t primIdx;			// index of the original primitive
 	};
-	BVH_Double( BVHContext ctx = {} ) { context = ctx; }
+	BVH_Double( BVHContext ctx = {} ) { layout = LAYOUT_BVH_DOUBLE; context = ctx; }
 	~BVH_Double();
 	void Build( const bvhdbl3* vertices, const uint64_t primCount );
 	void Build( BLASInstanceEx* bvhs, const uint64_t instCount, BVH_Double** blasses, const uint64_t blasCount );
@@ -750,7 +797,7 @@ public:
 	uint64_t idxCount = 0;			// number of primitive indices.
 	bvhdbl3 aabbMin, aabbMax;		// bounds of the root node of the BVH.
 	// Custom geometry intersection callback
-	void (*customIntersect)(RayEx&, uint64_t) = 0;
+	bool (*customIntersect)(RayEx&, uint64_t) = 0;
 	bool (*customIsOccluded)(const RayEx&, uint64_t) = 0;
 };
 
@@ -770,7 +817,7 @@ public:
 		bvhvec3 rmax; uint32_t firstTri; // total: 64 bytes
 		bool isLeaf() const { return triCount > 0; }
 	};
-	BVH_GPU( BVHContext ctx = {} ) { context = ctx; }
+	BVH_GPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH_GPU; context = ctx; }
 	BVH_GPU( const BVH& original ) { /* DEPRICATED */ ConvertFrom( original ); }
 	~BVH_GPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
@@ -802,8 +849,8 @@ public:
 		uint32_t left, right, triCount, firstTri; // total: 64 bytes
 		bool isLeaf() const { return triCount > 0; }
 	};
-	BVH_SoA( BVHContext ctx = {} ) { context = ctx; }
-	BVH_SoA( const BVH& original ) { /* DEPRICATED */ ConvertFrom( original ); }
+	BVH_SoA( BVHContext ctx = {} ) { layout = LAYOUT_BVH_SOA; context = ctx; }
+	BVH_SoA( const BVH& original ) { /* DEPRICATED */ layout = LAYOUT_BVH_SOA; ConvertFrom( original ); }
 	~BVH_SoA();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
@@ -835,8 +882,8 @@ public:
 		uint32_t triCount, firstTri, parent, dummy;
 		bool isLeaf() const { return triCount > 0; }
 	};
-	BVH_Verbose( BVHContext ctx = {} ) { context = ctx; }
-	BVH_Verbose( const BVH& original ) { /* DEPRECATED */ ConvertFrom( original ); }
+	BVH_Verbose( BVHContext ctx = {} ) { layout = LAYOUT_BVH_VERBOSE; context = ctx; }
+	BVH_Verbose( const BVH& original ) { /* DEPRECATED */ layout = LAYOUT_BVH_VERBOSE; ConvertFrom( original ); }
 	~BVH_Verbose() { AlignedFree( bvhNode ); }
 	void ConvertFrom( const BVH& original, bool compact = true );
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
@@ -874,8 +921,8 @@ public:
 		uint32_t dummy[((30 - M) & 3) + 1]; // dummies are for alignment.
 		bool isLeaf() const { return triCount > 0; }
 	};
-	MBVH( BVHContext ctx = {} ) { context = ctx; }
-	MBVH( const BVH& original ) { /* DEPRECATED */ ConvertFrom( original ); }
+	MBVH( BVHContext ctx = {} ) { layout = LAYOUT_MBVH; context = ctx; }
+	MBVH( const BVH& original ) { /* DEPRECATED */ layout = LAYOUT_MBVH; ConvertFrom( original ); }
 	~MBVH();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
@@ -916,8 +963,8 @@ public:
 		// there is no way we can shave off a full 16 bytes, unless aabbExt is stored
 		// as chars as well, as in CWBVH.
 	};
-	BVH4_GPU( BVHContext ctx = {} ) { context = ctx; }
-	BVH4_GPU( const MBVH<4>& bvh4 ) { /* DEPRECATED */ ConvertFrom( bvh4 ); }
+	BVH4_GPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH4_GPU; context = ctx; }
+	BVH4_GPU( const MBVH<4>& bvh4 ) { /* DEPRECATED */ layout = LAYOUT_BVH4_GPU; ConvertFrom( bvh4 ); }
 	~BVH4_GPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
@@ -951,8 +998,8 @@ public:
 		uint32_t childFirst[4];
 		uint32_t triCount[4];
 	};
-	BVH4_CPU( BVHContext ctx = {} ) { context = ctx; }
-	BVH4_CPU( const MBVH<4>& bvh4 ) { /* DEPRECATED */ ConvertFrom( bvh4 ); }
+	BVH4_CPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH4_CPU; context = ctx; }
+	BVH4_CPU( const MBVH<4>& bvh4 ) { /* DEPRECATED */ layout = LAYOUT_BVH4_CPU; ConvertFrom( bvh4 ); }
 	~BVH4_CPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
@@ -975,8 +1022,8 @@ public:
 class BVH8_CWBVH : public BVHBase
 {
 public:
-	BVH8_CWBVH( BVHContext ctx = {} ) { context = ctx; }
-	BVH8_CWBVH( MBVH<8>& bvh8 ) { /* DEPRECATED */ ConvertFrom( bvh8 ); }
+	BVH8_CWBVH( BVHContext ctx = {} ) { layout = LAYOUT_CWBVH; context = ctx; }
+	BVH8_CWBVH( MBVH<8>& bvh8 ) { /* DEPRECATED */ layout = LAYOUT_CWBVH; ConvertFrom( bvh8 ); }
 	~BVH8_CWBVH();
 	void Save( const char* fileName );
 	bool Load( const char* fileName, const uint32_t expectedTris );
@@ -1015,8 +1062,6 @@ public:
 	bvhvec3 aabbMax = bvhvec3( -BVH_FAR );
 	uint32_t dummy[9]; // pad struct to 64 byte
 	void Update( BVHBase * blas );
-	bvhvec3 TransformPoint( const bvhvec3 & v, const float* T ) const;
-	bvhvec3 TransformVector( const bvhvec3 & v, const float* T ) const;
 	void InvertTransform();
 };
 
@@ -1035,8 +1080,6 @@ public:
 	bvhdbl3 aabbMax = bvhdbl3( -BVH_DBL_FAR );
 	uint64_t dummy = 0;
 	void Update( BVH_Double* blas );
-	bvhdbl3 TransformPoint( const bvhdbl3& v, const double* T ) const;
-	bvhdbl3 TransformVector( const bvhdbl3& v, const double* T ) const;
 	void InvertTransform();
 };
 
@@ -2071,10 +2114,23 @@ int32_t BVH::Intersect( Ray& ray ) const
 		cost += C_TRAV;
 		if (node->isLeaf())
 		{
+			// Performance note: if indexed primitives (ENABLE_INDEXED_GEOMETRY) and custom
+			// geometry (ENABLE_CUSTOM_GEOMETRY) are both disabled, this leaf code reduces
+			// to a regular loop over triangles. Otherwise, the extra flexibility comes at
+			// a small performance cost.
 			if (indexedEnabled && vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 				IntersectTriIndexed( ray, verts, vertIdx, primIdx[node->leftFirst + i] );
 			else if (customEnabled && customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				(*customIntersect)(ray, primIdx[node->leftFirst + i]);
+			{
+				if ((*customIntersect)(ray, primIdx[node->leftFirst + i]))
+				{
+				#if INST_IDX_BITS == 32
+					ray.hit.inst = ray.instIdx;
+				#else
+					ray.hit.prim = (ray.hit.prim & PRIM_IDX_MASK) + ray.instIdx;
+				#endif
+				}
+			}
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 				IntersectTri( ray, verts, primIdx[node->leftFirst + i] );
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -2112,15 +2168,46 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				// BLAS traversal
 				const uint32_t instIdx = primIdx[node->leftFirst + i];
 				const BLASInstance& inst = instList[instIdx];
-				const BVH* blas = (const BVH*)blasList[inst.blasIdx]; // TODO: actually we don't know BVH type.
+				const BVHBase* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
-				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
-				tmp.D = inst.TransformVector( ray.D, inst.invTransform );
-				tmp.rD = tinybvh_safercp( tmp.D );
+				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
+				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
 				tmp.instIdx = instIdx << (32 - INST_IDX_BITS);
 				tmp.hit = ray.hit;
 				// 2. Traverse BLAS with the transformed ray
-				cost += blas->Intersect( tmp );
+				// Note: Valid BVH layout options for BLASses are the regular BVH layout,
+				// the AVX-optimized BVH_SOA layout and the wide BVH4_CPU layout. If all
+				// BLASses are of the same layout this reduces to nearly zero cost for
+				// a small set of predictable branches.
+				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU || blas->layout == LAYOUT_BVH_SOA );
+				if (blas->layout == LAYOUT_BVH)
+				{
+					float reciDirScale = 1.0f;
+					if (((BVH*)blas)->customIntersect == 0)
+					{
+						// regular (triangle) BVH traversal
+						tmp.rD = tinybvh_safercp( tmp.D );
+						cost += ((BVH*)blas)->Intersect( tmp );
+					}
+					else
+					{
+						// when intersecting custom geometry, we need to normalize the transformed ray
+						// direction, just to be safe. This is not needed for intersecting a regular BVH.
+						const float dirScale = tinybvh_length( tmp.D );
+						reciDirScale = 1.0f / dirScale;
+						tmp.D = tmp.D * reciDirScale;
+						tmp.hit.t *= dirScale;
+						tmp.rD = tinybvh_safercp( tmp.D );
+						cost += ((BVH*)blas)->Intersect( tmp );
+						tmp.hit.t *= reciDirScale;
+					}
+				}
+				else
+				{
+					tmp.rD = tinybvh_safercp( tmp.D );
+					if (blas->layout == LAYOUT_BVH4_CPU) cost += ((BVH4_CPU*)blas)->Intersect( tmp );
+					else if (blas->layout == LAYOUT_BVH_SOA) cost += ((BVH_SoA*)blas)->Intersect( tmp );
+				}
 				// 3. Restore ray
 				ray.hit = tmp.hit;
 			}
@@ -2204,8 +2291,8 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 				BLASInstance& inst = instList[primIdx[node->leftFirst + i]];
 				BVH* blas = (BVH*)blasList[inst.blasIdx]; // TODO: actually we don't know BVH type.
 				// 1. Transform ray with the inverse of the instance transform
-				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
-				tmp.D = inst.TransformVector( ray.D, inst.invTransform );
+				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
+				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
 				tmp.rD = tinybvh_safercp( tmp.D );
 				// 2. Traverse BLAS with the transformed ray
 				if (blas->IsOccluded( tmp )) return true;
@@ -5917,7 +6004,8 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 			if (customEnabled && customIntersect != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-					(*customIntersect)(ray, primIdx[node->leftFirst + i]);
+					if ((*customIntersect)(ray, primIdx[node->leftFirst + i]))
+						ray.hit.inst = ray.instIdx;
 			}
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 			{
@@ -5982,16 +6070,28 @@ int32_t BVH_Double::IntersectTLAS( RayEx& ray ) const
 				BLASInstanceEx& inst = instList[instIdx];
 				BVH_Double* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
-				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
-				tmp.D = inst.TransformVector( ray.D, inst.invTransform );
+				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
+				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
+				tmp.hit = ray.hit;
+				double reciDirScale = 1.0, dirScale = 1.0;
+				if (blas->customIntersect)
+				{
+					// when intersecting custom geometry, we need to normalize the
+					// transformed ray direction, just to be safe. This is not needed
+					// for intersecting a regular BVH.
+					dirScale = tinybvh_length( tmp.D );
+					reciDirScale = 1.0 / dirScale;
+					tmp.D = tmp.D * reciDirScale;
+					tmp.hit.t *= dirScale;
+				}
 				tmp.rD.x = tmp.D.x > 1e-24 ? (1.0 / tmp.D.x) : (tmp.D.x < -1e-24 ? (1.0 / tmp.D.x) : BVH_DBL_FAR);
 				tmp.rD.y = tmp.D.y > 1e-24 ? (1.0 / tmp.D.y) : (tmp.D.y < -1e-24 ? (1.0 / tmp.D.y) : BVH_DBL_FAR);
 				tmp.rD.z = tmp.D.z > 1e-24 ? (1.0 / tmp.D.z) : (tmp.D.z < -1e-24 ? (1.0 / tmp.D.z) : BVH_DBL_FAR);
-				tmp.instIdx = instIdx << 32UL;
-				tmp.hit = ray.hit;
 				// 2. Traverse BLAS with the transformed ray
+				tmp.instIdx = instIdx;
 				cost += blas->Intersect( tmp );
 				// 3. Restore ray
+				tmp.hit.t *= reciDirScale;
 				ray.hit = tmp.hit;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -6082,8 +6182,8 @@ bool BVH_Double::IsOccludedTLAS( const RayEx& ray ) const
 				BLASInstanceEx& inst = instList[primIdx[node->leftFirst + i]];
 				BVH_Double* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
-				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
-				tmp.D = inst.TransformVector( ray.D, inst.invTransform );
+				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
+				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
 				tmp.rD.x = tmp.D.x > 1e-24 ? (1.0 / tmp.D.x) : (tmp.D.x < -1e-24 ? (1.0 / tmp.D.x) : BVH_DBL_FAR);
 				tmp.rD.y = tmp.D.y > 1e-24 ? (1.0 / tmp.D.y) : (tmp.D.y < -1e-24 ? (1.0 / tmp.D.y) : BVH_DBL_FAR);
 				tmp.rD.z = tmp.D.z > 1e-24 ? (1.0 / tmp.D.z) : (tmp.D.z < -1e-24 ? (1.0 / tmp.D.z) : BVH_DBL_FAR);
@@ -6144,27 +6244,9 @@ void BLASInstance::Update( BVHBase* blas )
 	for (int32_t j = 0; j < 8; j++)
 	{
 		const bvhvec3 p( j & 1 ? bmax.x : bmin.x, j & 2 ? bmax.y : bmin.y, j & 4 ? bmax.z : bmin.z );
-		const bvhvec3 t = TransformPoint( p, transform );
+		const bvhvec3 t = tinybvh_transform_point( p, transform );
 		aabbMin = tinybvh_min( aabbMin, t ), aabbMax = tinybvh_max( aabbMax, t );
 	}
-}
-
-// TransformPoint
-bvhvec3 BLASInstance::TransformPoint( const bvhvec3& v, const float* T ) const
-{
-	const bvhvec3 res(
-		T[0] * v.x + T[1] * v.y + T[2] * v.z + T[3],
-		T[4] * v.x + T[5] * v.y + T[6] * v.z + T[7],
-		T[8] * v.x + T[9] * v.y + T[10] * v.z + T[11] );
-	const float w = T[12] * v.x + T[13] * v.y + T[14] * v.z + T[15];
-	if (w == 1) return res; else return res * (1.f / w);
-}
-
-// TransformVector - skips translation. Assumes orthonormal transform, for now.
-bvhvec3 BLASInstance::TransformVector( const bvhvec3& v, const float* T ) const
-{
-	return bvhvec3( T[0] * v.x + T[1] * v.y + T[2] * v.z, T[4] * v.x +
-		T[5] * v.y + T[6] * v.z, T[8] * v.x + T[9] * v.y + T[10] * v.z );
 }
 
 // InvertTransform - calculate the inverse of the matrix stored in 'transform'
@@ -6207,27 +6289,9 @@ void BLASInstanceEx::Update( BVH_Double* blas )
 	for (int32_t j = 0; j < 8; j++)
 	{
 		const bvhdbl3 p( j & 1 ? bmax.x : bmin.x, j & 2 ? bmax.y : bmin.y, j & 4 ? bmax.z : bmin.z );
-		const bvhdbl3 t = TransformPoint( p, transform );
+		const bvhdbl3 t = tinybvh_transform_point( p, transform );
 		aabbMin = tinybvh_min( aabbMin, t ), aabbMax = tinybvh_max( aabbMax, t );
 	}
-}
-
-// TransformPoint
-bvhdbl3 BLASInstanceEx::TransformPoint( const bvhdbl3& v, const double* T ) const
-{
-	const bvhdbl3 res(
-		T[0] * v.x + T[1] * v.y + T[2] * v.z + T[3],
-		T[4] * v.x + T[5] * v.y + T[6] * v.z + T[7],
-		T[8] * v.x + T[9] * v.y + T[10] * v.z + T[11] );
-	const double w = T[12] * v.x + T[13] * v.y + T[14] * v.z + T[15];
-	if (w == 1) return res; else return res * (1. / w);
-}
-
-// TransformVector - skips translation. Assumes orthonormal transform, for now.
-bvhdbl3 BLASInstanceEx::TransformVector( const bvhdbl3& v, const double* T ) const
-{
-	return bvhdbl3( T[0] * v.x + T[1] * v.y + T[2] * v.z, T[4] * v.x +
-		T[5] * v.y + T[6] * v.z, T[8] * v.x + T[9] * v.y + T[10] * v.z );
 }
 
 // InvertTransform - calculate the inverse of the matrix stored in 'transform'
