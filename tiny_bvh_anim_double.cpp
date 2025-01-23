@@ -4,7 +4,7 @@
 #define TILESIZE 20
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
-#define GRIDSIZE 45
+#define GRIDSIZE 2
 #define INSTCOUNT (GRIDSIZE * GRIDSIZE * GRIDSIZE)
 
 #define TINYBVH_IMPLEMENTATION
@@ -14,18 +14,54 @@
 
 using namespace tinybvh;
 
+struct Sphere { bvhdbl3 pos; double r; };
+
 BVH_Double sponza, obj, tlas;
 BVH_Double* bvhList[] = { &sponza, &obj };
 BLASInstanceEx inst[INSTCOUNT + 1 /* one extra for sponza */];
 int frameIdx = 0, verts = 0, bverts = 0;
 bvhvec4* triangles = 0, * bunny = 0;
-bvhdbl3* trianglesEx = 0, * bunnyEx = 0;
+bvhdbl3* trianglesEx = 0;
+Sphere* spheres = 0;
 static std::atomic<int> tileIdx( 0 );
 static unsigned threadCount = std::thread::hardware_concurrency();
 
 // setup view pyramid for a pinhole camera
 static bvhvec3 eye( -15.24f, 21.5f, 2.54f ), p1, p2, p3;
 static bvhvec3 view = tinybvh_normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
+
+// callback for custom geometry: ray/sphere intersection
+bool sphereIntersect( tinybvh::RayEx& ray, const uint64_t primID )
+{
+	bvhdbl3 oc = ray.O - spheres[primID].pos;
+	double b = tinybvh_dot( oc, ray.D );
+	double r = spheres[primID].r;
+	double c = tinybvh_dot( oc, oc ) - r * r;
+	double t, d = b * b - c;
+	if (d <= 0) return false;
+	d = sqrt( d ), t = -b - d;
+	bool hit = t < ray.hit.t && t > 0;
+	if (hit) ray.hit.t = t, ray.hit.prim = primID;
+	return hit;
+}
+
+bool sphereIsOccluded( const tinybvh::RayEx& ray, const uint64_t primID )
+{
+	bvhdbl3 oc = ray.O - spheres[primID].pos;
+	double b = tinybvh_dot( oc, ray.D );
+	double r = spheres[primID].r;
+	double c = tinybvh_dot( oc, oc ) - r * r;
+	double t, d = b * b - c;
+	if (d <= 0) return false;
+	d = sqrt( d ), t = -b - d;
+	return t < ray.hit.t && t > 0;
+}
+
+void sphereAABB( const uint64_t primID, bvhdbl3& boundsMin, bvhdbl3& boundsMax )
+{
+	boundsMin = spheres[primID].pos - bvhdbl3( spheres[primID].r );
+	boundsMax = spheres[primID].pos + bvhdbl3( spheres[primID].r );
+}
 
 void Init()
 {
@@ -44,19 +80,34 @@ void Init()
 	b.read( (char*)&bverts, 4 );
 	bverts *= 3, bunny = (bvhvec4*)malloc64( bverts * sizeof( bvhvec4 ) );
 	b.read( (char*)bunny, verts * 16 );
-	bunnyEx = (bvhdbl3*)malloc64( bverts * sizeof( bvhdbl3 ) );
-	for (int i = 0; i < bverts; i++) bunnyEx[i] = bvhdbl3( bunny[i] );
-	obj.Build( bunnyEx, bverts / 3 );
+
+	// turn bunny into spheres
+	spheres = new Sphere[bverts / 3];
+	for (int i = 0; i < bverts / 3; i++)
+	{
+		bvhdbl3 v0 = bvhdbl3( bunny[i * 3] );
+		bvhdbl3 v1 = bvhdbl3( bunny[i * 3 + 1] );
+		bvhdbl3 v2 = bvhdbl3( bunny[i * 3 + 2] );
+		spheres[i].r = tinybvh_min( 1.2, 0.55 * tinybvh_min( tinybvh_length( v1 - v0 ), tinybvh_length( v2 - v0 ) ) );
+		spheres[i].pos = (v0 + v1 + v2) * 0.33333;
+	}
+
+	// build a BLAS over the bunny spheres
+	obj.Build( &sphereAABB, bverts / 3 );
+
+	// set custom intersection callbacks
+	obj.customIntersect = &sphereIntersect;
+	obj.customIsOccluded = &sphereIsOccluded;
 
 	// build a TLAS
 	inst[0] = BLASInstanceEx( 0 /* sponza */ );
 	for (int b = 1, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
 	{
-		inst[b] = BLASInstanceEx( 1 /* bunny */ );
-		inst[b].transform[0] = inst[b].transform[5] = inst[b].transform[10] = 0.02; // scale
-		inst[b].transform[3] = (float)x * 0.2 - GRIDSIZE * 0.1;
-		inst[b].transform[7] = (float)y * 0.2 - GRIDSIZE * 0.1 + 7;
-		inst[b].transform[11] = (float)z * 0.2 - GRIDSIZE * 0.1 - 1;
+		inst[b] = BLASInstanceEx( 1 /* sphere bunny */ );
+		inst[b].transform[0] = inst[b].transform[5] = inst[b].transform[10] = 0.6; // scale
+		inst[b].transform[3] = (float)x * 5 - GRIDSIZE * 2.5;
+		inst[b].transform[7] = (float)y * 5 - GRIDSIZE * 2.5 + 7;
+		inst[b].transform[11] = (float)z * 5 - GRIDSIZE * 2.5 + 1;
 	}
 	tlas.Build( inst, 1 + INSTCOUNT, bvhList, 2 ); // just move build to Tick if instance transforms are not static.
 }
@@ -104,11 +155,24 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				// instance and primitive index are stored in separate fields
 				uint64_t primIdx = ray.hit.prim;
 				uint64_t instIdx = ray.hit.inst;
-				BVH_Double* blas = (BVH_Double*)tlas.blasList[inst[instIdx].blasIdx];
-				bvhdbl3 v0 = blas->verts[primIdx * 3];
-				bvhdbl3 v1 = blas->verts[primIdx * 3 + 1];
-				bvhdbl3 v2 = blas->verts[primIdx * 3 + 2];
-				bvhdbl3 N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) ); // TODO: Transform to world space
+				BLASInstanceEx& instance = inst[instIdx];
+				bvhdbl3 N;
+				if (instance.blasIdx == 0)
+				{
+					// we hit the Sponza mesh, which consists of triangles
+					bvhdbl3 v0 = trianglesEx[primIdx * 3];
+					bvhdbl3 v1 = trianglesEx[primIdx * 3 + 1];
+					bvhdbl3 v2 = trianglesEx[primIdx * 3 + 2];
+					N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) );
+					N = tinybvh_transform_vector( N, instance.transform );
+				}
+				else
+				{
+					// we hit a sphere
+					bvhdbl3 C = tinybvh_transform_point( spheres[primIdx].pos, instance.transform );
+					bvhdbl3 I = ray.O + ray.hit.t * ray.D;
+					N = tinybvh_normalize( I - C );
+				}
 				int c = (int)(255.9 * fabs( tinybvh_dot( N, L ) ));
 				buf[pixelIdx] = c + (c << 8) + (c << 16);
 			}
