@@ -141,7 +141,4 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	}
 }
 
-void Shutdown()
-{
-	// nothing here.
-}
+void Shutdown() { /* nothing here. */ }
