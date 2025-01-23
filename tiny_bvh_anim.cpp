@@ -46,7 +46,7 @@ void Init()
 
 	// build a TLAS
 	inst[0] = BLASInstance( 0 /* sponza */ );
-	for (int b = 0, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
+	for (int b = 1, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
 	{
 		inst[b] = BLASInstance( 1 /* bunny */ );
 		inst[b].transform[0] = inst[b].transform[5] = inst[b].transform[10] = 0.02f; // scale
