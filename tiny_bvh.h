@@ -583,7 +583,7 @@ public:
 	// Common methods
 	void CopyBasePropertiesFrom( const BVHBase& original );	// copy flags from one BVH to another
 protected:
-	__FORCEINLINE void IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t triIdx ) const;
+	__FORCEINLINE void IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t primIdx ) const;
 	__FORCEINLINE void IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const;
 	__FORCEINLINE bool TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const;
 	__FORCEINLINE bool IndexedTriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const;
@@ -631,6 +631,7 @@ public:
 	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void Build( BLASInstance* instances, const uint32_t instCount, BVHBase** blasses, const uint32_t blasCount );
+	void Build( void (*customGetAABB)(const unsigned, bvhvec3&, bvhvec3&), const uint32_t primCount );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
@@ -679,7 +680,7 @@ public:
 	// Basic BVH data
 	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
 	uint32_t* vertIdx = 0;			// vertex indices, only used in case the BVH is built over indexed prims.
-	uint32_t* triIdx = 0;			// primitive index array.
+	uint32_t* primIdx = 0;			// primitive index array.
 	BLASInstance* instList = 0;		// instance array, for top-level acceleration structure.
 	BVHBase** blasList = 0;			// blas array, for TLAS traversal.
 	uint32_t blasCount = 0;			// number of blasses in blasList.
@@ -687,8 +688,8 @@ public:
 	uint32_t newNodePtr = 0;		// used during build to keep track of next free node in pool.
 	Fragment* fragment = 0;			// input primitive bounding boxes.
 	// Custom geometry intersection callback
-	void (*customIntersect)(Ray&, unsigned) = 0;
-	bool (*customIsOccluded)(const Ray&, unsigned) = 0;
+	void (*customIntersect)(Ray&, const unsigned) = 0;
+	bool (*customIsOccluded)(const Ray&, const unsigned) = 0;
 };
 
 #ifdef DOUBLE_PRECISION_SUPPORT
@@ -729,7 +730,7 @@ public:
 	bvhdbl3* verts = 0;				// pointer to input primitive array, double-precision, 3x24 bytes per tri.
 	Fragment* fragment = 0;			// input primitive bounding boxes, double-precision.
 	BVHNode* bvhNode = 0;			// BVH node, double precision format.
-	uint64_t* triIdx = 0;			// primitive index array for double-precision bvh.
+	uint64_t* primIdx = 0;			// primitive index array for double-precision bvh.
 	BLASInstanceEx* instList = 0;	// instance array, for top-level acceleration structure.
 	BVH_Double** blasList = 0;		// blas array, for TLAS traversal.
 	uint64_t blasCount = 0;			// number of blasses in blasList.
@@ -848,7 +849,7 @@ public:
 	// BVH data
 	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
 	Fragment* fragment = 0;			// input primitive bounding boxes, double-precision.
-	uint32_t* triIdx = 0;			// primitive index array - pointer copied from original.
+	uint32_t* primIdx = 0;			// primitive index array - pointer copied from original.
 	BVHNode* bvhNode = 0;			// BVH node with additional info, for BVH optimizer.
 };
 
@@ -1059,7 +1060,7 @@ public:
 	bool IsOccluded( const Ray& ray ) const;
 	// BVH4 data
 	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
-	uint32_t* triIdx = 0;			// primitive index array - pointer copied from original.
+	uint32_t* primIdx = 0;			// primitive index array - pointer copied from original.
 	BVHNode* bvh4Node = 0;			// 128-byte 4-wide BVH node for efficient CPU rendering.
 };
 
@@ -1197,7 +1198,7 @@ void BVHBase::CopyBasePropertiesFrom( const BVHBase& original )
 BVH::~BVH()
 {
 	AlignedFree( bvhNode );
-	AlignedFree( triIdx );
+	AlignedFree( primIdx );
 	AlignedFree( fragment );
 }
 
@@ -1260,7 +1261,7 @@ void BVH::ConvertFrom( const BVH_Verbose& original, bool compact )
 	memset( bvhNode, 0, sizeof( BVHNode ) * spaceNeeded );
 	CopyBasePropertiesFrom( original );
 	this->verts = original.verts;
-	this->triIdx = original.triIdx;
+	this->primIdx = original.primIdx;
 	// start conversion
 	uint32_t srcNodeIdx = 0, dstNodeIdx = 0;
 	newNodePtr = 2;
@@ -1326,12 +1327,12 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
+		AlignedFree( primIdx );
 		AlignedFree( fragment );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
 		allocatedNodes = spaceNeeded;
 		memset( &bvhNode[1], 0, 32 );	// node 1 remains unused, for cache line alignment.
-		triIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
+		primIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildQuick( .. ), bvh not rebuildable." );
@@ -1348,7 +1349,7 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 		fragment[i].bmin = tinybvh_min( tinybvh_min( verts[i * 3], verts[i * 3 + 1] ), verts[i * 3 + 2] );
 		fragment[i].bmax = tinybvh_max( tinybvh_max( verts[i * 3], verts[i * 3 + 1] ), verts[i * 3 + 2] );
 		root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
-		root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
+		root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), primIdx[i] = i;
 	}
 	// subdivide recursively
 	uint32_t task[256], taskCount = 0, nodeIdx = 0;
@@ -1367,14 +1368,14 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 			bvhvec3 lbmin( BVH_FAR ), lbmax( -BVH_FAR ), rbmin( BVH_FAR ), rbmax( -BVH_FAR ), fmin, fmax;
 			for (uint32_t fi, i = 0; i < node.triCount; i++)
 			{
-				fi = triIdx[src], fmin = fragment[fi].bmin, fmax = fragment[fi].bmax;
+				fi = primIdx[src], fmin = fragment[fi].bmin, fmax = fragment[fi].bmax;
 				centroid = (fmin[axis] + fmax[axis]) * 0.5f;
 				if (centroid < splitPos)
 					lbmin = tinybvh_min( lbmin, fmin ), lbmax = tinybvh_max( lbmax, fmax ), src++;
 				else
 				{
 					rbmin = tinybvh_min( rbmin, fmin ), rbmax = tinybvh_max( rbmax, fmax );
-					tinybvh_swap( triIdx[src], triIdx[--j] );
+					tinybvh_swap( primIdx[src], primIdx[--j] );
 				}
 			}
 			// create child nodes
@@ -1430,6 +1431,37 @@ void BVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t
 	bvh_over_indices = true;
 }
 
+void BVH::Build( void (*customGetAABB)(const unsigned, bvhvec3&, bvhvec3&), const uint32_t primCount )
+{
+	FATAL_ERROR_IF( primCount == 0, "BVH::Build( void (*customGetAABB)( .. ), instCount ), instCount == 0." );
+	triCount = idxCount = primCount;
+	const uint32_t spaceNeeded = primCount * 2; // upper limit
+	if (allocatedNodes < spaceNeeded)
+	{
+		AlignedFree( bvhNode );
+		AlignedFree( primIdx );
+		AlignedFree( fragment );
+		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
+		allocatedNodes = spaceNeeded;
+		memset( &bvhNode[1], 0, 32 );	// node 1 remains unused, for cache line alignment.
+		primIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
+		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
+	}
+	// copy relevant data from instance array
+	BVHNode& root = bvhNode[0];
+	root.leftFirst = 0, root.triCount = primCount, root.aabbMin = bvhvec3( BVH_FAR ), root.aabbMax = bvhvec3( -BVH_FAR );
+	for (uint32_t i = 0; i < primCount; i++)
+	{
+		customGetAABB( i, fragment[i].bmin, fragment[i].bmax );
+		fragment[i].primIdx = i, fragment[i].clipped = 0, primIdx[i] = i;
+		root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
+		root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax );
+	}
+	// start build
+	newNodePtr = 2;
+	Build(); // or BuildAVX, for large TLAS.
+}
+
 void BVH::Build( BLASInstance* instances, const uint32_t instCount, BVHBase** blasses, const uint32_t bCount )
 {
 	FATAL_ERROR_IF( instCount == 0, "BVH::Build( BLASInstance*, instCount ), instCount == 0." );
@@ -1438,12 +1470,12 @@ void BVH::Build( BLASInstance* instances, const uint32_t instCount, BVHBase** bl
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
+		AlignedFree( primIdx );
 		AlignedFree( fragment );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
 		allocatedNodes = spaceNeeded;
 		memset( &bvhNode[1], 0, 32 );	// node 1 remains unused, for cache line alignment.
-		triIdx = (uint32_t*)AlignedAlloc( instCount * sizeof( uint32_t ) );
+		primIdx = (uint32_t*)AlignedAlloc( instCount * sizeof( uint32_t ) );
 		fragment = (Fragment*)AlignedAlloc( instCount * sizeof( Fragment ) );
 	}
 	instList = instances;
@@ -1463,7 +1495,7 @@ void BVH::Build( BLASInstance* instances, const uint32_t instCount, BVHBase** bl
 		fragment[i].bmin = instList[i].aabbMin, fragment[i].primIdx = i;
 		fragment[i].bmax = instList[i].aabbMax, fragment[i].clipped = 0;
 		root.aabbMin = tinybvh_min( root.aabbMin, instList[i].aabbMin );
-		root.aabbMax = tinybvh_max( root.aabbMax, instList[i].aabbMax ), triIdx[i] = i;
+		root.aabbMax = tinybvh_max( root.aabbMax, instList[i].aabbMax ), primIdx[i] = i;
 	}
 	// start build
 	newNodePtr = 2;
@@ -1478,12 +1510,12 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
+		AlignedFree( primIdx );
 		AlignedFree( fragment );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
 		allocatedNodes = spaceNeeded;
 		memset( &bvhNode[1], 0, 32 );	// node 1 remains unused, for cache line alignment.
-		triIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
+		primIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
 		if (vertices) fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 		else FATAL_ERROR_IF( fragment == 0, "BVH::PrepareBuild( 0, .. ), not called from ::Build( aabb )." );
 	}
@@ -1504,7 +1536,7 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 			const bvhvec4 fmax = tinybvh_max( v0, tinybvh_max( v1, v2 ) );
 			fragment[i].bmin = fmin, fragment[i].bmax = fmax;
 			root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
-			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
+			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), primIdx[i] = i;
 		}
 	}
 	else
@@ -1519,7 +1551,7 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 			const bvhvec4 fmax = tinybvh_max( v0, tinybvh_max( v1, v2 ) );
 			fragment[i].bmin = fmin, fragment[i].bmax = fmax;
 			root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
-			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
+			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), primIdx[i] = i;
 		}
 		vertIdx = (uint32_t*)indices;
 	}
@@ -1546,7 +1578,7 @@ void BVH::Build()
 			const bvhvec3 rpd3 = bvhvec3( BVHBINS / (node.aabbMax - node.aabbMin) ), nmin3 = node.aabbMin;
 			for (uint32_t i = 0; i < node.triCount; i++) // process all tris for x,y and z at once
 			{
-				const uint32_t fi = triIdx[node.leftFirst + i];
+				const uint32_t fi = primIdx[node.leftFirst + i];
 				bvhint3 bi = bvhint3( ((fragment[fi].bmin + fragment[fi].bmax) * 0.5f - nmin3) * rpd3 );
 				bi.x = tinybvh_clamp( bi.x, 0, BVHBINS - 1 );
 				bi.y = tinybvh_clamp( bi.y, 0, BVHBINS - 1 );
@@ -1594,10 +1626,10 @@ void BVH::Build()
 			const float rpd = rpd3.cell[bestAxis], nmin = nmin3.cell[bestAxis];
 			for (uint32_t i = 0; i < node.triCount; i++)
 			{
-				const uint32_t fi = triIdx[src];
+				const uint32_t fi = primIdx[src];
 				int32_t bi = (uint32_t)(((fragment[fi].bmin[bestAxis] + fragment[fi].bmax[bestAxis]) * 0.5f - nmin) * rpd);
 				bi = tinybvh_clamp( bi, 0, BVHBINS - 1 );
-				if ((uint32_t)bi <= bestPos) src++; else tinybvh_swap( triIdx[src], triIdx[--j] );
+				if ((uint32_t)bi <= bestPos) src++; else tinybvh_swap( primIdx[src], primIdx[--j] );
 			}
 			// create child nodes
 			uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
@@ -1665,12 +1697,12 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
+		AlignedFree( primIdx );
 		AlignedFree( fragment );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
 		allocatedNodes = spaceNeeded;
 		memset( &bvhNode[1], 0, 32 );	// node 1 remains unused, for cache line alignment.
-		triIdx = (uint32_t*)AlignedAlloc( (primCount + slack) * sizeof( uint32_t ) );
+		primIdx = (uint32_t*)AlignedAlloc( (primCount + slack) * sizeof( uint32_t ) );
 		fragment = (Fragment*)AlignedAlloc( (primCount + slack) * sizeof( Fragment ) );
 	}
 	else FATAL_ERROR_IF( !rebuildable, "BVH::PrepareHQBuild( .. ), bvh not rebuildable." );
@@ -1691,7 +1723,7 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 			const bvhvec4 fmax = tinybvh_max( v0, tinybvh_max( v1, v2 ) );
 			fragment[i].bmin = fmin, fragment[i].bmax = fmax, fragment[i].primIdx = i, fragment[i].clipped = 0;
 			root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
-			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
+			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), primIdx[i] = i;
 		}
 	}
 	else
@@ -1707,18 +1739,18 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 			const bvhvec4 fmax = tinybvh_max( v0, tinybvh_max( v1, v2 ) );
 			fragment[i].bmin = fmin, fragment[i].bmax = fmax, fragment[i].primIdx = i, fragment[i].clipped = 0;
 			root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
-			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
+			root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), primIdx[i] = i;
 		}
 		vertIdx = (uint32_t*)indices;
 	}
 	// clear remainder of index array
-	memset( triIdx + triCount, 0, slack * 4 );
+	memset( primIdx + triCount, 0, slack * 4 );
 	// all set; actual build happens in BVH::Build.
 }
 void BVH::BuildHQ()
 {
 	const uint32_t slack = triCount >> 1; // for split prims
-	uint32_t* triIdxA = triIdx;
+	uint32_t* triIdxA = primIdx;
 	uint32_t* triIdxB = (uint32_t*)AlignedAlloc( (triCount + slack) * sizeof( uint32_t ) );
 	memset( triIdxB, 0, (triCount + slack) * 4 );
 	// reset node pool
@@ -1745,7 +1777,7 @@ void BVH::BuildHQ()
 			const bvhvec3 rpd3 = bvhvec3( HQBVHBINS / (node.aabbMax - node.aabbMin) ), nmin3 = node.aabbMin;
 			for (uint32_t i = 0; i < node.triCount; i++) // process all tris for x,y and z at once
 			{
-				const uint32_t fi = triIdx[node.leftFirst + i];
+				const uint32_t fi = primIdx[node.leftFirst + i];
 				bvhint3 bi = bvhint3( ((fragment[fi].bmin + fragment[fi].bmax) * 0.5f - nmin3) * rpd3 );
 				bi.x = tinybvh_clamp( bi.x, 0, HQBVHBINS - 1 );
 				bi.y = tinybvh_clamp( bi.y, 0, HQBVHBINS - 1 );
@@ -1854,7 +1886,7 @@ void BVH::BuildHQ()
 			{
 				bvhvec3 nodeMin( BVH_FAR ), nodeMax( -BVH_FAR );
 				for (uint32_t i = 0; i < node.triCount; i++)
-					triIdx[node.leftFirst + i] = fragment[triIdx[node.leftFirst + i]].primIdx;
+					primIdx[node.leftFirst + i] = fragment[primIdx[node.leftFirst + i]].primIdx;
 				break; // not splitting is better.
 			}
 			// double-buffered partition
@@ -1930,7 +1962,7 @@ void BVH::BuildHQ()
 				const float rpd = rpd3.cell[bestAxis], nmin = nmin3.cell[bestAxis];
 				for (uint32_t i = 0; i < node.triCount; i++)
 				{
-					const uint32_t fr = triIdx[src + i];
+					const uint32_t fr = primIdx[src + i];
 					int32_t bi = (int32_t)(((fragment[fr].bmin[bestAxis] + fragment[fr].bmax[bestAxis]) * 0.5f - nmin) * rpd);
 					bi = tinybvh_clamp( bi, 0, HQBVHBINS - 1 );
 					if (bi <= (int32_t)bestPos) triIdxB[A++] = fr; else triIdxB[--B] = fr;
@@ -1985,7 +2017,7 @@ void BVH::Refit( const uint32_t /* unused */ )
 			{
 				for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
 				{
-					const uint32_t vidx = triIdx[first + j] * 3;
+					const uint32_t vidx = primIdx[first + j] * 3;
 					const uint32_t i0 = vertIdx[vidx], i1 = vertIdx[vidx + 1], i2 = vertIdx[vidx + 2];
 					const bvhvec4 v0 = verts[i0], v1 = verts[i1], v2 = verts[i2];
 					const bvhvec4 t1 = tinybvh_min( v0, bmin );
@@ -2000,7 +2032,7 @@ void BVH::Refit( const uint32_t /* unused */ )
 			{
 				for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
 				{
-					const uint32_t vidx = triIdx[first + j] * 3;
+					const uint32_t vidx = primIdx[first + j] * 3;
 					const bvhvec4 v0 = verts[vidx], v1 = verts[vidx + 1], v2 = verts[vidx + 2];
 					const bvhvec4 t1 = tinybvh_min( v0, bmin );
 					const bvhvec4 t2 = tinybvh_max( v0, bmax );
@@ -2032,11 +2064,11 @@ int32_t BVH::Intersect( Ray& ray ) const
 		if (node->isLeaf())
 		{
 			if (indexedEnabled && vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				IntersectTriIndexed( ray, verts, vertIdx, triIdx[node->leftFirst + i] );
+				IntersectTriIndexed( ray, verts, vertIdx, primIdx[node->leftFirst + i] );
 			else if (customEnabled && customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				(*customIntersect)(ray, triIdx[node->leftFirst + i]);
+				(*customIntersect)(ray, primIdx[node->leftFirst + i]);
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				IntersectTri( ray, verts, triIdx[node->leftFirst + i] );
+				IntersectTri( ray, verts, primIdx[node->leftFirst + i] );
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -2070,7 +2102,7 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 			for (uint32_t i = 0; i < node->triCount; i++)
 			{
 				// BLAS traversal
-				const uint32_t instIdx = triIdx[node->leftFirst + i];
+				const uint32_t instIdx = primIdx[node->leftFirst + i];
 				const BLASInstance& inst = instList[instIdx];
 				const BVH* blas = (const BVH*)blasList[inst.blasIdx]; // TODO: actually we don't know BVH type.
 				// 1. Transform ray with the inverse of the instance transform
@@ -2116,17 +2148,17 @@ bool BVH::IsOccluded( const Ray& ray ) const
 			if (indexedEnabled && vertIdx != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
-					if (IndexedTriOccludes( ray, verts, vertIdx, triIdx[node->leftFirst + i] )) return true;
+					if (IndexedTriOccludes( ray, verts, vertIdx, primIdx[node->leftFirst + i] )) return true;
 			}
 			else if (customEnabled && customIsOccluded != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
-					if ((*customIsOccluded)(ray, triIdx[node->leftFirst + i])) return true;
+					if ((*customIsOccluded)(ray, primIdx[node->leftFirst + i])) return true;
 			}
 			else
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
-					if (TriOccludes( ray, verts, triIdx[node->leftFirst + i] )) return true;
+					if (TriOccludes( ray, verts, primIdx[node->leftFirst + i] )) return true;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
@@ -2161,7 +2193,7 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 			for (uint32_t i = 0; i < node->triCount; i++)
 			{
 				// BLAS traversal
-				BLASInstance& inst = instList[triIdx[node->leftFirst + i]];
+				BLASInstance& inst = instList[primIdx[node->leftFirst + i]];
 				BVH* blas = (BVH*)blasList[inst.blasIdx]; // TODO: actually we don't know BVH type.
 				// 1. Transform ray with the inverse of the instance transform
 				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
@@ -2231,7 +2263,7 @@ void BVH::Intersect256Rays( Ray* packet ) const
 			// handle leaf node
 			for (uint32_t j = 0; j < node->triCount; j++)
 			{
-				const uint32_t idx = triIdx[node->leftFirst + j], vid = idx * 3;
+				const uint32_t idx = primIdx[node->leftFirst + j], vid = idx * 3;
 				const bvhvec3 edge1 = verts[vid + 1] - verts[vid], edge2 = verts[vid + 2] - verts[vid];
 				const bvhvec3 s = O - bvhvec3( verts[vid] );
 				for (int32_t i = first; i <= last; i++)
@@ -2431,7 +2463,7 @@ void BVH_Verbose::ConvertFrom( const BVH& original, bool /* unused here */ )
 	CopyBasePropertiesFrom( original );
 	this->verts = original.verts;
 	this->fragment = original.fragment;
-	this->triIdx = original.triIdx;
+	this->primIdx = original.primIdx;
 	bvhNode[0].parent = 0xffffffff; // root sentinel
 	// convert
 	uint32_t nodeIdx = 0, parent = 0xffffffff, stack[128], stackPtr = 0;
@@ -2487,7 +2519,7 @@ void BVH_Verbose::Refit( const uint32_t nodeIdx )
 		bvhvec4 bmin( BVH_FAR ), bmax( -BVH_FAR );
 		for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
 		{
-			const uint32_t vertIdx = triIdx[first + j] * 3;
+			const uint32_t vertIdx = primIdx[first + j] * 3;
 			bmin = tinybvh_min( bmin, verts[vertIdx] ), bmax = tinybvh_max( bmax, verts[vertIdx] );
 			bmin = tinybvh_min( bmin, verts[vertIdx + 1] ), bmax = tinybvh_max( bmax, verts[vertIdx + 1] );
 			bmin = tinybvh_min( bmin, verts[vertIdx + 2] ), bmax = tinybvh_max( bmax, verts[vertIdx + 2] );
@@ -2585,11 +2617,11 @@ void BVH_Verbose::SplitLeafs( const uint32_t maxPrims )
 				node.left = newIdx1, node.right = newIdx2, node.triCount = 0;
 				new1.aabbMin = new2.aabbMin = BVH_FAR, new1.aabbMax = new2.aabbMax = -BVH_FAR;
 				for (uint32_t fi, i = 0; i < new1.triCount; i++)
-					fi = triIdx[new1.firstTri + i],
+					fi = primIdx[new1.firstTri + i],
 					new1.aabbMin = tinybvh_min( new1.aabbMin, fragment[fi].bmin ),
 					new1.aabbMax = tinybvh_max( new1.aabbMax, fragment[fi].bmax );
 				for (uint32_t fi, i = 0; i < new2.triCount; i++)
-					fi = triIdx[new2.firstTri + i],
+					fi = primIdx[new2.firstTri + i],
 					new2.aabbMin = tinybvh_min( new2.aabbMin, fragment[fi].bmin ),
 					new2.aabbMax = tinybvh_max( new2.aabbMax, fragment[fi].bmax );
 				// recurse
@@ -2651,8 +2683,8 @@ void BVH_Verbose::MergeLeafs()
 	}
 	// cleanup
 	AlignedFree( subtreeTriCount );
-	AlignedFree( triIdx );
-	triIdx = newIdx, may_have_holes = true; // all over the place, in fact
+	AlignedFree( primIdx );
+	primIdx = newIdx, may_have_holes = true; // all over the place, in fact
 }
 
 // BVH_GPU implementation
@@ -2774,7 +2806,7 @@ int32_t BVH_GPU::Intersect( Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
-	const uint32_t* triIdx = bvh.triIdx;
+	const uint32_t* primIdx = bvh.primIdx;
 	uint32_t stackPtr = 0, cost = 0;
 	while (1)
 	{
@@ -2782,11 +2814,11 @@ int32_t BVH_GPU::Intersect( Ray& ray ) const
 		if (node->isLeaf())
 		{
 			if (indexedEnabled && bvh.vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				IntersectTriIndexed( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] );
+				IntersectTriIndexed( ray, verts, bvh.vertIdx, primIdx[node->firstTri + i] );
 			else if (customEnabled && bvh.customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				(*bvh.customIntersect)(ray, triIdx[node->firstTri + i]);
+				(*bvh.customIntersect)(ray, primIdx[node->firstTri + i]);
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				IntersectTri( ray, verts, triIdx[node->firstTri + i] );
+				IntersectTri( ray, verts, primIdx[node->firstTri + i] );
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -3006,7 +3038,7 @@ template<int M> void MBVH<M>::Refit( const uint32_t nodeIdx )
 		{
 			for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
 			{
-				const uint32_t vidx = bvh.triIdx[first + j] * 3;
+				const uint32_t vidx = bvh.primIdx[first + j] * 3;
 				const uint32_t i0 = bvh.vertIdx[vidx], i1 = bvh.vertIdx[vidx + 1], i2 = bvh.vertIdx[vidx + 2];
 				const bvhvec3 v0 = bvh.verts[i0], v1 = bvh.verts[i1], v2 = bvh.verts[i2];
 				aabbMin = tinybvh_min( aabbMin, tinybvh_min( tinybvh_min( v0, v1 ), v2 ) );
@@ -3017,7 +3049,7 @@ template<int M> void MBVH<M>::Refit( const uint32_t nodeIdx )
 		{
 			for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
 			{
-				const uint32_t vidx = bvh.triIdx[first + j] * 3;
+				const uint32_t vidx = bvh.primIdx[first + j] * 3;
 				const bvhvec3 v0 = bvh.verts[vidx], v1 = bvh.verts[vidx + 1], v2 = bvh.verts[vidx + 2];
 				aabbMin = tinybvh_min( aabbMin, tinybvh_min( tinybvh_min( v0, v1 ), v2 ) );
 				aabbMax = tinybvh_max( aabbMax, tinybvh_max( tinybvh_max( v0, v1 ), v2 ) );
@@ -3120,7 +3152,7 @@ template<int M> void MBVH<M>::ConvertFrom( const BVH& original, bool compact )
 // busy leafs recursively in multiple leaves, until the requirement is met.
 template<int M> void MBVH<M>::SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims )
 {
-	const uint32_t* triIdx = bvh.triIdx;
+	const uint32_t* primIdx = bvh.primIdx;
 	const Fragment* fragment = bvh.fragment;
 	MBVHNode& node = mbvhNode[nodeIdx];
 	if (node.triCount <= maxPrims) return; // also catches interior nodes
@@ -3144,7 +3176,7 @@ template<int M> void MBVH<M>::SplitBVHLeaf( const uint32_t nodeIdx, const uint32
 		{
 			// TODO: why is this producing wrong aabbs for SBVH?
 			child.aabbMin = bvhvec3( BVH_FAR ), child.aabbMax = bvhvec3( -BVH_FAR );
-			for (uint32_t fi, j = 0; j < child.triCount; j++) fi = triIdx[child.firstTri + j],
+			for (uint32_t fi, j = 0; j < child.triCount; j++) fi = primIdx[child.firstTri + j],
 				child.aabbMin = tinybvh_min( child.aabbMin, fragment[fi].bmin ),
 				child.aabbMax = tinybvh_max( child.aabbMax, fragment[fi].bmax );
 		}
@@ -3290,7 +3322,7 @@ void BVH4_CPU::ConvertFrom( const MBVH<4>& original, bool compact )
 				// assign vertex data
 				for (uint32_t j = 0; j < count; j++)
 				{
-					uint32_t fi = bvh4.bvh.triIdx[first + j];
+					uint32_t fi = bvh4.bvh.primIdx[first + j];
 					PrecomputeTriangle( bvh4.bvh.verts, fi * 3, (float*)&bvh4Tris[triPtr] );
 					bvh4Tris[triPtr + 3] = bvhvec4( 0, 0, 0, *(float*)&fi );
 					triPtr += 4;
@@ -3414,7 +3446,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 			childInfo[i] |= 0x80000000;
 			for (uint32_t j = 0; j < childNode[i]->triCount; j++)
 			{
-				uint32_t t = bvh4.bvh.triIdx[childNode[i]->firstTri + j];
+				uint32_t t = bvh4.bvh.primIdx[childNode[i]->firstTri + j];
 			#ifdef BVH4_GPU_COMPRESSED_TRIS
 				PrecomputeTriangle( verts, t * 3, (float*)&bvh4Alt[newAlt4Ptr] );
 				bvh4Alt[newAlt4Ptr + 3] = bvhvec4( 0, 0, 0, *(float*)&t );
@@ -3814,7 +3846,7 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 			leafChildTriCount += tcount;
 			for (uint32_t j = 0; j < tcount; j++)
 			{
-				int32_t primitiveIndex = bvh8.bvh.triIdx[child->firstTri + j];
+				int32_t primitiveIndex = bvh8.bvh.primIdx[child->firstTri + j];
 			#ifdef CWBVH_COMPRESSED_TRIS
 				PrecomputeTriangle( verts, +primitiveIndex * 3, (float*)&bvh8Tris[triDataPtr] );
 				bvh8Tris[triDataPtr + 3] = bvhvec4( 0, 0, 0, *(float*)&primitiveIndex );
@@ -3920,9 +3952,9 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
+		AlignedFree( primIdx );
 		AlignedFree( fragment );
-		triIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
+		primIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
 		allocatedNodes = spaceNeeded;
 		memset( &bvhNode[1], 0, 32 ); // avoid crash in refit.
@@ -3952,7 +3984,7 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 			const __m128 t1 = _mm_min_ps( _mm_min_ps( v0, v1 ), v2 );
 			const __m128 t2 = _mm_max_ps( _mm_max_ps( v0, v1 ), v2 );
 			frag4[i].bmin4 = t1, frag4[i].bmax4 = t2, rootMin = _mm_min_ps( rootMin, t1 ), rootMax = _mm_max_ps( rootMax, t2 );
-			triIdx[i] = i;
+			primIdx[i] = i;
 		}
 	}
 	else
@@ -3966,7 +3998,7 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 			const __m128 t1 = _mm_min_ps( _mm_min_ps( v0, v1 ), v2 );
 			const __m128 t2 = _mm_max_ps( _mm_max_ps( v0, v1 ), v2 );
 			frag4[i].bmin4 = t1, frag4[i].bmax4 = t2, rootMin = _mm_min_ps( rootMin, t1 ), rootMax = _mm_max_ps( rootMax, t2 );
-			triIdx[i] = i;
+			primIdx[i] = i;
 		}
 	}
 	root.aabbMin = *(bvhvec3*)&rootMin, root.aabbMax = *(bvhvec3*)&rootMax;
@@ -4006,14 +4038,14 @@ void BVH::BuildAVX()
 			const __m128 rpd4 = _mm_and_ps( _mm_div_ps( binmul3, d4 ), _mm_cmpneq_ps( d4, _mm_setzero_ps() ) );
 			// implementation of Section 4.1 of "Parallel Spatial Splits in Bounding Volume Hierarchies":
 			// main loop operates on two fragments to minimize dependencies and maximize ILP.
-			uint32_t fi = triIdx[node.leftFirst];
+			uint32_t fi = primIdx[node.leftFirst];
 			memset( count, 0, sizeof( count ) );
 			__m256 r0, r1, r2, f = _mm256_xor_ps( _mm256_and_ps( frag8[fi], mask6 ), signFlip8 );
 			const __m128 fmin = _mm_and_ps( frag4[fi].bmin4, mask3 ), fmax = _mm_and_ps( frag4[fi].bmax4, mask3 );
 			const __m128i bi4 = _mm_cvtps_epi32( _mm_sub_ps( _mm_mul_ps( _mm_sub_ps( _mm_add_ps( fmax, fmin ), nmin4 ), rpd4 ), half4 ) );
 			const __m128i b4c = _mm_max_epi32( _mm_min_epi32( bi4, maxbin4 ), _mm_setzero_si128() ); // clamp needed after all
 			memcpy( binbox, binboxOrig, sizeof( binbox ) );
-			uint32_t i0 = ILANE( b4c, 0 ), i1 = ILANE( b4c, 1 ), i2 = ILANE( b4c, 2 ), * ti = triIdx + node.leftFirst + 1;
+			uint32_t i0 = ILANE( b4c, 0 ), i1 = ILANE( b4c, 1 ), i2 = ILANE( b4c, 2 ), * ti = primIdx + node.leftFirst + 1;
 			for (uint32_t i = 0; i < node.triCount - 1; i++)
 			{
 				uint32_t fid = *ti++;
@@ -4067,11 +4099,11 @@ void BVH::BuildAVX()
 			if (splitCost >= noSplitCost) break; // not splitting is better.
 			// in-place partition
 			const float rpd = (*(bvhvec3*)&rpd4)[bestAxis], nmin = (*(bvhvec3*)&nmin4)[bestAxis];
-			uint32_t t, fr = triIdx[src];
+			uint32_t t, fr = primIdx[src];
 			for (uint32_t i = 0; i < node.triCount; i++)
 			{
 				const uint32_t bi = (uint32_t)((fragment[fr].bmax[bestAxis] + fragment[fr].bmin[bestAxis] - nmin) * rpd);
-				if (bi <= bestPos) fr = triIdx[++src]; else t = fr, fr = triIdx[src] = triIdx[--j], triIdx[j] = t;
+				if (bi <= bestPos) fr = primIdx[++src]; else t = fr, fr = primIdx[src] = primIdx[--j], primIdx[j] = t;
 			}
 			// create child nodes and recurse
 			const uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
@@ -4134,7 +4166,7 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 			// handle leaf node
 			for (uint32_t j = 0; j < node->triCount; j++)
 			{
-				const uint32_t idx = triIdx[node->leftFirst + j], vid = idx * 3;
+				const uint32_t idx = primIdx[node->leftFirst + j], vid = idx * 3;
 				const bvhvec3 edge1 = verts[vid + 1] - verts[vid], edge2 = verts[vid + 2] - verts[vid];
 				const bvhvec3 s = O - bvhvec3( verts[vid] );
 				for (int32_t i = first; i <= last; i++)
@@ -4306,7 +4338,7 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
-	const uint32_t* triIdx = bvh.triIdx;
+	const uint32_t* primIdx = bvh.primIdx;
 	uint32_t stackPtr = 0, cost = 0;
 	const __m128 Ox4 = _mm_set1_ps( ray.O.x ), rDx4 = _mm_set1_ps( ray.rD.x );
 	const __m128 Oy4 = _mm_set1_ps( ray.O.y ), rDy4 = _mm_set1_ps( ray.rD.y );
@@ -4317,11 +4349,11 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		if (node->isLeaf())
 		{
 			if (indexedEnabled && bvh.vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				IntersectTriIndexed( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] );
+				IntersectTriIndexed( ray, verts, bvh.vertIdx, primIdx[node->firstTri + i] );
 			else if (customEnabled && bvh.customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				(*bvh.customIntersect)(ray, triIdx[node->firstTri + i]);
+				(*bvh.customIntersect)(ray, primIdx[node->firstTri + i]);
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-				IntersectTri( ray, verts, triIdx[node->firstTri + i] );
+				IntersectTri( ray, verts, primIdx[node->firstTri + i] );
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -4384,7 +4416,7 @@ bool BVH_SoA::IsOccluded( const Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
-	const uint32_t* triIdx = bvh.triIdx;
+	const uint32_t* primIdx = bvh.primIdx;
 	uint32_t stackPtr = 0;
 	const __m128 Ox4 = _mm_set1_ps( ray.O.x ), rDx4 = _mm_set1_ps( ray.rD.x );
 	const __m128 Oy4 = _mm_set1_ps( ray.O.y ), rDy4 = _mm_set1_ps( ray.rD.y );
@@ -4396,17 +4428,17 @@ bool BVH_SoA::IsOccluded( const Ray& ray ) const
 			if (indexedEnabled && bvh.vertIdx != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
-					if (IndexedTriOccludes( ray, verts, bvh.vertIdx, triIdx[node->firstTri + i] )) return true;
+					if (IndexedTriOccludes( ray, verts, bvh.vertIdx, primIdx[node->firstTri + i] )) return true;
 			}
 			else if (customEnabled && bvh.customIsOccluded != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
-					if ((*bvh.customIsOccluded)(ray, triIdx[node->firstTri + i])) return true;
+					if ((*bvh.customIsOccluded)(ray, primIdx[node->firstTri + i])) return true;
 			}
 			else
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
-					if (TriOccludes( ray, verts, triIdx[node->firstTri + i] )) return true;
+					if (TriOccludes( ray, verts, primIdx[node->firstTri + i] )) return true;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
@@ -5057,9 +5089,9 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
+		AlignedFree( primIdx );
 		AlignedFree( fragment );
-		triIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
+		primIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
 		allocatedNodes = spaceNeeded;
 		memset( &bvhNode[1], 0, 32 ); // avoid crash in refit.
@@ -5082,7 +5114,7 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 	{
 		const float32x4_t v1 = vminq_f32( vminq_f32( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
 		const float32x4_t v2 = vmaxq_f32( vmaxq_f32( verts4[i * 3], verts4[i * 3 + 1] ), verts4[i * 3 + 2] );
-		frag4[i].bmin4 = v1, frag4[i].bmax4 = v2, rootMin = vminq_f32( rootMin, v1 ), rootMax = vmaxq_f32( rootMax, v2 ), triIdx[i] = i;
+		frag4[i].bmin4 = v1, frag4[i].bmax4 = v2, rootMin = vminq_f32( rootMin, v1 ), rootMax = vmaxq_f32( rootMax, v2 ), primIdx[i] = i;
 	}
 	root.aabbMin = *(bvhvec3*)&rootMin, root.aabbMax = *(bvhvec3*)&rootMax;
 	// subdivide recursively
@@ -5100,7 +5132,7 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 			const float32x4_t rpd4 = vandq_s32( vdivq_f32( binmul3, d4 ), vmvnq_u32( vceqq_f32( d4, vdupq_n_f32( 0 ) ) ) );
 			// implementation of Section 4.1 of "Parallel Spatial Splits in Bounding Volume Hierarchies":
 			// main loop operates on two fragments to minimize dependencies and maximize ILP.
-			uint32_t fi = triIdx[node.leftFirst];
+			uint32_t fi = primIdx[node.leftFirst];
 			memset( count, 0, sizeof( count ) );
 			Fragment tmp = fragment[fi];
 			tmp.bmin *= -1.0f;
@@ -5110,7 +5142,7 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 			uint32_t i0 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 0 ), 0, 7 ));
 			uint32_t i1 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 1 ), 0, 7 ));
 			uint32_t i2 = (uint32_t)(tinybvh_clamp( ILANE( bi4, 2 ), 0, 7 ));
-			uint32_t* ti = triIdx + node.leftFirst + 1;
+			uint32_t* ti = primIdx + node.leftFirst + 1;
 			for (uint32_t i = 0; i < node.triCount - 1; i++)
 			{
 				uint32_t fid = *ti++;
@@ -5172,11 +5204,11 @@ void BVH::BuildNEON( const bvhvec4slice& vertices )
 			if (splitCost >= noSplitCost) break; // not splitting is better.
 			// in-place partition
 			const float rpd = (*(bvhvec3*)&rpd4)[bestAxis], nmin = (*(bvhvec3*)&nmin4)[bestAxis];
-			uint32_t t, fr = triIdx[src];
+			uint32_t t, fr = primIdx[src];
 			for (uint32_t i = 0; i < node.triCount; i++)
 			{
 				const uint32_t bi = (uint32_t)((fragment[fr].bmax[bestAxis] + fragment[fr].bmin[bestAxis] - nmin) * rpd);
-				if (bi <= bestPos) fr = triIdx[++src]; else t = fr, fr = triIdx[src] = triIdx[--j], triIdx[j] = t;
+				if (bi <= bestPos) fr = primIdx[++src]; else t = fr, fr = primIdx[src] = primIdx[--j], primIdx[j] = t;
 			}
 			// create child nodes and recurse
 			const uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
@@ -5204,7 +5236,7 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
-	const uint32_t* triIdx = bvh.triIdx;
+	const uint32_t* primIdx = bvh.primIdx;
 	uint32_t stackPtr = 0, cost = 0;
 	const float32x4_t Ox4 = vdupq_n_f32( ray.O.x ), rDx4 = vdupq_n_f32( ray.rD.x );
 	const float32x4_t Oy4 = vdupq_n_f32( ray.O.y ), rDy4 = vdupq_n_f32( ray.rD.y );
@@ -5217,7 +5249,7 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		{
 			for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 			{
-				const uint32_t tidx = triIdx[node->firstTri + i], vertIdx = tidx * 3;
+				const uint32_t tidx = primIdx[node->firstTri + i], vertIdx = tidx * 3;
 				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
 				const bvhvec3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
 				const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
@@ -5644,7 +5676,7 @@ BVH_Double::~BVH_Double()
 {
 	AlignedFree( fragment );
 	AlignedFree( bvhNode );
-	AlignedFree( triIdx );
+	AlignedFree( primIdx );
 }
 
 void BVH_Double::Build( BLASInstanceEx* bvhs, const uint64_t instCount, BVH_Double** blasses, const uint64_t bCount )
@@ -5655,11 +5687,11 @@ void BVH_Double::Build( BLASInstanceEx* bvhs, const uint64_t instCount, BVH_Doub
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
+		AlignedFree( primIdx );
 		AlignedFree( fragment );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
 		allocatedNodes = spaceNeeded;
-		triIdx = (uint64_t*)AlignedAlloc( instCount * sizeof( uint64_t ) );
+		primIdx = (uint64_t*)AlignedAlloc( instCount * sizeof( uint64_t ) );
 		fragment = (Fragment*)AlignedAlloc( instCount * sizeof( Fragment ) );
 	}
 	instList = (BLASInstanceEx*)bvhs;
@@ -5678,7 +5710,7 @@ void BVH_Double::Build( BLASInstanceEx* bvhs, const uint64_t instCount, BVH_Doub
 		}
 		fragment[i].bmin = instList[i].aabbMin, fragment[i].primIdx = i, fragment[i].bmax = instList[i].aabbMax;
 		root.aabbMin = tinybvh_min( root.aabbMin, instList[i].aabbMin );
-		root.aabbMax = tinybvh_max( root.aabbMax, instList[i].aabbMax ), triIdx[i] = i;
+		root.aabbMax = tinybvh_max( root.aabbMax, instList[i].aabbMax ), primIdx[i] = i;
 	}
 	// start build
 	newNodePtr = 1;
@@ -5698,11 +5730,11 @@ void BVH_Double::PrepareBuild( const bvhdbl3* vertices, const uint64_t primCount
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
-		AlignedFree( triIdx );
+		AlignedFree( primIdx );
 		AlignedFree( fragment );
 		bvhNode = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
 		allocatedNodes = spaceNeeded;
-		triIdx = (uint64_t*)AlignedAlloc( primCount * sizeof( uint64_t ) );
+		primIdx = (uint64_t*)AlignedAlloc( primCount * sizeof( uint64_t ) );
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
 	verts = (bvhdbl3*)vertices; // note: we're not copying this data; don't delete.
@@ -5716,7 +5748,7 @@ void BVH_Double::PrepareBuild( const bvhdbl3* vertices, const uint64_t primCount
 		fragment[i].bmin = tinybvh_min( tinybvh_min( v0, v1 ), v2 );
 		fragment[i].bmax = tinybvh_max( tinybvh_max( v0, v1 ), v2 );
 		root.aabbMin = tinybvh_min( root.aabbMin, fragment[i].bmin );
-		root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), triIdx[i] = i;
+		root.aabbMax = tinybvh_max( root.aabbMax, fragment[i].bmax ), primIdx[i] = i;
 	}
 	// reset node pool
 	newNodePtr = 1;
@@ -5742,7 +5774,7 @@ void BVH_Double::Build()
 			const bvhdbl3 rpd3 = bvhdbl3( BVHBINS / (node.aabbMax - node.aabbMin) ), nmin3 = node.aabbMin;
 			for (uint32_t i = 0; i < node.triCount; i++) // process all tris for x,y and z at once
 			{
-				const uint64_t fi = triIdx[node.leftFirst + i];
+				const uint64_t fi = primIdx[node.leftFirst + i];
 				const bvhdbl3 fbi = ((fragment[fi].bmin + fragment[fi].bmax) * 0.5 - nmin3) * rpd3;
 				bvhint3 bi( (int32_t)fbi.x, (int32_t)fbi.y, (int32_t)fbi.z );
 				bi.x = tinybvh_clamp( bi.x, 0, BVHBINS - 1 );
@@ -5791,10 +5823,10 @@ void BVH_Double::Build()
 			const double rpd = rpd3.cell[bestAxis], nmin = nmin3.cell[bestAxis];
 			for (uint64_t i = 0; i < node.triCount; i++)
 			{
-				const uint64_t fi = triIdx[src];
+				const uint64_t fi = primIdx[src];
 				int32_t bi = (uint32_t)(((fragment[fi].bmin[bestAxis] + fragment[fi].bmax[bestAxis]) * 0.5 - nmin) * rpd);
 				bi = tinybvh_clamp( bi, 0, BVHBINS - 1 );
-				if ((uint32_t)bi <= bestPos) src++; else tinybvh_swap( triIdx[src], triIdx[--j] );
+				if ((uint32_t)bi <= bestPos) src++; else tinybvh_swap( primIdx[src], primIdx[--j] );
 			}
 			// create child nodes
 			uint64_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
@@ -5848,11 +5880,11 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 			if (customEnabled && customIntersect != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
-					(*customIntersect)(ray, triIdx[node->leftFirst + i]);
+					(*customIntersect)(ray, primIdx[node->leftFirst + i]);
 			}
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
 			{
-				const uint64_t idx = triIdx[node->leftFirst + i];
+				const uint64_t idx = primIdx[node->leftFirst + i];
 				const uint64_t vertIdx = idx * 3;
 				const bvhdbl3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
 				const bvhdbl3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
@@ -5909,7 +5941,7 @@ int32_t BVH_Double::IntersectTLAS( RayEx& ray ) const
 			for (uint32_t i = 0; i < node->triCount; i++)
 			{
 				// BLAS traversal
-				const uint64_t instIdx = triIdx[node->leftFirst + i];
+				const uint64_t instIdx = primIdx[node->leftFirst + i];
 				BLASInstanceEx& inst = instList[instIdx];
 				BVH_Double* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
@@ -5957,11 +5989,11 @@ bool BVH_Double::IsOccluded( const RayEx& ray ) const
 			if (customEnabled && customIntersect != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
-					(*customIsOccluded)(ray, triIdx[node->leftFirst + i]);
+					(*customIsOccluded)(ray, primIdx[node->leftFirst + i]);
 			}
 			else for (uint32_t i = 0; i < node->triCount; i++)
 			{
-				const uint64_t idx = triIdx[node->leftFirst + i];
+				const uint64_t idx = primIdx[node->leftFirst + i];
 				const uint64_t vertIdx = idx * 3;
 				const bvhdbl3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
 				const bvhdbl3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
@@ -6010,7 +6042,7 @@ bool BVH_Double::IsOccludedTLAS( const RayEx& ray ) const
 			for (uint32_t i = 0; i < node->triCount; i++)
 			{
 				// BLAS traversal
-				BLASInstanceEx& inst = instList[triIdx[node->leftFirst + i]];
+				BLASInstanceEx& inst = instList[primIdx[node->leftFirst + i]];
 				BVH_Double* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
 				tmp.O = inst.TransformPoint( ray.O, inst.invTransform );
@@ -6615,7 +6647,7 @@ void BVH_Verbose::MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32
 	BVHNode& node = bvhNode[nodeIdx];
 	if (node.isLeaf())
 	{
-		memcpy( newIdx + newIdxPtr, triIdx + node.firstTri, node.triCount * 4 );
+		memcpy( newIdx + newIdxPtr, primIdx + node.firstTri, node.triCount * 4 );
 		newIdxPtr += node.triCount;
 	}
 	else
