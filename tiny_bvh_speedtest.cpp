@@ -14,7 +14,6 @@
 #define BUILD_REFERENCE
 #define BUILD_DOUBLE
 #define BUILD_AVX
-#define BUILD_NEON
 #define BUILD_SBVH
 #define REFIT_BVH2
 #define REFIT_MBVH4
@@ -491,21 +490,6 @@ int main()
 
 #endif
 
-#ifdef BUILD_NEON
-#ifdef BVH_USENEON
-
-	// measure single-core bvh construction time - NEON builder
-	printf( "- fast NEON builder: " );
-	t.reset();
-	for (int pass = 0; pass < 3; pass++) bvh->BuildNEON( triangles, verts / 3 );
-	buildTime = t.elapsed() / 3.0f;
-	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
-	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
-
-#endif
-#endif
-
 #ifdef BUILD_SBVH
 
 	// measure single-core bvh construction time - AVX builder
@@ -606,7 +590,7 @@ int main()
 	{
 		vertices[i * 3 + 0] = triangles[i].x, vertices[i * 3 + 1] = triangles[i].y;
 		vertices[i * 3 + 2] = triangles[i].z, indices[i] = i; // Note: not using shared vertices.
-	}
+}
 	rtcSetGeometryBuildQuality( embreeGeom, RTC_BUILD_QUALITY_HIGH ); // max quality
 	rtcCommitGeometry( embreeGeom );
 	rtcAttachGeometry( embreeScene, embreeGeom );
@@ -1066,4 +1050,4 @@ int main()
 
 	printf( "all done." );
 	return 0;
-}
+	}
