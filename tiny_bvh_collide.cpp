@@ -17,9 +17,8 @@ struct Sphere { bvhvec3 pos; float r; };
 BVH sponza, obj, tlas;
 BVHBase* bvhList[] = { &sponza, &obj };
 BLASInstance inst[2];
-int frameIdx = 0, verts = 0, bverts = 0;
+int frameIdx = 0, verts = 0;
 bvhvec4* triangles = 0;
-bvhvec4* bunny = 0;
 Sphere* spheres = 0;
 static std::atomic<int> tileIdx( 0 );
 static unsigned threadCount = std::thread::hardware_concurrency();
@@ -32,10 +31,8 @@ static bvhvec3 view = tinybvh_normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 bool sphereIntersect( tinybvh::Ray& ray, const unsigned primID )
 {
 	bvhvec3 oc = ray.O - spheres[primID].pos;
-	float b = tinybvh_dot( oc, ray.D );
-	float r = spheres[primID].r;
-	float c = tinybvh_dot( oc, oc ) - r * r;
-	float t, d = b * b - c;
+	float b = tinybvh_dot( oc, ray.D ), r = spheres[primID].r;
+	float c = tinybvh_dot( oc, oc ) - r * r, t, d = b * b - c;
 	if (d <= 0) return false;
 	d = sqrtf( d ), t = -b - d;
 	bool hit = t < ray.hit.t && t > 0;
@@ -46,10 +43,8 @@ bool sphereIntersect( tinybvh::Ray& ray, const unsigned primID )
 bool sphereIsOccluded( const tinybvh::Ray& ray, const unsigned primID )
 {
 	bvhvec3 oc = ray.O - spheres[primID].pos;
-	float b = tinybvh_dot( oc, ray.D );
-	float r = spheres[primID].r;
-	float c = tinybvh_dot( oc, oc ) - r * r;
-	float t, d = b * b - c;
+	float b = tinybvh_dot( oc, ray.D ), r = spheres[primID].r;
+	float c = tinybvh_dot( oc, oc ) - r * r, t, d = b * b - c;
 	if (d <= 0) return false;
 	d = sqrtf( d ), t = -b - d;
 	return t < ray.hit.t && t > 0;
@@ -73,8 +68,7 @@ void Init()
 
 	// create a blas for a single sphere
 	spheres = new Sphere[1];
-	spheres[0].pos = bvhvec3( 0 );
-	spheres[0].r = 2;
+	spheres[0].pos = bvhvec3( 0 ), spheres[0].r = 2;
 	obj.Build( &sphereAABB, 1 );
 	obj.customIntersect = &sphereIntersect;
 	obj.customIsOccluded = &sphereIsOccluded;
