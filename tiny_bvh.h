@@ -666,6 +666,7 @@ public:
 		bvhvec3 aabbMax; uint32_t triCount;	// 16 bytes, total: 32 bytes
 		bool isLeaf() const { return triCount > 0; /* empty BVH leaves do not exist */ }
 		float Intersect( const Ray& ray ) const { return BVH::IntersectAABB( ray, aabbMin, aabbMax ); }
+		bool Intersect( const bvhvec3& bmin, const bvhvec3& bmax ) const;
 		float SurfaceArea() const { return BVH::SA( aabbMin, aabbMax ); }
 	};
 	BVH( BVHContext ctx = {} ) { layout = LAYOUT_BVH; context = ctx; }
@@ -698,6 +699,7 @@ public:
 #endif
 	void Refit( const uint32_t nodeIdx = 0 );
 	int32_t Intersect( Ray& ray ) const;
+	bool IntersectSphere( const bvhvec3& pos, const float r ) const;
 	bool IsOccluded( const Ray& ray ) const;
 	void Intersect256Rays( Ray* first ) const;
 	void Intersect256RaysSSE( Ray* packet ) const; // requires BVH_USEAVX
@@ -2091,6 +2093,35 @@ void BVH::Refit( const uint32_t /* unused */ )
 		node.aabbMax = tinybvh_max( left.aabbMax, right.aabbMax );
 	}
 	aabbMin = bvhNode[0].aabbMin, aabbMax = bvhNode[0].aabbMax;
+}
+
+bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
+{
+	const bvhvec3 bmin = pos - bvhvec3( r ), bmax = pos + bvhvec3( r );
+	BVHNode* node = &bvhNode[0], * stack[64];
+	uint32_t stackPtr = 0;
+	const float r2 = r * r;
+	while (1)
+	{
+		if (node->isLeaf())
+		{
+			// check if the leaf aabb overlaps the sphere: https://gamedev.stackexchange.com/a/156877
+			float dist2 = 0;
+			if (pos.x < bmin.x) dist2 += (bmin.x - pos.x) * (bmin.x - pos.x);
+			if (pos.x > bmax.x) dist2 += (pos.x - bmax.x) * (pos.x - bmax.x);
+			if (pos.y < bmin.y) dist2 += (bmin.y - pos.y) * (bmin.y - pos.y);
+			if (pos.y > bmax.y) dist2 += (pos.y - bmax.y) * (pos.y - bmax.y);
+			if (pos.z < bmin.z) dist2 += (bmin.z - pos.z) * (bmin.z - pos.z);
+			if (pos.z > bmax.z) dist2 += (pos.z - bmax.z) * (pos.z - bmax.z);
+			if (dist2 <= r2) return true; else if (stackPtr == 0) break; else node = stack[--stackPtr];
+		}
+		BVHNode* child1 = &bvhNode[node->leftFirst], * child2 = &bvhNode[node->leftFirst + 1];
+		bool hit1 = child1->Intersect( bmin, bmax ), hit2 = child2->Intersect( bmin, bmax );
+		if (hit1 && hit2) stack[stackPtr++] = child2, node = child1;
+		else if (hit1) node = child1; else if (hit2) node = child2;
+		else { if (stackPtr == 0) break; node = stack[--stackPtr]; }
+	}
+	return false;
 }
 
 int32_t BVH::Intersect( Ray& ray ) const
@@ -6250,6 +6281,13 @@ void BVHBase::PrecomputeTriangle( const bvhvec4slice& vert, uint32_t triIndex, f
 		T[8] = N.x * rN, T[9] = N.y * rN, T[10] = 1, T[11] = -n * rN;
 	}
 	else memset( T, 0, 12 * 4 ); // cerr << "degenerate source " << endl;
+}
+
+bool BVH::BVHNode::Intersect( const bvhvec3& bmin, const bvhvec3& bmax ) const
+{
+	return bmin.x < aabbMax.x && bmax.x > aabbMin.x &&
+		bmin.y < aabbMax.y && bmax.y > aabbMin.y &&
+		bmin.z < aabbMax.z && bmax.z > aabbMin.z;
 }
 
 // Faster ClipFrag, which clips against only two planes if a tri wasn't clipped before.
