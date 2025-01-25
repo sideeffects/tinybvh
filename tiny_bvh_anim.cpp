@@ -8,6 +8,7 @@
 #define INSTCOUNT (GRIDSIZE * GRIDSIZE * GRIDSIZE)
 
 #define TINYBVH_IMPLEMENTATION
+#define TINYBVH_NO_SIMD
 #define INST_IDX_BITS 8 // override default; space for 256 instances.
 #include "tiny_bvh.h"
 #include <fstream>
@@ -17,7 +18,7 @@ using namespace tinybvh;
 
 struct Sphere { bvhvec3 pos; float r; };
 
-BVH4_CPU sponza;
+BVH sponza;
 BVH obj; // custom geometry BVH must be regular BVH layout.
 BVH tlas; // TLAS must for now be in regular BVH layout.
 BVHBase* bvhList[] = { &sponza, &obj };
@@ -148,7 +149,7 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 			// setup primary ray
 			const float u = (float)pixel_x / SCRWIDTH, v = (float)pixel_y / SCRHEIGHT;
 			const bvhvec3 D = tinybvh_normalize( p1 + u * (p2 - p1) + v * (p3 - p1) - eye );
-			Ray ray( eye, D, 1e30f );
+			Ray ray( eye, D );
 			tlas.Intersect( ray );
 			if (ray.hit.t < 10000)
 			{
