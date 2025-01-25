@@ -104,7 +104,6 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 	while (tile < tiles)
 	{
 		const int tx = tile % xtiles, ty = tile / xtiles;
-		unsigned seed = (tile + 17) * 171717 + frameIdx * 1023;
 		const bvhvec3 L = tinybvh_normalize( bvhvec3( 1, 2, 3 ) );
 		for (int y = 0; y < TILESIZE; y++) for (int x = 0; x < TILESIZE; x++)
 		{
@@ -117,7 +116,6 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 			tlas.Intersect( ray );
 			if (ray.hit.t < 10000)
 			{
-				uint32_t pixel_x = tx * 4 + x, pixel_y = ty * 4 + y;
 			#if INST_IDX_BITS == 32
 				// instance and primitive index are stored in separate fields
 				uint32_t primIdx = ray.hit.prim;
@@ -158,7 +156,7 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 {
 	// handle user input and update camera
-	bool moved = UpdateCamera( delta_time_s, f ) || frameIdx++ == 0;
+	UpdateCamera( delta_time_s, f );
 
 	// clear the screen with a debug-friendly color
 	for (int i = 0; i < SCRWIDTH * SCRHEIGHT; i++) buf[i] = 0xaaaaff;
