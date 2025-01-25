@@ -6,8 +6,21 @@
 #define SCRHEIGHT 720
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
-#define DRAGONS 100
+#define SCENE 2
+
+#if SCENE == 1
+
+// At GRIDSIZE == 15, make sure to set INST_IDX_BITS to 12 in tiny_bvh.h.
+#define GRIDSIZE 15
+#define DRAGONS (GRIDSIZE * GRIDSIZE * GRIDSIZE)
 // #define AUTOCAM
+
+#else
+
+#define DRAGONS 100
+#define AUTOCAM
+
+#endif
 
 // This application uses tinybvh - And this file will include the implementation.
 #define TINYBVH_IMPLEMENTATION
@@ -94,7 +107,7 @@ static void splineCam( float t )
 	rd.eye = 0.5f * (a + (b * t) + (c * t * t) + ((3 * Qp - 3 * Rp + Sp - Pp) * t * t * t));
 	a = 2 * Qt, b = Rt - Pt, c = 2 * Pt - 5 * Qt + 4 * Rt - St;
 	bvhvec3 target = 0.5f * (a + (b * t) + (c * t * t) + ((3 * Qt - 3 * Rt + St - Pt) * t * t * t));
-	rd.view = normalize( target - bvhvec3( rd.eye ) );
+	rd.view = tinybvh_normalize( target - bvhvec3( rd.eye ) );
 }
 static float uniform_rand() { return (float)rand() / (float)RAND_MAX; }
 
@@ -144,7 +157,6 @@ void Init()
 
 	// create OpenCL buffers for wavefront path tracing
 	int N = SCRWIDTH * SCRHEIGHT;
-	pixels = new Buffer( N * sizeof( uint32_t ) );
 	raysIn = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	raysOut = new Buffer( N * sizeof( bvhvec4 ) * 4 );
 	connections = new Buffer( N * 3 * sizeof( bvhvec4 ) * 3 );
@@ -153,6 +165,30 @@ void Init()
 	LoadBlueNoise();
 	noise = new Buffer( 128 * 128 * 8 * sizeof( uint32_t ), blueNoise );
 	noise->CopyToDevice();
+
+#if SCENE == 1
+
+	// load dragon mesh
+	AddMesh( "./testdata/dragon.bin", 1, bvhvec3( 0 ) );
+	swap( verts, dragonVerts );
+	swap( triCount, dragonTriCount );
+	dragon.Build( dragonVerts, dragonTriCount );
+
+	// dragon grid
+	for (int b = 1, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
+	{
+		instance[b] = BLASInstance( 1 /* dragon */ );
+		BLASInstance& i = instance[b];
+		i.transform[0] = i.transform[5] = i.transform[10] = 0.07f;
+		i.transform[3] = x, i.transform[7] = y, i.transform[11] = z;
+	}
+
+	// vertex data for static scenery
+	AddQuad( bvhvec3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
+	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 500 ), 0xffffff );
+	bistro.Build( verts, 300 );
+
+#else
 
 	// load dragon mesh
 	AddMesh( "./testdata/dragon.bin", 1, bvhvec3( 0 ) );
@@ -168,7 +204,7 @@ void Init()
 		float t = (float)d * 0.17f + 1.0f;
 		float size = 0.1f + 0.075f * uniform_rand();
 		bvhvec3 pos = splinePos( t );
-		bvhvec3 D = -size * normalize( splinePos( t + 0.01f ) - pos );
+		bvhvec3 D = -size * tinybvh_normalize( splinePos( t + 0.01f ) - pos );
 		bvhvec3 U( 0, size, 0 );
 		bvhvec3 N( -D.z, 0, D.x );
 		pos += N * 20.0f * (uniform_rand() - 0.5f);
@@ -183,28 +219,32 @@ void Init()
 	AddQuad( bvhvec3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
 	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 0 ) );
 	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
+	bistro.Build( verts, triCount );
+
+#endif
 
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-	bistro.Build( verts, triCount );
 	instance[0] = BLASInstance( 0 /* static geometry */ );
+
+	// finalize scene: build tlas
 	tlas.Build( instance, DRAGONS + 1, blasList, 2 );
 
 	// create OpenCL buffers for BVH data
 	tlasNodes = new Buffer( tlas.allocatedNodes /* could change! */ * sizeof( BVH_GPU::BVHNode ), tlas.bvhNode );
-	tlasIndices = new Buffer( tlas.bvh.idxCount * sizeof( uint32_t ), tlas.bvh.triIdx );
+	tlasIndices = new Buffer( tlas.bvh.idxCount * sizeof( uint32_t ), tlas.bvh.primIdx );
 	tlasNodes->CopyToDevice();
 	tlasIndices->CopyToDevice();
 	blasInstances = new Buffer( (DRAGONS + 1) * sizeof( BLASInstance ), instance );
 	blasInstances->CopyToDevice();
-	bistroNodes = new Buffer( bistro.usedBlocks * sizeof( bvhvec4 ), bistro.bvh8Data );
-	bistroTris = new Buffer( bistro.idxCount * 3 * sizeof( bvhvec4 ), bistro.bvh8Tris );
-	bistroVerts = new Buffer( triCount * 3 * sizeof( bvhvec4 ), verts );
 	dragonNodes = new Buffer( dragon.usedBlocks * sizeof( bvhvec4 ), dragon.bvh8Data );
 	dragonTris = new Buffer( dragon.idxCount * 3 * sizeof( bvhvec4 ), dragon.bvh8Tris );
 	drVerts = new Buffer( dragonTriCount * 3 * sizeof( bvhvec4 ), dragonVerts );
 	dragonNodes->CopyToDevice();
 	dragonTris->CopyToDevice();
 	drVerts->CopyToDevice();
+	bistroNodes = new Buffer( bistro.usedBlocks * sizeof( bvhvec4 ), bistro.bvh8Data );
+	bistroTris = new Buffer( bistro.idxCount * 3 * sizeof( bvhvec4 ), bistro.bvh8Tris );
+	bistroVerts = new Buffer( triCount * 3 * sizeof( bvhvec4 ), verts );
 	bistroNodes->CopyToDevice();
 	bistroTris->CopyToDevice();
 	bistroVerts->CopyToDevice();
@@ -218,7 +258,8 @@ void Init()
 // Keyboard handling
 bool UpdateCamera( float delta_time_s, fenster& f )
 {
-	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) ), up = 0.8f * cross( rd.view, right );
+	bvhvec3 right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), rd.view ) );
+	bvhvec3 up = 0.8f * tinybvh_cross( rd.view, right );
 #ifdef AUTOCAM
 	// playback camera spline
 	static float ct = 0, moved = 1;
@@ -243,13 +284,14 @@ bool UpdateCamera( float delta_time_s, fenster& f )
 	if (f.keys['A'] || f.keys['D']) rd.eye += right * (f.keys['D'] ? spd : -spd), moved = 1;
 	if (f.keys['W'] || f.keys['S']) rd.eye += rd.view * (f.keys['W'] ? spd : -spd), moved = 1;
 	if (f.keys['R'] || f.keys['F']) rd.eye += up * 2.0f * (f.keys['R'] ? spd : -spd), moved = 1;
-	if (f.keys[20]) rd.view = normalize( rd.view + right * -0.1f * spd ), moved = 1;
-	if (f.keys[19]) rd.view = normalize( rd.view + right * 0.1f * spd ), moved = 1;
-	if (f.keys[17]) rd.view = normalize( rd.view + up * -0.1f * spd ), moved = 1;
-	if (f.keys[18]) rd.view = normalize( rd.view + up * 0.1f * spd ), moved = 1;
+	if (f.keys[20]) rd.view = tinybvh_normalize( rd.view + right * -0.1f * spd ), moved = 1;
+	if (f.keys[19]) rd.view = tinybvh_normalize( rd.view + right * 0.1f * spd ), moved = 1;
+	if (f.keys[17]) rd.view = tinybvh_normalize( rd.view + up * -0.1f * spd ), moved = 1;
+	if (f.keys[18]) rd.view = tinybvh_normalize( rd.view + up * 0.1f * spd ), moved = 1;
 #endif
 	// recalculate right, up
-	right = normalize( cross( bvhvec3( 0, 1, 0 ), rd.view ) ), up = 0.8f * cross( rd.view, right );
+	right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), rd.view ) );
+	up = 0.8f * tinybvh_cross( rd.view, right );
 	bvhvec3 C = rd.eye + 1.2f * rd.view;
 	rd.p0 = C - right + up, rd.p1 = C + right + up, rd.p2 = C - right - up;
 	return moved > 0;

@@ -14,7 +14,6 @@
 #define BUILD_REFERENCE
 #define BUILD_DOUBLE
 #define BUILD_AVX
-#define BUILD_NEON
 #define BUILD_SBVH
 #define REFIT_BVH2
 #define REFIT_MBVH4
@@ -377,12 +376,12 @@ int main()
 		bvhvec3( -1.3, 4.96, 12.28 )
 	}, eye = eyes[0];
 	bvhvec3 views[3] = {
-		normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) ),
-		normalize( bvhvec3( 0.9427, 0.0292, -0.3324 ) ),
-		normalize( bvhvec3( -0.9886, 0.0507, -0.1419 ) )
+		tinybvh_normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) ),
+		tinybvh_normalize( bvhvec3( 0.9427, 0.0292, -0.3324 ) ),
+		tinybvh_normalize( bvhvec3( -0.9886, 0.0507, -0.1419 ) )
 	}, view = views[0];
-	bvhvec3 right = normalize( cross( bvhvec3( 0, 1, 0 ), view ) );
-	bvhvec3 up = 0.8f * cross( view, right ), C = eye + 2 * view;
+	bvhvec3 right = tinybvh_normalize( tinybvh_cross( bvhvec3( 0, 1, 0 ), view ) );
+	bvhvec3 up = 0.8f * tinybvh_cross( view, right ), C = eye + 2 * view;
 	bvhvec3 p1 = C - right + up, p2 = C + right + up, p3 = C - right - up;
 
 	// generate primary rays in a cacheline-aligned buffer - and, for data locality:
@@ -408,7 +407,7 @@ int main()
 					float u = (float)(pixel_x * 4 + (s & 3)) / (SCRWIDTH * 4);
 					float v = (float)(pixel_y * 4 + (s >> 2)) / (SCRHEIGHT * 4);
 					bvhvec3 P = p1 + u * (p2 - p1) + v * (p3 - p1);
-					fullBatch[i][Nfull++] = Ray( eye, normalize( P - eye ) );
+					fullBatch[i][Nfull++] = Ray( eye, tinybvh_normalize( P - eye ) );
 					if ((s & 7) == 0)
 					{
 						smallBatch[i][Nsmall] = fullBatch[i][Nfull - 1];
@@ -489,21 +488,6 @@ int main()
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
 	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
 
-#endif
-
-#ifdef BUILD_NEON
-#ifdef BVH_USENEON
-
-	// measure single-core bvh construction time - NEON builder
-	printf( "- fast NEON builder: " );
-	t.reset();
-	for (int pass = 0; pass < 3; pass++) bvh->BuildNEON( triangles, verts / 3 );
-	buildTime = t.elapsed() / 3.0f;
-	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
-	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
-
-#endif
 #endif
 
 #ifdef BUILD_SBVH
@@ -606,7 +590,7 @@ int main()
 	{
 		vertices[i * 3 + 0] = triangles[i].x, vertices[i * 3 + 1] = triangles[i].y;
 		vertices[i * 3 + 2] = triangles[i].z, indices[i] = i; // Note: not using shared vertices.
-	}
+}
 	rtcSetGeometryBuildQuality( embreeGeom, RTC_BUILD_QUALITY_HIGH ); // max quality
 	rtcCommitGeometry( embreeGeom );
 	rtcAttachGeometry( embreeScene, embreeGeom );
@@ -642,8 +626,8 @@ int main()
 		{
 			float t = tinybvh::tinybvh_min( 1000.0f, smallBatch[view][i].hit.t );
 			bvhvec3 I = smallBatch[view][i].O + t * smallBatch[view][i].D;
-			bvhvec3 D = tinybvh::normalize( lightPos - I );
-			shadowBatch[view][i] = Ray( I + D * shadowEpsilon, D, tinybvh::length( lightPos - I ) - shadowEpsilon );
+			bvhvec3 D = tinybvh_normalize( lightPos - I );
+			shadowBatch[view][i] = Ray( I + D * shadowEpsilon, D, tinybvh_length( lightPos - I ) - shadowEpsilon );
 		}
 		// get reference shadow ray query result
 		refOccluded[view] = 0, refOccl[view] = new unsigned[Nsmall];
@@ -821,7 +805,7 @@ int main()
 	}
 	// create OpenCL buffers for the BVH data calculated by tiny_bvh.h
 	tinyocl::Buffer gpuNodes( bvh_gpu->usedNodes * sizeof( BVH_GPU::BVHNode ), bvh_gpu->bvhNode );
-	tinyocl::Buffer idxData( bvh_gpu->idxCount * sizeof( unsigned ), bvh_gpu->bvh.triIdx );
+	tinyocl::Buffer idxData( bvh_gpu->idxCount * sizeof( unsigned ), bvh_gpu->bvh.primIdx );
 	tinyocl::Buffer triData( bvh_gpu->triCount * 3 * sizeof( tinybvh::bvhvec4 ), triangles );
 	// synchronize the host-side data to the gpu side
 	gpuNodes.CopyToDevice();
@@ -1066,4 +1050,4 @@ int main()
 
 	printf( "all done." );
 	return 0;
-}
+	}

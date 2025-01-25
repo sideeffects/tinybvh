@@ -312,3 +312,12 @@ void kernel Finalize( global float4* accumulator, const float scale, global uint
 	int3 rgb = convert_int3( min( sqrt( p.xyz ), (float3)(1.0f, 1.0f, 1.0f) ) * 255.0f );
 	pixels[pixelIdx] = (rgb.x << 16) + (rgb.y << 8) + rgb.z;
 }
+// This version of Finalize does the proper thing: pixels are plotted straight to an OpenGL
+// texture, which bypasses transfers to and from the host altogether.
+void kernel FinalizeGL( global float4* accumulator, const float scale, write_only image2d_t pixels )
+{
+	const uint x = get_global_id( 0 ), y = get_global_id( 1 );
+	const uint pixelIdx = x + y * get_global_size( 0 );
+	const float4 p = sqrt( accumulator[pixelIdx] * scale );
+	write_imagef( pixels, (int2)(x, y), p );
+}

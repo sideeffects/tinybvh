@@ -69,7 +69,9 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.2.5
+# Version 1.3.2
+
+Version 1.3.0 changed the names of vector math functions, which are now prepended with ````tinybvh_````, e.g. ````tinybvh_cross````, ````tinybvh_normalize````. This avoids name clashes in applications that override the vector types with their own. Basically tinybvh evades these so you don't have to. 
 
 Version 1.1.0 introduced a <ins>change to the API</ins>. The single BVH class with multiple layouts has been replaced with a BVH class per layout. You can simply instantiate the desired layout; conversion (and data ownership) is then handled properly by the library. Examples:
 
@@ -112,13 +114,16 @@ This version of the library includes the following functionality:
 * Fast binned SAH BVH builder using NEON intrinsices, by [wuyakuma](https://github.com/wuyakuma)
 * TLAS builder with instancing and TLAS/BLAS traversal
 * Double-precision binned SAH BVH builder
+* Support for custom geometry and mixed scenes
 * Example code for GPU TLAS/BLAS traversal (dragon invasion demo, tiny_bvh_gpu2.cpp)
+* Example TLAS/BLAS application using OpenGL interop (windows only)
 * Spatial Splits ([SBVH](https://www.nvidia.in/docs/IO/77714/sbvh.pdf), Stich et al., 2009) builder, including "unsplitting"
 * 'Compressed Wide BVH' (CWBVH) data structure
 * BVH optimizer: reduces SAH cost and improves ray tracing performance ([Bittner et al., 2013](https://dspace.cvut.cz/bitstream/handle/10467/15603/2013-Fast-Insertion-Based-Optimization-of-Bounding-Volume-Hierarchies.pdf))
 * Collapse to N-wide MBVH using templated code
 * Conversion of 4-wide BVH to GPU-friendly 64-byte quantized format
 * Single-ray and packet traversal
+* Sphere/BVH collision detection via BVH::IntersectSphere(..)
 * Fast triangle intersection: Implements the 2016 paper by [Baldwin & Weber](https://jcgt.org/published/0005/03/03/paper.pdf)
 * OpenCL traversal: Aila & Laine, 4-way quantized, CWBVH
 * Support for WASM / EMSCRIPTEN, g++, clang, Visual Studio
@@ -128,7 +133,8 @@ This version of the library includes the following functionality:
 * Custom primitives can be intersected via callbacks (new in 1.2.2)
 * Clear data ownership and intuitive management via the new and simplified API, with lots of help from David Peicho
 * You can now also BYOVT ('bring your own vector types'), thanks [Tijmen Verhoef](https://github.com/nemjit001)
-* 'SpeedTest' tool that times and validates all (well, most) traversal kernels.
+* 'SpeedTest' tool that times and validates all (well, most) traversal kernels
+* A [manual](https://jacco.ompf2.com/2025/01/24/tinybvh-manual-basic-use) is now available.
 
 The current version of the library is rapidly gaining functionality. Please expect changes to the interface.
 

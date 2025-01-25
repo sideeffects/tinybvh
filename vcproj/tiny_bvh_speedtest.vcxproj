@@ -27,6 +27,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\traverse.cl" />
+    <None Include="..\traverse_bvh2.cl" />
+    <None Include="..\traverse_bvh4.cl" />
+    <None Include="..\traverse_cwbvh.cl" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
