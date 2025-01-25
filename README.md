@@ -1,6 +1,3 @@
-# dev
-This is the **development branch** for tinybvh.
-
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
@@ -72,7 +69,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.3.2
+# Version 1.3.3
 
 Version 1.3.0 changed the names of vector math functions, which are now prepended with ````tinybvh_````, e.g. ````tinybvh_cross````, ````tinybvh_normalize````. This avoids name clashes in applications that override the vector types with their own. Basically tinybvh evades these so you don't have to. 
 
