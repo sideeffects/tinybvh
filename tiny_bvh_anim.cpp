@@ -37,28 +37,26 @@ static bvhvec3 view = tinybvh_normalize( bvhvec3( 0.826f, -0.438f, -0.356f ) );
 // callback for custom geometry: ray/sphere intersection
 bool sphereIntersect( tinybvh::Ray& ray, const unsigned primID )
 {
+	// Note: In TLAS/BLAS traversal, ray.D is not guaranteed to be normalized.
+	float mag = tinybvh_length( ray.D ), reciMag = 1.0f / mag;
 	bvhvec3 oc = ray.O - spheres[primID].pos;
-	float b = tinybvh_dot( oc, ray.D );
-	float r = spheres[primID].r;
-	float c = tinybvh_dot( oc, oc ) - r * r;
-	float t, d = b * b - c;
-	if (d <= 0) return false;
-	d = sqrtf( d ), t = -b - d;
-	bool hit = t < ray.hit.t && t > 0;
-	if (hit) ray.hit.t = t, ray.hit.prim = primID;
+	float b = tinybvh_dot( oc, ray.D ) * reciMag, r = spheres[primID].r;
+	float c = tinybvh_dot( oc, oc ) - r * r, t, d = b * b - c;
+	if (d <= 0) return false; else d = sqrtf( d ), t = -b - d;
+	const bool hit = t < ray.hit.t * mag && t > 0;
+	if (hit) ray.hit.t = t * reciMag, ray.hit.prim = primID;
 	return hit;
 }
 
 bool sphereIsOccluded( const tinybvh::Ray& ray, const unsigned primID )
 {
+	// Note: In TLAS/BLAS traversal, ray.D is not guaranteed to be normalized.
+	float mag = tinybvh_length( ray.D ), reciMag = 1.0f / mag;
 	bvhvec3 oc = ray.O - spheres[primID].pos;
-	float b = tinybvh_dot( oc, ray.D );
-	float r = spheres[primID].r;
-	float c = tinybvh_dot( oc, oc ) - r * r;
-	float t, d = b * b - c;
-	if (d <= 0) return false;
-	d = sqrtf( d ), t = -b - d;
-	return t < ray.hit.t && t > 0;
+	float b = tinybvh_dot( oc, ray.D ) * reciMag, r = spheres[primID].r;
+	float c = tinybvh_dot( oc, oc ) - r * r, t, d = b * b - c;
+	if (d <= 0) return false; else d = sqrtf( d ), t = -b - d;
+	return t < ray.hit.t * mag && t > 0;
 }
 
 void sphereAABB( const unsigned primID, bvhvec3& boundsMin, bvhvec3& boundsMax )

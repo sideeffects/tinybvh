@@ -516,6 +516,9 @@ typedef bvhvec4 SIMDVEC4;
 //
 // ============================================================================
 
+#if defined(_MSC_VER) || defined(__GNUC__)
+#pragma pack(push, 4) // is there a good alternative for Clang / EMSCRIPTEN?
+#endif
 struct Intersection
 {
 	// An intersection result is designed to fit in no more than
@@ -529,9 +532,23 @@ struct Intersection
 #endif
 	float t, u, v;	// distance along ray & barycentric coordinates of the intersection
 	uint32_t prim;	// primitive index
+	// 64 byte of custom data - 
+	// assuming struct Ray is aligned, this starts at a cache line boundary.
+	void* auxData;
+	union
+	{
+		unsigned char userChar[56];
+		float userFloat[14];
+		uint32_t userInt32[14];
+		double userDouble[7];
+		uint64_t userInt64[7];
+	};
 };
+#if defined(_MSC_VER) || defined(__GNUC__)
+#pragma pack(pop) // is there a good alternative for Clang / EMSCRIPTEN?
+#endif
 
-struct Ray
+struct ALIGNED( 64 ) Ray
 {
 	// Basic ray class. Note: For single blas traversal it is expected
 	// that Ray::rD is properly initialized. For tlas/blas traversal this
@@ -2207,25 +2224,9 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU || blas->layout == LAYOUT_BVH_SOA );
 				if (blas->layout == LAYOUT_BVH)
 				{
-					float reciDirScale = 1.0f;
-					if (((BVH*)blas)->customIntersect == 0)
-					{
-						// regular (triangle) BVH traversal
-						tmp.rD = tinybvh_safercp( tmp.D );
-						cost += ((BVH*)blas)->Intersect( tmp );
-					}
-					else
-					{
-						// when intersecting custom geometry, we need to normalize the transformed ray
-						// direction, just to be safe. This is not needed for intersecting a regular BVH.
-						const float dirScale = tinybvh_length( tmp.D );
-						reciDirScale = 1.0f / dirScale;
-						tmp.D = tmp.D * reciDirScale;
-						tmp.hit.t *= dirScale;
-						tmp.rD = tinybvh_safercp( tmp.D );
-						cost += ((BVH*)blas)->Intersect( tmp );
-						tmp.hit.t *= reciDirScale;
-					}
+					// regular (triangle) BVH traversal
+					tmp.rD = tinybvh_safercp( tmp.D );
+					cost += ((BVH*)blas)->Intersect( tmp );
 				}
 				else
 				{
@@ -5904,17 +5905,6 @@ int32_t BVH_Double::IntersectTLAS( RayEx& ray ) const
 				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
 				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
 				tmp.hit = ray.hit;
-				double reciDirScale = 1.0, dirScale = 1.0;
-				if (blas->customIntersect)
-				{
-					// when intersecting custom geometry, we need to normalize the
-					// transformed ray direction, just to be safe. This is not needed
-					// for intersecting a regular BVH.
-					dirScale = tinybvh_length( tmp.D );
-					reciDirScale = 1.0 / dirScale;
-					tmp.D = tmp.D * reciDirScale;
-					tmp.hit.t *= dirScale;
-				}
 				tmp.rD.x = tmp.D.x > 1e-24 ? (1.0 / tmp.D.x) : (tmp.D.x < -1e-24 ? (1.0 / tmp.D.x) : BVH_DBL_FAR);
 				tmp.rD.y = tmp.D.y > 1e-24 ? (1.0 / tmp.D.y) : (tmp.D.y < -1e-24 ? (1.0 / tmp.D.y) : BVH_DBL_FAR);
 				tmp.rD.z = tmp.D.z > 1e-24 ? (1.0 / tmp.D.z) : (tmp.D.z < -1e-24 ? (1.0 / tmp.D.z) : BVH_DBL_FAR);
@@ -5922,7 +5912,6 @@ int32_t BVH_Double::IntersectTLAS( RayEx& ray ) const
 				tmp.instIdx = instIdx;
 				cost += blas->Intersect( tmp );
 				// 3. Restore ray
-				tmp.hit.t *= reciDirScale;
 				ray.hit = tmp.hit;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
