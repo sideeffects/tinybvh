@@ -134,8 +134,12 @@ THE SOFTWARE.
 #endif
 // #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
 // #define TINYBVH_NO_SIMD
+#ifndef NO_INDEXED_GEOMETRY
 #define ENABLE_INDEXED_GEOMETRY
+#endif
+#ifndef NO_CUSTOM_GEOMETRY
 #define ENABLE_CUSTOM_GEOMETRY
+#endif
 
 // CWBVH triangle format: doesn't seem to help on GPU?
 // #define CWBVH_COMPRESSED_TRIS
@@ -469,7 +473,7 @@ static inline bvhdbl3 tinybvh_cross( const bvhdbl3& a, const bvhdbl3& b )
 }
 static inline double tinybvh_dot( const bvhdbl3& a, const bvhdbl3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
-#endif
+#endif // DOUBLE_PRECISION_SUPPORT
 
 // SIMD typedef, helps keeping the interface generic
 #ifdef BVH_USEAVX
@@ -800,7 +804,7 @@ public:
 	bool (*customIsOccluded)(const RayEx&, uint64_t) = 0;
 };
 
-#endif
+#endif // DOUBLE_PRECISION_SUPPORT
 
 class BVH_GPU : public BVHBase
 {
