@@ -163,7 +163,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	3
-#define TINY_BVH_VERSION_SUB	2
+#define TINY_BVH_VERSION_SUB	3
 
 // ============================================================================
 //
@@ -444,8 +444,8 @@ inline bvhdbl3 operator*( double b, const bvhdbl3& a ) { return bvhdbl3( b * a.x
 inline bvhdbl3 operator/( double b, const bvhdbl3& a ) { return bvhdbl3( b / a.x, b / a.y, b / a.z ); }
 inline bvhdbl3 operator*=( bvhdbl3& a, const double b ) { return bvhdbl3( a.x * b, a.y * b, a.z * b ); }
 
-static double tinybvh_length( const bvhdbl3& a ) { return sqrt( a.x * a.x + a.y * a.y + a.z * a.z ); }
-static bvhdbl3 tinybvh_normalize( const bvhdbl3& a )
+double tinybvh_length( const bvhdbl3& a ) { return sqrt( a.x * a.x + a.y * a.y + a.z * a.z ); }
+bvhdbl3 tinybvh_normalize( const bvhdbl3& a )
 {
 	double l = tinybvh_length( a ), rl = l == 0 ? 0 : (1.0 / l);
 	return a * rl;
@@ -506,6 +506,7 @@ typedef bvhvec4 SIMDVEC4;
 #endif
 
 // error handling
+#define FATAL_ERROR(s) FATAL_ERROR_IF(1,s)
 #define FATAL_ERROR_IF(c,s) if (c) { fprintf( stderr, \
 	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); exit( 1 ); }
 
@@ -5563,6 +5564,30 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 }
 
 #endif // BVH_USENEON
+
+#if !defined( BVH_USEAVX ) && !defined( BVH_USENEON )
+
+int32_t BVH_SoA::Intersect( Ray& ray ) const
+{
+	FATAL_ERROR( "BVH_SoA::Intersect: Requires AVX or NEON." );
+}
+
+bool BVH_SoA::IsOccluded( const Ray& ray ) const
+{
+	FATAL_ERROR( "BVH_SoA::IsOccluded: Requires AVX or NEON." );
+}
+
+int32_t BVH4_CPU::Intersect( Ray& ray ) const
+{
+	FATAL_ERROR( "BVH4_CPU::Intersect: Requires AVX or NEON." );
+}
+
+bool BVH4_CPU::IsOccluded( const Ray& ray ) const
+{
+	FATAL_ERROR( "BVH4_CPU::IsOccluded: Requires AVX or NEON." );
+}
+
+#endif
 
 // ============================================================================
 //
