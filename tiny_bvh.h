@@ -701,6 +701,10 @@ public:
 	int32_t NodeCount() const;
 	int32_t PrimCount( const uint32_t nodeIdx = 0 ) const;
 	void Compact();
+	void Save( const char* fileName );
+	bool Load( const char* fileName, const bvhvec4* vertices, const uint32_t primCount );
+	bool Load( const char* fileName, const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
+	bool Load( const char* fileName, const bvhvec4slice& vertices, const uint32_t* indices = 0, const uint32_t primCount = 0 );
 	void BuildQuick( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildQuick( const bvhvec4slice& vertices );
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
@@ -1272,6 +1276,63 @@ BVH::~BVH()
 	AlignedFree( bvhNode );
 	AlignedFree( primIdx );
 	AlignedFree( fragment );
+}
+
+void BVH::Save( const char* fileName )
+{
+	std::fstream s{ fileName, s.binary | s.out };
+	uint32_t header = TINY_BVH_VERSION_SUB + (TINY_BVH_VERSION_MINOR << 8) + (TINY_BVH_VERSION_MAJOR << 16) + (layout << 24);
+	s.write( (char*)&header, sizeof( uint32_t ) );
+	s.write( (char*)&triCount, sizeof( uint32_t ) );
+	s.write( (char*)this, sizeof( BVH ) );
+	s.write( (char*)bvhNode, usedNodes * sizeof( BVHNode ) );
+	s.write( (char*)primIdx, idxCount * sizeof( uint32_t ) );
+}
+
+bool BVH::Load( const char* fileName, const bvhvec4* vertices, const uint32_t primCount )
+{
+	return Load( fileName, bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) } );
+}
+
+bool BVH::Load( const char* fileName, const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount )
+{
+	return Load( fileName, bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) }, indices, primCount );
+}
+
+bool BVH::Load( const char* fileName, const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount )
+{
+	// open file and check contents
+	std::fstream s{ fileName, s.binary | s.in };
+	if (!s) return false;
+	BVHContext tmp = context;
+	bool expectIndexed = (indices != nullptr);
+	uint32_t header, fileTriCount;
+	s.read( (char*)&header, sizeof( uint32_t ) );
+	if (((header >> 8) & 255) != TINY_BVH_VERSION_MINOR ||
+		((header >> 16) & 255) != TINY_BVH_VERSION_MAJOR ||
+		(header & 255) != TINY_BVH_VERSION_SUB || (header >> 24) != layout) return false;
+	s.read( (char*)&fileTriCount, sizeof( uint32_t ) );
+	if (expectIndexed && fileTriCount != primCount) return false;
+	if (!expectIndexed && fileTriCount != vertices.count / 3) return false;
+	// all checks passed; safe to overwrite *this
+	s.read( (char*)this, sizeof( BVH ) );
+	if (vertIdx) return false; // saved BVH was built for indexed geometry.
+	if (blasList != nullptr || instList != nullptr) return false; // can't load/save TLAS.
+	context = tmp; // can't load context; function pointers will differ.
+	bvhNode = (BVHNode*)AlignedAlloc( usedNodes * sizeof( BVHNode ) );
+	primIdx = (uint32_t*)AlignedAlloc( idxCount * sizeof( uint32_t ) );
+	fragment = 0; // no need for this in a BVH that can't be rebuilt.
+	s.read( (char*)bvhNode, usedNodes * sizeof( BVHNode ) );
+	s.read( (char*)primIdx, idxCount * sizeof( uint32_t ) );
+	allocatedNodes = usedNodes;
+	verts = vertices; // we can't load vertices since the BVH doesn't own this data.
+	vertIdx = (uint32_t*)indices;
+	// conservative assumptions - Loading is for static BVHs.
+	rebuildable = false;
+	refittable = false;
+	may_have_holes = true;
+	// all ok.
+	return true;
 }
 
 void BVH::BuildDefault( const bvhvec4* vertices, const uint32_t primCount )
@@ -2135,7 +2196,41 @@ bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
 			if (pos.y > bmax.y) dist2 += (pos.y - bmax.y) * (pos.y - bmax.y);
 			if (pos.z < bmin.z) dist2 += (bmin.z - pos.z) * (bmin.z - pos.z);
 			if (pos.z > bmax.z) dist2 += (pos.z - bmax.z) * (pos.z - bmax.z);
-			if (dist2 <= r2) return true; else if (stackPtr == 0) break; else node = stack[--stackPtr];
+			if (dist2 <= r2) 
+			{
+				// tri/sphere test: https://gist.github.com/yomotsu/d845f21e2e1eb49f647f#file-gistfile1-js-L223
+				for( int i = 0; i < node->triCount; i++ )
+				{
+					uint32_t idx = primIdx[node->leftFirst + i];
+					bvhvec3 a, b, c;
+					if (!vertIdx) idx *= 3, a = verts[idx], b = verts[idx + 1], c = verts[idx + 2]; else
+					{
+						const uint32_t i0 = vertIdx[idx * 3], i1 = vertIdx[idx * 3 + 1], i2 = vertIdx[idx * 3 + 2];
+						a = verts[i0], b = verts[i1], c = verts[i2];
+					}
+					const bvhvec3 A = a - pos, B = b - pos, C = c - pos;
+					const float rr = r * r;
+					const bvhvec3 V = tinybvh_cross( B - A, C - A );
+					const float d = tinybvh_dot( A, V ), e = tinybvh_dot( V, V );
+					if (d * d > rr * e) continue;
+					const float aa = tinybvh_dot( A, A ), ab = tinybvh_dot( A, B ), ac = tinybvh_dot( A, C );
+					const float bb = tinybvh_dot( B, B ), bc = tinybvh_dot( B, C ), cc = tinybvh_dot( C, C );
+					if ((aa > rr && ab > aa && ac > aa) ||
+						(bb > rr && ab > bb && bc > bb) ||
+						(cc > rr && ac > cc && bc > cc)) continue;
+					const bvhvec3 AB = B - A, BC = C - B, CA = A - C;
+					const float d1 = ab - aa, d2 = bc - bb, d3 = ac - cc;
+					const float e1 = tinybvh_dot( AB, AB ), e2 = tinybvh_dot( BC, BC ), e3 = tinybvh_dot( CA, CA );
+					const bvhvec3 Q1 = A * e1 - AB * d1, Q2 = B * e2 - BC * d2, Q3 = C * e3 - CA * d3;
+					const bvhvec3 QC = C * e1 - Q1, QA = A * e2 - Q2, QB = B * e3 - Q3;
+					if ((tinybvh_dot( Q1, Q1 ) > rr * e1 * e1) && (tinybvh_dot( Q1, QC ) >= 0 ) ||
+						(tinybvh_dot( Q2, Q2 ) > rr * e2 * e2) && (tinybvh_dot( Q2, QA ) >= 0 ) ||
+						(tinybvh_dot( Q3, Q3 ) > rr * e3 * e3) && (tinybvh_dot( Q3, QB ) >= 0 )) continue;
+					// const float dist = sqrtf( d * d / e ) - r; // we're not using this.
+					return true; 
+				}
+			}
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
 		}
 		BVHNode* child1 = &bvhNode[node->leftFirst], * child2 = &bvhNode[node->leftFirst + 1];
 		bool hit1 = child1->Intersect( bmin, bmax ), hit2 = child2->Intersect( bmin, bmax );
@@ -3765,7 +3860,7 @@ BVH8_CWBVH::~BVH8_CWBVH()
 void BVH8_CWBVH::Save( const char* fileName )
 {
 	std::fstream s{ fileName, s.binary | s.out };
-	uint32_t header = TINY_BVH_VERSION_SUB + (TINY_BVH_VERSION_MINOR << 6) + (TINY_BVH_VERSION_MAJOR << 12);
+	uint32_t header = TINY_BVH_VERSION_SUB + (TINY_BVH_VERSION_MINOR << 8) + (TINY_BVH_VERSION_MAJOR << 16) + (layout << 24);
 	s.write( (char*)&header, sizeof( uint32_t ) );
 	s.write( (char*)&triCount, sizeof( uint32_t ) );
 	s.write( (char*)this, sizeof( BVH8_CWBVH ) );
@@ -3781,9 +3876,9 @@ bool BVH8_CWBVH::Load( const char* fileName, const uint32_t expectedTris )
 	BVHContext tmp = context;
 	uint32_t header, fileTriCount;
 	s.read( (char*)&header, sizeof( uint32_t ) );
-	if (((header >> 6) & 63) != TINY_BVH_VERSION_MINOR ||
-		((header >> 12) & 63) != TINY_BVH_VERSION_MAJOR ||
-		(header & 63) != TINY_BVH_VERSION_SUB) return false;
+	if (((header >> 8) & 255) != TINY_BVH_VERSION_MINOR ||
+		((header >> 16) & 255) != TINY_BVH_VERSION_MAJOR ||
+		(header & 255) != TINY_BVH_VERSION_SUB || (header >> 24) != layout) return false;
 	s.read( (char*)&fileTriCount, sizeof( uint32_t ) );
 	if (fileTriCount != expectedTris) return false;
 	// all checks passed; safe to overwrite *this
