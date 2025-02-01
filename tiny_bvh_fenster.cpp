@@ -6,7 +6,7 @@
 //#define COLOR_PRIM // compute color as hashed triangle Index
 //#define COLOR_DEPTH // compute color as depth of intersection 
 
-#define LOADSCENE
+// #define LOADSCENE
 
 #define TINYBVH_IMPLEMENTATION
 #include "tiny_bvh.h"
@@ -14,14 +14,12 @@
 
 using namespace tinybvh;
 
-BVH bvh;
+BVH4_CPU bvh;
 int frameIdx = 0;
 Ray* rays = 0;
 #ifdef COLOR_DEPTH
 int* depths = 0;
 #endif
-
-
 
 #ifdef LOADSCENE
 bvhvec4* vertices = 0;
@@ -109,14 +107,14 @@ void Init()
 
 	// build a BVH over the scene
 	if (inds > 0)
-		bvh.BuildHQ( vertices, indices, inds / 3 );
+		bvh.Build( vertices, indices, inds / 3 );
 	else
-		bvh.BuildHQ( vertices, verts / 3 );
+		bvh.Build( vertices, verts / 3 );
 
 	// allocate buffers
-	rays = (Ray*)tinybvh::malloc64(SCRWIDTH * SCRHEIGHT * 16 * sizeof(Ray));
+	rays = (Ray*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * 16 * sizeof( Ray ) );
 #ifdef COLOR_DEPTH
-	depths = (int*)tinybvh::malloc64(SCRWIDTH * SCRHEIGHT * sizeof(int));
+	depths = (int*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * sizeof( int ) );
 #endif
 
 	// load camera position / direction from file
@@ -180,11 +178,11 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 
 	// trace primary rays
 	for (int i = 0; i < N; i++) {
-#ifdef COLOR_DEPTH
-		depths[i] = bvh.Intersect(rays[i]);
-#else 
-		bvh.Intersect(rays[i]);
-#endif
+	#ifdef COLOR_DEPTH
+		depths[i] = bvh.Intersect( rays[i] );
+	#else 
+		bvh.Intersect( rays[i] );
+	#endif
 	}
 	// visualize result
 	const bvhvec3 L = tinybvh_normalize( bvhvec3( 1, 2, 3 ) );
@@ -193,29 +191,29 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++, i++) if (rays[i].hit.t < 10000)
 		{
 			int pixel_x = tx * 4 + x, pixel_y = ty * 4 + y, primIdx = rays[i].hit.prim;
-			
 
-#ifdef COLOR_DEPTH
+
+		#ifdef COLOR_DEPTH
 			buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
-#elif defined COLOR_PRIM
+		#elif defined COLOR_PRIM
 			buf[pixel_x + pixel_y * SCRWIDTH] = (primIdx * 0xdeece66d + 0xb) & 0xFFFFFF; // color is hashed primitive index
-#else
+		#else
 			int v0idx = primIdx * 3, v1idx = v0idx + 1, v2idx = v0idx + 2;
 			if (inds) v0idx = indices[v0idx], v1idx = indices[v1idx], v2idx = indices[v2idx];
 			bvhvec3 v0 = vertices[v0idx];
 			bvhvec3 v1 = vertices[v1idx];
 			bvhvec3 v2 = vertices[v2idx];
-			bvhvec3 N = tinybvh_normalize(tinybvh_cross(v1 - v0, v2 - v0));
-			int c = (int)(255.9f * fabs(tinybvh_dot(N, L)));
+			bvhvec3 N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) );
+			int c = (int)(255.9f * fabs( tinybvh_dot( N, L ) ));
 			buf[pixel_x + pixel_y * SCRWIDTH] = c + (c << 8) + (c << 16);
-#endif
+		#endif
 		}
 	}
 
 	// print frame time / rate in window title
 	char title[50];
-	sprintf(title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s);
-	fenster_update_title(&f, title);
+	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
+	fenster_update_title( &f, title );
 }
 
 void Shutdown()
