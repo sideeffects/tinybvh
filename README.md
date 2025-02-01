@@ -1,6 +1,3 @@
-# dev
-This is the **development branch** for tinybvh.
-
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
@@ -72,7 +69,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.3.3
+# Version 1.3.4
 
 Version 1.3.0 changed the names of vector math functions, which are now prepended with ````tinybvh_````, e.g. ````tinybvh_cross````, ````tinybvh_normalize````. This avoids name clashes in applications that override the vector types with their own. Basically tinybvh evades these so you don't have to. 
 
@@ -127,6 +124,7 @@ This version of the library includes the following functionality:
 * Conversion of 4-wide BVH to GPU-friendly 64-byte quantized format
 * Single-ray and packet traversal
 * Sphere/BVH collision detection via BVH::IntersectSphere(..)
+* BVH (de)serialization for most layouts
 * Fast triangle intersection: Implements the 2016 paper by [Baldwin & Weber](https://jcgt.org/published/0005/03/03/paper.pdf)
 * OpenCL traversal: Aila & Laine, 4-way quantized, CWBVH
 * Support for WASM / EMSCRIPTEN, g++, clang, Visual Studio
