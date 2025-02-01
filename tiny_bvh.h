@@ -2223,9 +2223,9 @@ bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
 					const float e1 = tinybvh_dot( AB, AB ), e2 = tinybvh_dot( BC, BC ), e3 = tinybvh_dot( CA, CA );
 					const bvhvec3 Q1 = A * e1 - AB * d1, Q2 = B * e2 - BC * d2, Q3 = C * e3 - CA * d3;
 					const bvhvec3 QC = C * e1 - Q1, QA = A * e2 - Q2, QB = B * e3 - Q3;
-					if ((tinybvh_dot( Q1, Q1 ) > rr * e1 * e1) && (tinybvh_dot( Q1, QC ) >= 0 ) ||
-						(tinybvh_dot( Q2, Q2 ) > rr * e2 * e2) && (tinybvh_dot( Q2, QA ) >= 0 ) ||
-						(tinybvh_dot( Q3, Q3 ) > rr * e3 * e3) && (tinybvh_dot( Q3, QB ) >= 0 )) continue;
+					if ((tinybvh_dot( Q1, Q1 ) > rr * e1 * e1 && tinybvh_dot( Q1, QC ) >= 0) ||
+						(tinybvh_dot( Q2, Q2 ) > rr * e2 * e2 && tinybvh_dot( Q2, QA ) >= 0) ||
+						(tinybvh_dot( Q3, Q3 ) > rr * e3 * e3 && tinybvh_dot( Q3, QB ) >= 0)) continue;
 					// const float dist = sqrtf( d * d / e ) - r; // we're not using this.
 					return true; 
 				}
