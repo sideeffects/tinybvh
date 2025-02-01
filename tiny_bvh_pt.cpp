@@ -94,8 +94,12 @@ void Init()
 	AddMesh( "./testdata/xyzrgb_dragon.bin", 0.5f, bvhvec3( -22, 0.95f, 0 ), 0xffffaa );
 	AddMesh( "./testdata/suzanne.bin", 0.2f, bvhvec3( -18, 0.95f, -16 ), 0x90ff90 );
 	AddMesh( "./testdata/head.bin", 0.5f, bvhvec3( 0, 3, 9 ) );
-	// build bvh
-	bvh.Build( tris, triCount );
+	// load or build bvh
+	if (!bvh.Load( "sponzabvh.bin", tris, triCount ))
+	{
+		bvh.Build( tris, triCount );
+		bvh.Save( "sponzabvh.bin" );
+	}
 	// load camera position / direction from file
 	std::fstream t = std::fstream{ "camera.bin", t.binary | t.in };
 	if (!t.is_open()) return;

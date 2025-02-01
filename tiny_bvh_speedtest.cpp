@@ -812,7 +812,11 @@ int main()
 	idxData.CopyToDevice();
 	triData.CopyToDevice();
 	// create rays and send them to the gpu side
-	tinyocl::Buffer rayData( Nfull * sizeof( tinybvh::Ray ), fullBatch[0] );
+	tinyocl::Buffer rayData( Nfull * 64 /* sizeof( tinybvh::Ray ) */ );
+	// the size of the ray struct exceeds 64 bytes because of the large Intersection struct.
+	// Here we chop this off, since on the GPU side, the ray is precisely 64 bytes.
+	for( unsigned i = 0; i < Nfull; i++ )
+		memcpy( (unsigned char*)rayData.GetHostPtr() + 64 * i, &fullBatch[0][i], 64 );
 	rayData.CopyToDevice();
 	// create an event to time the OpenCL kernel
 	cl_event event;
@@ -858,7 +862,9 @@ int main()
 	cl_event event;
 	cl_ulong startTime, endTime;
 	// create rays and send them to the gpu side
-	tinyocl::Buffer rayData( Nfull * sizeof( tinybvh::Ray ), fullBatch[0] );
+	tinyocl::Buffer rayData( Nfull * 64 /* sizeof( tinybvh::Ray ) */, 0 );
+	for( unsigned i = 0; i < Nfull; i++ )
+		memcpy( (unsigned char*)rayData.GetHostPtr() + 64 * i, &fullBatch[0][i], 64 );
 	rayData.CopyToDevice();
 #endif
 	// start timer and start kernel on gpu
@@ -908,7 +914,9 @@ int main()
 	cl_event event;
 	cl_ulong startTime, endTime;
 	// create rays and send them to the gpu side
-	tinyocl::Buffer rayData( Nfull * sizeof( tinybvh::Ray ), fullBatch[0] );
+	tinyocl::Buffer rayData( Nfull * 64 /* sizeof( tinybvh::Ray ) */, 0 );
+	for( unsigned i = 0; i < Nfull; i++ )
+		memcpy( (unsigned char*)rayData.GetHostPtr() + 64 * i, &fullBatch[0][i], 64 );
 	rayData.CopyToDevice();
 #endif
 	// start timer and start kernel on gpu
