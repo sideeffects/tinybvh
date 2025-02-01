@@ -1280,6 +1280,7 @@ BVH::~BVH()
 
 void BVH::Save( const char* fileName )
 {
+	// saving is easy, it's the loadingn that will be complex.
 	std::fstream s{ fileName, s.binary | s.out };
 	uint32_t header = TINY_BVH_VERSION_SUB + (TINY_BVH_VERSION_MINOR << 8) + (TINY_BVH_VERSION_MAJOR << 16) + (layout << 24);
 	s.write( (char*)&header, sizeof( uint32_t ) );
@@ -1319,7 +1320,7 @@ bool BVH::Load( const char* fileName, const bvhvec4slice& vertices, const uint32
 	if (vertIdx) return false; // saved BVH was built for indexed geometry.
 	if (blasList != nullptr || instList != nullptr) return false; // can't load/save TLAS.
 	context = tmp; // can't load context; function pointers will differ.
-	bvhNode = (BVHNode*)AlignedAlloc( usedNodes * sizeof( BVHNode ) );
+	bvhNode = (BVHNode*)AlignedAlloc( allocatedNodes * sizeof( BVHNode ) );
 	primIdx = (uint32_t*)AlignedAlloc( idxCount * sizeof( uint32_t ) );
 	fragment = 0; // no need for this in a BVH that can't be rebuilt.
 	s.read( (char*)bvhNode, usedNodes * sizeof( BVHNode ) );
@@ -1327,10 +1328,6 @@ bool BVH::Load( const char* fileName, const bvhvec4slice& vertices, const uint32
 	allocatedNodes = usedNodes;
 	verts = vertices; // we can't load vertices since the BVH doesn't own this data.
 	vertIdx = (uint32_t*)indices;
-	// conservative assumptions - Loading is for static BVHs.
-	rebuildable = false;
-	refittable = false;
-	may_have_holes = true;
 	// all ok.
 	return true;
 }
