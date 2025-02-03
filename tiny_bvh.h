@@ -908,8 +908,10 @@ public:
 		// This format exists primarily for the BVH optimizer.
 		bvhvec3 aabbMin; uint32_t left;
 		bvhvec3 aabbMax; uint32_t right;
-		uint32_t triCount, firstTri, parent, dummy;
+		uint32_t triCount, firstTri, parent;
+		float Mcomb; // for the optimizer.
 		bool isLeaf() const { return triCount > 0; }
+		float SurfaceArea() const { return BVH::SA( aabbMin, aabbMax ); }
 	};
 	BVH_Verbose( BVHContext ctx = {} ) { layout = LAYOUT_BVH_VERBOSE; context = ctx; }
 	BVH_Verbose( const BVH& original ) { /* DEPRECATED */ layout = LAYOUT_BVH_VERBOSE; ConvertFrom( original ); }
@@ -923,7 +925,9 @@ public:
 	void SplitLeafs( const uint32_t maxPrims = 1 );
 	void MergeLeafs();
 	void Optimize( const uint32_t iterations );
+	void Optimize2( const uint32_t iterations );
 private:
+	void CalculateCombinedCost( float& low, float& high );
 	void RefitUpVerbose( uint32_t nodeIdx );
 	uint32_t FindBestNewPosition( const uint32_t Lid );
 	void ReinsertNodeVerbose( const uint32_t Lid, const uint32_t Nid, const uint32_t origin );
@@ -2806,6 +2810,58 @@ void BVH_Verbose::Optimize( const uint32_t iterations )
 		RefitUpVerbose( X1 );
 		ReinsertNodeVerbose( L, Pid, X1 );
 		ReinsertNodeVerbose( R, Nid, X1 );
+	}
+}
+void BVH_Verbose::Optimize2( const uint32_t iterations )
+{
+	// Optimize by reinserting subtrees with a high cost - Section 3.4 of the paper.
+	for (uint32_t i = 0; i < 50; i++)
+	{
+		// Calculate combined cost for all nodes
+		float low = 1e30f, high = 0; 
+		CalculateCombinedCost( low, high );
+		// Find 1% nodes with the highest cost
+		// see https://en.cppreference.com/w/cpp/algorithm/sort
+		// Reinsert selected nodes
+		uint32_t Nid = 0; // TODO
+		// snip it loose
+		const BVHNode& N = bvhNode[Nid], & P = bvhNode[N.parent];
+		const uint32_t Pid = N.parent, X1 = P.parent;
+		const uint32_t X2 = P.left == Nid ? P.right : P.left;
+		if (bvhNode[X1].left == Pid) bvhNode[X1].left = X2;
+		else /* verbose[X1].right == Pid */ bvhNode[X1].right = X2;
+		bvhNode[X2].parent = X1;
+		uint32_t L = N.left, R = N.right;
+		// fix affected node bounds
+		RefitUpVerbose( X1 );
+		ReinsertNodeVerbose( L, Pid, X1 );
+		ReinsertNodeVerbose( R, Nid, X1 );
+	}
+}
+
+// Optimizing a BVH: Calculating the contribution of each node to overall tree cost,
+// so we can process a batch of the most relevant nodes. Section 3.4 of the paper.
+void BVH_Verbose::CalculateCombinedCost( float& low, float& high )
+{
+	uint32_t nodeIdx = 0, stack[64], stackPtr = 0;
+	while (1)
+	{
+		BVHNode& node = bvhNode[nodeIdx];
+		if (node.isLeaf())
+		{
+			if (stackPtr == 0) break;
+			nodeIdx = stack[--stackPtr];
+		}
+		else
+		{
+			const float SA = node.SurfaceArea();
+			const float AL = bvhNode[node.left].SurfaceArea(), AR = bvhNode[node.right].SurfaceArea();
+			float Mcomb = SA * (SA / tinybvh_min( AL, AR )) * (SA / (0.5f * (AL + AR)));
+			node.Mcomb = Mcomb;
+			if (Mcomb < low) low = Mcomb;
+			if (Mcomb > high) high = Mcomb;
+			nodeIdx = node.left, stack[stackPtr++] = node.right;
+		}
 	}
 }
 
