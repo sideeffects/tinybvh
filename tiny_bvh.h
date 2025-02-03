@@ -532,7 +532,7 @@ struct Intersection
 #endif
 	float t, u, v;	// distance along ray & barycentric coordinates of the intersection
 	uint32_t prim;	// primitive index
-	// 64 byte of custom data - 
+	// 64 byte of custom data -
 	// assuming struct Ray is aligned, this starts at a cache line boundary.
 	void* auxData;
 	union
@@ -924,10 +924,12 @@ public:
 	void Compact();
 	void SplitLeafs( const uint32_t maxPrims = 1 );
 	void MergeLeafs();
-	void Optimize( const uint32_t iterations );
-	void Optimize2( const uint32_t iterations );
+	void Optimize( const uint32_t iterations, const bool extreme = false );
 private:
+	struct SortItem { uint32_t idx; float cost; };
 	void CalculateCombinedCost( float& low, float& high );
+	void FillSortList( SortItem* sortList, uint32_t& sortListSize, const float minCost );
+	void SortSortList( SortItem* sortList, const uint32_t sortListSize );
 	void RefitUpVerbose( uint32_t nodeIdx );
 	uint32_t FindBestNewPosition( const uint32_t Lid );
 	void ReinsertNodeVerbose( const uint32_t Lid, const uint32_t Nid, const uint32_t origin );
@@ -2200,10 +2202,10 @@ bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
 			if (pos.y > bmax.y) dist2 += (pos.y - bmax.y) * (pos.y - bmax.y);
 			if (pos.z < bmin.z) dist2 += (bmin.z - pos.z) * (bmin.z - pos.z);
 			if (pos.z > bmax.z) dist2 += (pos.z - bmax.z) * (pos.z - bmax.z);
-			if (dist2 <= r2) 
+			if (dist2 <= r2)
 			{
 				// tri/sphere test: https://gist.github.com/yomotsu/d845f21e2e1eb49f647f#file-gistfile1-js-L223
-				for( uint32_t i = 0; i < node->triCount; i++ )
+				for (uint32_t i = 0; i < node->triCount; i++)
 				{
 					uint32_t idx = primIdx[node->leftFirst + i];
 					bvhvec3 a, b, c;
@@ -2231,7 +2233,7 @@ bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
 						(tinybvh_dot( Q2, Q2 ) > rr * e2 * e2 && tinybvh_dot( Q2, QA ) >= 0) ||
 						(tinybvh_dot( Q3, Q3 ) > rr * e3 * e3 && tinybvh_dot( Q3, QB ) >= 0)) continue;
 					// const float dist = sqrtf( d * d / e ) - r; // we're not using this.
-					return true; 
+					return true;
 				}
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -2780,6 +2782,8 @@ void BVH_Verbose::Compact()
 	bvhNode = tmp;
 }
 
+#if 0
+
 // Optimizing a BVH: BVH must be in 'verbose' format.
 // Implements "Fast Insertion-Based Optimization of Bounding Volume Hierarchies",
 void BVH_Verbose::Optimize( const uint32_t iterations )
@@ -2812,58 +2816,72 @@ void BVH_Verbose::Optimize( const uint32_t iterations )
 		ReinsertNodeVerbose( R, Nid, X1 );
 	}
 }
-void BVH_Verbose::Optimize2( const uint32_t iterations )
+
+#else
+
+void BVH_Verbose::Optimize( const uint32_t iterations, const bool extreme )
 {
+	// allocate array for sorting; size is upper-bound.
+	SortItem* sortList = (SortItem*)AlignedAlloc( usedNodes * sizeof( SortItem ) );
 	// Optimize by reinserting subtrees with a high cost - Section 3.4 of the paper.
-	for (uint32_t i = 0; i < 50; i++)
+	for (uint32_t i = 0; i < iterations; i++)
 	{
-		// Calculate combined cost for all nodes
-		float low = 1e30f, high = 0; 
-		CalculateCombinedCost( low, high );
-		// Find 1% nodes with the highest cost
-		// see https://en.cppreference.com/w/cpp/algorithm/sort
-		// Reinsert selected nodes
-		uint32_t Nid = 0; // TODO
-		// snip it loose
-		const BVHNode& N = bvhNode[Nid], & P = bvhNode[N.parent];
-		const uint32_t Pid = N.parent, X1 = P.parent;
-		const uint32_t X2 = P.left == Nid ? P.right : P.left;
-		if (bvhNode[X1].left == Pid) bvhNode[X1].left = X2;
-		else /* verbose[X1].right == Pid */ bvhNode[X1].right = X2;
-		bvhNode[X2].parent = X1;
-		uint32_t L = N.left, R = N.right;
-		// fix affected node bounds
-		RefitUpVerbose( X1 );
-		ReinsertNodeVerbose( L, Pid, X1 );
-		ReinsertNodeVerbose( R, Nid, X1 );
+		// calculate combined cost for all nodes
+		uint32_t interiorNodes = 0;
+		for (uint32_t j = 2; j < usedNodes; j++)
+		{
+			const BVHNode& node = bvhNode[j];
+			if (node.isLeaf()) continue;
+			if (node.parent == 0) continue;
+			if (bvhNode[node.parent].parent == 0) continue;
+			const float SA = node.SurfaceArea(), AL = bvhNode[node.left].SurfaceArea(), AR = bvhNode[node.right].SurfaceArea();
+			float Mcomb = SA * (SA / tinybvh_max( 1e-7f, tinybvh_min( AL, AR ) )) * (SA / tinybvh_max( 1e-7f, (0.5f * (AL + AR)) ));
+			sortList[interiorNodes].idx = j, sortList[interiorNodes++].cost = Mcomb;
+		}
+		// last couple of iterations we will process more nodes.
+		const int tail = extreme ? (tinybvh_min( 15u, iterations - 1 - i ) * 2) : 30;
+		const int limit = tinybvh_max( (uint32_t)(0.01f * (float)interiorNodes), interiorNodes >> tail );
+		// sort list - partial quick sort.
+		struct Task { uint32_t first, last; } stack[512];
+		int pivot, first = 0, last = (int)interiorNodes - 1, stackPtr = 0;
+		while (1)
+		{
+			if (first >= last)
+			{
+				if (stackPtr == 0) break; else first = stack[--stackPtr].first, last = stack[stackPtr].last;
+				continue;
+			}
+			pivot = first;
+			SortItem t, e = sortList[first];
+			for (int i = first + 1; i <= last; i++) if (sortList[i].cost > e.cost)
+				t = sortList[i], sortList[i] = sortList[++pivot], sortList[pivot] = t;
+			t = sortList[pivot], sortList[pivot] = sortList[first], sortList[first] = t;
+			if (pivot < limit) stack[stackPtr].first = pivot + 1, stack[stackPtr++].last = last;
+			last = pivot - 1;
+		}
+		// reinsert selected nodes
+		for (int j = 0; j < limit; j++)
+		{
+			const uint32_t Nid = sortList[j].idx;
+			const BVHNode& N = bvhNode[Nid];
+			if (N.parent == 0) continue;
+			const BVHNode& P = bvhNode[N.parent];
+			if (P.parent == 0) continue;
+			const uint32_t Pid = N.parent, X1 = P.parent;
+			const uint32_t X2 = P.left == Nid ? P.right : P.left;
+			if (bvhNode[X1].left == Pid) bvhNode[X1].left = X2;
+			else /* verbose[X1].right == Pid */ bvhNode[X1].right = X2;
+			bvhNode[X2].parent = X1;
+			const uint32_t L = N.left, R = N.right;
+			RefitUpVerbose( X1 );
+			ReinsertNodeVerbose( L, Pid, X1 );
+			ReinsertNodeVerbose( R, Nid, X1 );
+		}
 	}
+	AlignedFree( sortList );
 }
 
-// Optimizing a BVH: Calculating the contribution of each node to overall tree cost,
-// so we can process a batch of the most relevant nodes. Section 3.4 of the paper.
-void BVH_Verbose::CalculateCombinedCost( float& low, float& high )
-{
-	uint32_t nodeIdx = 0, stack[64], stackPtr = 0;
-	while (1)
-	{
-		BVHNode& node = bvhNode[nodeIdx];
-		if (node.isLeaf())
-		{
-			if (stackPtr == 0) break;
-			nodeIdx = stack[--stackPtr];
-		}
-		else
-		{
-			const float SA = node.SurfaceArea();
-			const float AL = bvhNode[node.left].SurfaceArea(), AR = bvhNode[node.right].SurfaceArea();
-			float Mcomb = SA * (SA / tinybvh_min( AL, AR )) * (SA / (0.5f * (AL + AR)));
-			node.Mcomb = Mcomb;
-			if (Mcomb < low) low = Mcomb;
-			if (Mcomb > high) high = Mcomb;
-			nodeIdx = node.left, stack[stackPtr++] = node.right;
-		}
-	}
-}
+#endif
 
 // Single-primitive leafs: Prepare the BVH for optimization. While it is not strictly
 // necessary to have a single primitive per leaf, it will yield a slightly better
@@ -3640,7 +3658,7 @@ void BVH4_CPU::ConvertFrom( const MBVH<4>& original, bool compact )
 					const uint32_t fi = bvh4.bvh.primIdx[first + j];
 					uint32_t ti0, ti1, ti2;
 					if (bvh4.bvh.vertIdx)
-						ti0 = bvh4.bvh.vertIdx[fi * 3], 
+						ti0 = bvh4.bvh.vertIdx[fi * 3],
 						ti1 = bvh4.bvh.vertIdx[fi * 3 + 1],
 						ti2 = bvh4.bvh.vertIdx[fi * 3 + 2];
 					else
@@ -3767,7 +3785,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 				uint32_t t = bvh4.bvh.primIdx[childNode[i]->firstTri + j];
 				uint32_t ti0, ti1, ti2;
 				if (bvh4.bvh.vertIdx)
-					ti0 = bvh4.bvh.vertIdx[t * 3], 
+					ti0 = bvh4.bvh.vertIdx[t * 3],
 					ti1 = bvh4.bvh.vertIdx[t * 3 + 1],
 					ti2 = bvh4.bvh.vertIdx[t * 3 + 2];
 				else
@@ -4170,7 +4188,7 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 				int32_t triIdx = bvh8.bvh.primIdx[child->firstTri + j];
 				uint32_t ti0, ti1, ti2;
 				if (bvh8.bvh.vertIdx)
-					ti0 = bvh8.bvh.vertIdx[triIdx * 3], 
+					ti0 = bvh8.bvh.vertIdx[triIdx * 3],
 					ti1 = bvh8.bvh.vertIdx[triIdx * 3 + 1],
 					ti2 = bvh8.bvh.vertIdx[triIdx * 3 + 2];
 				else
