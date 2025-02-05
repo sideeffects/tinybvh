@@ -327,20 +327,20 @@ struct bvhvec4slice
 // isolation; hence the tinybvh_ prefix.
 inline float tinybvh_safercp( const float x ) { return x > 1e-12f ? (1.0f / x) : (x < -1e-12f ? (1.0f / x) : BVH_FAR); }
 inline bvhvec3 tinybvh_safercp( const bvhvec3 a ) { return bvhvec3( tinybvh_safercp( a.x ), tinybvh_safercp( a.y ), tinybvh_safercp( a.z ) ); }
-static inline float tinybvh_min( const float a, const float b ) { return a < b ? a : b; }
-static inline float tinybvh_max( const float a, const float b ) { return a > b ? a : b; }
-static inline double tinybvh_min( const double a, const double b ) { return a < b ? a : b; }
-static inline double tinybvh_max( const double a, const double b ) { return a > b ? a : b; }
-static inline int32_t tinybvh_min( const int32_t a, const int32_t b ) { return a < b ? a : b; }
-static inline int32_t tinybvh_max( const int32_t a, const int32_t b ) { return a > b ? a : b; }
-static inline uint32_t tinybvh_min( const uint32_t a, const uint32_t b ) { return a < b ? a : b; }
-static inline uint32_t tinybvh_max( const uint32_t a, const uint32_t b ) { return a > b ? a : b; }
-static inline bvhvec3 tinybvh_min( const bvhvec3& a, const bvhvec3& b ) { return bvhvec3( tinybvh_min( a.x, b.x ), tinybvh_min( a.y, b.y ), tinybvh_min( a.z, b.z ) ); }
-static inline bvhvec4 tinybvh_min( const bvhvec4& a, const bvhvec4& b ) { return bvhvec4( tinybvh_min( a.x, b.x ), tinybvh_min( a.y, b.y ), tinybvh_min( a.z, b.z ), tinybvh_min( a.w, b.w ) ); }
-static inline bvhvec3 tinybvh_max( const bvhvec3& a, const bvhvec3& b ) { return bvhvec3( tinybvh_max( a.x, b.x ), tinybvh_max( a.y, b.y ), tinybvh_max( a.z, b.z ) ); }
-static inline bvhvec4 tinybvh_max( const bvhvec4& a, const bvhvec4& b ) { return bvhvec4( tinybvh_max( a.x, b.x ), tinybvh_max( a.y, b.y ), tinybvh_max( a.z, b.z ), tinybvh_max( a.w, b.w ) ); }
-static inline float tinybvh_clamp( const float x, const float a, const float b ) { return x > a ? (x < b ? x : b) : a; /* NaN safe */ }
-static inline int32_t tinybvh_clamp( const int32_t x, const int32_t a, const int32_t b ) { return x > a ? (x < b ? x : b) : a; /* NaN safe */ }
+inline float tinybvh_min( const float a, const float b ) { return a < b ? a : b; }
+inline float tinybvh_max( const float a, const float b ) { return a > b ? a : b; }
+inline double tinybvh_min( const double a, const double b ) { return a < b ? a : b; }
+inline double tinybvh_max( const double a, const double b ) { return a > b ? a : b; }
+inline int32_t tinybvh_min( const int32_t a, const int32_t b ) { return a < b ? a : b; }
+inline int32_t tinybvh_max( const int32_t a, const int32_t b ) { return a > b ? a : b; }
+inline uint32_t tinybvh_min( const uint32_t a, const uint32_t b ) { return a < b ? a : b; }
+inline uint32_t tinybvh_max( const uint32_t a, const uint32_t b ) { return a > b ? a : b; }
+inline bvhvec3 tinybvh_min( const bvhvec3& a, const bvhvec3& b ) { return bvhvec3( tinybvh_min( a.x, b.x ), tinybvh_min( a.y, b.y ), tinybvh_min( a.z, b.z ) ); }
+inline bvhvec4 tinybvh_min( const bvhvec4& a, const bvhvec4& b ) { return bvhvec4( tinybvh_min( a.x, b.x ), tinybvh_min( a.y, b.y ), tinybvh_min( a.z, b.z ), tinybvh_min( a.w, b.w ) ); }
+inline bvhvec3 tinybvh_max( const bvhvec3& a, const bvhvec3& b ) { return bvhvec3( tinybvh_max( a.x, b.x ), tinybvh_max( a.y, b.y ), tinybvh_max( a.z, b.z ) ); }
+inline bvhvec4 tinybvh_max( const bvhvec4& a, const bvhvec4& b ) { return bvhvec4( tinybvh_max( a.x, b.x ), tinybvh_max( a.y, b.y ), tinybvh_max( a.z, b.z ), tinybvh_max( a.w, b.w ) ); }
+inline float tinybvh_clamp( const float x, const float a, const float b ) { return x > a ? (x < b ? x : b) : a; /* NaN safe */ }
+inline int32_t tinybvh_clamp( const int32_t x, const int32_t a, const int32_t b ) { return x > a ? (x < b ? x : b) : a; /* NaN safe */ }
 template <class T> inline static void tinybvh_swap( T& a, T& b ) { T t = a; a = b; b = t; }
 
 // Operator overloads.
@@ -377,22 +377,22 @@ inline void operator*=( bvhvec3& a, const float b ) { a.x *= b; a.y *= b; a.z *=
 #endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
 // Vector math: cross and dot.
-static inline bvhvec3 tinybvh_cross( const bvhvec3& a, const bvhvec3& b )
+inline bvhvec3 tinybvh_cross( const bvhvec3& a, const bvhvec3& b )
 {
 	return bvhvec3( a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x );
 }
-static inline float tinybvh_dot( const bvhvec2& a, const bvhvec2& b ) { return a.x * b.x + a.y * b.y; }
-static inline float tinybvh_dot( const bvhvec3& a, const bvhvec3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-static inline float tinybvh_dot( const bvhvec4& a, const bvhvec4& b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+inline float tinybvh_dot( const bvhvec2& a, const bvhvec2& b ) { return a.x * b.x + a.y * b.y; }
+inline float tinybvh_dot( const bvhvec3& a, const bvhvec3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline float tinybvh_dot( const bvhvec4& a, const bvhvec4& b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
 
 // Vector math: common operations.
-static float tinybvh_length( const bvhvec3& a ) { return sqrtf( a.x * a.x + a.y * a.y + a.z * a.z ); }
-static bvhvec3 tinybvh_normalize( const bvhvec3& a )
+inline float tinybvh_length( const bvhvec3& a ) { return sqrtf( a.x * a.x + a.y * a.y + a.z * a.z ); }
+inline bvhvec3 tinybvh_normalize( const bvhvec3& a )
 {
 	float l = tinybvh_length( a ), rl = l == 0 ? 0 : (1.0f / l);
 	return a * rl;
 }
-bvhvec3 tinybvh_transform_point( const bvhvec3& v, const float* T )
+inline bvhvec3 tinybvh_transform_point( const bvhvec3& v, const float* T )
 {
 	const bvhvec3 res(
 		T[0] * v.x + T[1] * v.y + T[2] * v.z + T[3],
@@ -401,7 +401,7 @@ bvhvec3 tinybvh_transform_point( const bvhvec3& v, const float* T )
 	const float w = T[12] * v.x + T[13] * v.y + T[14] * v.z + T[15];
 	if (w == 1) return res; else return res * (1.f / w);
 }
-bvhvec3 tinybvh_transform_vector( const bvhvec3& v, const float* T )
+inline bvhvec3 tinybvh_transform_vector( const bvhvec3& v, const float* T )
 {
 	return bvhvec3( T[0] * v.x + T[1] * v.y + T[2] * v.z, T[4] * v.x +
 		T[5] * v.y + T[6] * v.z, T[8] * v.x + T[9] * v.y + T[10] * v.z );
@@ -429,8 +429,8 @@ struct bvhdbl3
 #pragma warning ( pop )
 #endif
 
-static inline bvhdbl3 tinybvh_min( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( tinybvh_min( a.x, b.x ), tinybvh_min( a.y, b.y ), tinybvh_min( a.z, b.z ) ); }
-static inline bvhdbl3 tinybvh_max( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( tinybvh_max( a.x, b.x ), tinybvh_max( a.y, b.y ), tinybvh_max( a.z, b.z ) ); }
+inline bvhdbl3 tinybvh_min( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( tinybvh_min( a.x, b.x ), tinybvh_min( a.y, b.y ), tinybvh_min( a.z, b.z ) ); }
+inline bvhdbl3 tinybvh_max( const bvhdbl3& a, const bvhdbl3& b ) { return bvhdbl3( tinybvh_max( a.x, b.x ), tinybvh_max( a.y, b.y ), tinybvh_max( a.z, b.z ) ); }
 
 #ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
@@ -444,13 +444,13 @@ inline bvhdbl3 operator*( double b, const bvhdbl3& a ) { return bvhdbl3( b * a.x
 inline bvhdbl3 operator/( double b, const bvhdbl3& a ) { return bvhdbl3( b / a.x, b / a.y, b / a.z ); }
 inline bvhdbl3 operator*=( bvhdbl3& a, const double b ) { return bvhdbl3( a.x * b, a.y * b, a.z * b ); }
 
-double tinybvh_length( const bvhdbl3& a ) { return sqrt( a.x * a.x + a.y * a.y + a.z * a.z ); }
-bvhdbl3 tinybvh_normalize( const bvhdbl3& a )
+inline double tinybvh_length( const bvhdbl3& a ) { return sqrt( a.x * a.x + a.y * a.y + a.z * a.z ); }
+inline bvhdbl3 tinybvh_normalize( const bvhdbl3& a )
 {
 	double l = tinybvh_length( a ), rl = l == 0 ? 0 : (1.0 / l);
 	return a * rl;
 }
-bvhdbl3 tinybvh_transform_point( const bvhdbl3& v, const double* T )
+inline bvhdbl3 tinybvh_transform_point( const bvhdbl3& v, const double* T )
 {
 	const bvhdbl3 res(
 		T[0] * v.x + T[1] * v.y + T[2] * v.z + T[3],
@@ -459,7 +459,7 @@ bvhdbl3 tinybvh_transform_point( const bvhdbl3& v, const double* T )
 	const double w = T[12] * v.x + T[13] * v.y + T[14] * v.z + T[15];
 	if (w == 1) return res; else return res * (1. / w);
 }
-bvhdbl3 tinybvh_transform_vector( const bvhdbl3& v, const double* T )
+inline bvhdbl3 tinybvh_transform_vector( const bvhdbl3& v, const double* T )
 {
 	return bvhdbl3( T[0] * v.x + T[1] * v.y + T[2] * v.z, T[4] * v.x +
 		T[5] * v.y + T[6] * v.z, T[8] * v.x + T[9] * v.y + T[10] * v.z );
@@ -467,11 +467,11 @@ bvhdbl3 tinybvh_transform_vector( const bvhdbl3& v, const double* T )
 
 #endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
-static inline bvhdbl3 tinybvh_cross( const bvhdbl3& a, const bvhdbl3& b )
+inline bvhdbl3 tinybvh_cross( const bvhdbl3& a, const bvhdbl3& b )
 {
 	return bvhdbl3( a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x );
 }
-static inline double tinybvh_dot( const bvhdbl3& a, const bvhdbl3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline double tinybvh_dot( const bvhdbl3& a, const bvhdbl3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
 #endif // DOUBLE_PRECISION_SUPPORT
 
@@ -4860,8 +4860,8 @@ static uint32_t __popc( uint32_t x )
 }
 #define STACK_POP() { ngroup = traversalStack[--stackPtr]; }
 #define STACK_PUSH() { traversalStack[stackPtr++] = ngroup; }
-static inline uint32_t extract_byte( const uint32_t i, const uint32_t n ) { return (i >> (n * 8)) & 0xFF; }
-static inline uint32_t sign_extend_s8x4( const uint32_t i )
+inline uint32_t extract_byte( const uint32_t i, const uint32_t n ) { return (i >> (n * 8)) & 0xFF; }
+inline uint32_t sign_extend_s8x4( const uint32_t i )
 {
 	// asm("prmt.b32 %0, %1, 0x0, 0x0000BA98;" : "=r"(v) : "r"(i)); // BA98: 1011`1010`1001`1000
 	// with the given parameters, prmt will extend the sign to all bits in a byte.
