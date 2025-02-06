@@ -12,21 +12,21 @@
 // tests to perform
 // #define BUILD_MIDPOINT
 #define BUILD_REFERENCE
-#define BUILD_DOUBLE
-#define BUILD_AVX
-#define BUILD_SBVH
-#define REFIT_BVH2
-#define REFIT_MBVH4
-#define REFIT_MBVH8
+// #define BUILD_DOUBLE
+// #define BUILD_AVX
+// #define BUILD_SBVH
+// #define REFIT_BVH2
+// #define REFIT_MBVH4
+// #define REFIT_MBVH8
 // #define BUILD_AVX_SBVH
 #define TRAVERSE_2WAY_ST
-#define TRAVERSE_ALT2WAY_ST
-#define TRAVERSE_SOA2WAY_ST
-#define TRAVERSE_4WAY
-#define TRAVERSE_2WAY_DBL
-#define TRAVERSE_CWBVH
-#define TRAVERSE_2WAY_MT
-#define TRAVERSE_2WAY_MT_PACKET
+// #define TRAVERSE_ALT2WAY_ST
+// #define TRAVERSE_SOA2WAY_ST
+// #define TRAVERSE_4WAY
+// #define TRAVERSE_2WAY_DBL
+// #define TRAVERSE_CWBVH
+// #define TRAVERSE_2WAY_MT
+// #define TRAVERSE_2WAY_MT_PACKET
 #define TRAVERSE_OPTIMIZED_ST
 #define TRAVERSE_4WAY_OPTIMIZED
 // #define EMBREE_BUILD // win64-only for now.
@@ -590,7 +590,7 @@ int main()
 	{
 		vertices[i * 3 + 0] = triangles[i].x, vertices[i * 3 + 1] = triangles[i].y;
 		vertices[i * 3 + 2] = triangles[i].z, indices[i] = i; // Note: not using shared vertices.
-}
+	}
 	rtcSetGeometryBuildQuality( embreeGeom, RTC_BUILD_QUALITY_HIGH ); // max quality
 	rtcCommitGeometry( embreeGeom );
 	rtcAttachGeometry( embreeScene, embreeGeom );
@@ -734,7 +734,7 @@ int main()
 		bvh_verbose->ConvertFrom( *bvh );
 	}
 	t.reset();
-	bvh_verbose->Optimize( 1500000 ); // optimize the raw SBVH
+	bvh_verbose->Optimize( 50, true ); // optimize the raw SBVH
 	bvh->ConvertFrom( *bvh_verbose );
 	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
 	printf( "done (%.2fs). New: %i nodes, SAH=%.2f to %.2f, rayCost=%.2f\n", t.elapsed(), bvh->NodeCount(), prevSAH, bvh->SAHCost(), avgCost );
@@ -815,7 +815,7 @@ int main()
 	tinyocl::Buffer rayData( Nfull * 64 /* sizeof( tinybvh::Ray ) */ );
 	// the size of the ray struct exceeds 64 bytes because of the large Intersection struct.
 	// Here we chop this off, since on the GPU side, the ray is precisely 64 bytes.
-	for( unsigned i = 0; i < Nfull; i++ )
+	for (unsigned i = 0; i < Nfull; i++)
 		memcpy( (unsigned char*)rayData.GetHostPtr() + 64 * i, &fullBatch[0][i], 64 );
 	rayData.CopyToDevice();
 	// create an event to time the OpenCL kernel
@@ -863,7 +863,7 @@ int main()
 	cl_ulong startTime, endTime;
 	// create rays and send them to the gpu side
 	tinyocl::Buffer rayData( Nfull * 64 /* sizeof( tinybvh::Ray ) */, 0 );
-	for( unsigned i = 0; i < Nfull; i++ )
+	for (unsigned i = 0; i < Nfull; i++)
 		memcpy( (unsigned char*)rayData.GetHostPtr() + 64 * i, &fullBatch[0][i], 64 );
 	rayData.CopyToDevice();
 #endif
@@ -915,7 +915,7 @@ int main()
 	cl_ulong startTime, endTime;
 	// create rays and send them to the gpu side
 	tinyocl::Buffer rayData( Nfull * 64 /* sizeof( tinybvh::Ray ) */, 0 );
-	for( unsigned i = 0; i < Nfull; i++ )
+	for (unsigned i = 0; i < Nfull; i++)
 		memcpy( (unsigned char*)rayData.GetHostPtr() + 64 * i, &fullBatch[0][i], 64 );
 	rayData.CopyToDevice();
 #endif
@@ -1058,4 +1058,4 @@ int main()
 
 	printf( "all done." );
 	return 0;
-	}
+}
