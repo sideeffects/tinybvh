@@ -724,6 +724,7 @@ public:
 	void BuildAVX( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 #endif
 	void Refit( const uint32_t nodeIdx = 0 );
+	void Optimize( const uint32_t iterations = 25, bool extreme = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IntersectSphere( const bvhvec3& pos, const float r ) const;
 	bool IsOccluded( const Ray& ray ) const;
@@ -2786,7 +2787,7 @@ void BVH_Verbose::Optimize( const uint32_t iterations, const bool extreme )
 {
 	// allocate array for sorting; size is upper-bound.
 	SortItem* sortList = (SortItem*)AlignedAlloc( usedNodes * sizeof( SortItem ) );
-	// Optimize by reinserting subtrees with a high cost - Section 3.4 of the paper.
+	// optimize by reinserting subtrees with a high cost - Section 3.4 of the paper.
 	for (uint32_t i = 0; i < iterations; i++)
 	{
 		// calculate combined cost for all nodes
@@ -6711,7 +6712,7 @@ uint32_t BVH_Verbose::FindBestNewPosition( const uint32_t Lid )
 	{
 		// 'pop' task with createst taskInvCi
 		uint32_t bestTask = 0, * tmp = (uint32_t*)task, minCi = tmp[0]; // tnx Brian
-		for (uint32_t j = 1; j < tasks; j++) if (tmp[j * 2] < minCi) minCi = tmp[j * 2], bestTask = j;
+		for (int j = 1; j < tasks; j++) if (tmp[j * 2] < minCi) minCi = tmp[j * 2], bestTask = j;
 		const uint32_t Xid = task[bestTask].node;
 		const float CiLX = task[bestTask].ci;
 		task[bestTask] = task[--tasks];
