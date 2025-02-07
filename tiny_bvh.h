@@ -724,7 +724,7 @@ public:
 	void BuildAVX( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 #endif
 	void Refit( const uint32_t nodeIdx = 0 );
-	void Optimize( const uint32_t iterations = 25, bool extreme = true );
+	void Optimize( const uint32_t iterations = 25, bool extreme = false );
 	int32_t Intersect( Ray& ray ) const;
 	bool IntersectSphere( const bvhvec3& pos, const float r ) const;
 	bool IsOccluded( const Ray& ray ) const;
@@ -741,11 +741,6 @@ private:
 	void BuildHQ();
 	bool ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim, const uint32_t splitAxis );
 	void SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, const bvhvec3& minDim, const uint32_t splitAxis, const float splitPos, bool& leftOK, bool& rightOK );
-	void RefitUpVerbose( uint32_t nodeIdx );
-	uint32_t FindBestNewPosition( const uint32_t Lid );
-	void ReinsertNodeVerbose( const uint32_t Lid, const uint32_t Nid, const uint32_t origin );
-	uint32_t CountSubtreeTris( const uint32_t nodeIdx, uint32_t* counters );
-	void MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32_t& newIdxPtr );
 protected:
 	void BuildDefault( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildDefault( const bvhvec4slice& vertices );
@@ -910,10 +905,9 @@ public:
 		bvhvec3 aabbMin; uint32_t left;
 		bvhvec3 aabbMax; uint32_t right;
 		uint32_t triCount, firstTri, parent;
-		float Mcomb, SA; // for the optimizer.
-		float dummy1, dummy2, dummy3; // total: 64 bytes.
+		float dummy[5]; // total: 64 bytes.
 		bool isLeaf() const { return triCount > 0; }
-		void UpdateSA() { SA = BVH::SA( aabbMin, aabbMax ); }
+		float SA() const { return BVH::SA( aabbMin, aabbMax ); }
 	};
 	BVH_Verbose( BVHContext ctx = {} ) { layout = LAYOUT_BVH_VERBOSE; context = ctx; }
 	BVH_Verbose( const BVH& original ) { /* DEPRECATED */ layout = LAYOUT_BVH_VERBOSE; ConvertFrom( original ); }
@@ -922,16 +916,16 @@ public:
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	int32_t NodeCount() const;
 	int32_t PrimCount( const uint32_t nodeIdx = 0 ) const;
-	void Refit( const uint32_t nodeIdx );
+	void Refit( const uint32_t nodeIdx = 0 );
 	void Compact();
 	void SplitLeafs( const uint32_t maxPrims = 1 );
 	void MergeLeafs();
 	void Optimize( const uint32_t iterations, const bool extreme = false );
 private:
 	struct SortItem { uint32_t idx; float cost; };
-	void RefitUpVerbose( uint32_t nodeIdx );
-	uint32_t FindBestNewPosition( const uint32_t Lid );
-	void ReinsertNodeVerbose( const uint32_t Lid, const uint32_t Nid, const uint32_t origin );
+	void RefitUp( uint32_t nodeIdx );
+	float SAHCostUp( uint32_t nodeIdx ) const;
+	uint32_t FindBestNewPosition( const uint32_t Lid ) const;
 	uint32_t CountSubtreeTris( const uint32_t nodeIdx, uint32_t* counters );
 	void MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32_t& newIdxPtr );
 public:
@@ -1399,7 +1393,7 @@ void BVH::ConvertFrom( const BVH_Verbose& original, bool compact )
 	// start conversion
 	uint32_t srcNodeIdx = 0, dstNodeIdx = 0;
 	newNodePtr = 2;
-	uint32_t srcStack[64], dstStack[64], stackPtr = 0;
+	uint32_t srcStack[1024], dstStack[1024], stackPtr = 0;
 	while (1)
 	{
 		const BVH_Verbose::BVHNode& orig = original.bvhNode[srcNodeIdx];
@@ -1419,7 +1413,7 @@ void BVH::ConvertFrom( const BVH_Verbose& original, bool compact )
 			uint32_t srcRightIdx = orig.right;
 			srcNodeIdx = orig.left, dstNodeIdx = newNodePtr++;
 			srcStack[stackPtr] = srcRightIdx;
-			dstStack[stackPtr++] = newNodePtr++;
+ 			dstStack[stackPtr++] = newNodePtr++;
 		}
 	}
 	usedNodes = original.usedNodes;
@@ -2128,6 +2122,15 @@ void BVH::BuildHQ()
 	Compact();
 }
 
+// Optimize: Will happen via BVH_Verbose.
+void BVH::Optimize( const uint32_t iterations, bool extreme )
+{
+	BVH_Verbose* verbose = new BVH_Verbose();
+	verbose->ConvertFrom( *this );
+	verbose->Optimize( iterations, extreme );
+	ConvertFrom( *verbose );	
+}
+
 // Refitting: For animated meshes, where the topology remains intact. This
 // includes trees waving in the wind, or subsequent frames for skinned
 // animations. Repeated refitting tends to lead to deteriorated BVHs and
@@ -2673,7 +2676,7 @@ void BVH::Compact()
 void BVH_Verbose::ConvertFrom( const BVH& original, bool /* unused here */ )
 {
 	// allocate space
-	uint32_t spaceNeeded = original.triCount * (refittable ? 2 : 3); // this one needs space to grow to 2N
+	uint32_t spaceNeeded = original.triCount * (refittable ? 2 : 3);
 	if (allocatedNodes < spaceNeeded)
 	{
 		AlignedFree( bvhNode );
@@ -2693,7 +2696,6 @@ void BVH_Verbose::ConvertFrom( const BVH& original, bool /* unused here */ )
 		const BVH::BVHNode& orig = original.bvhNode[nodeIdx];
 		bvhNode[nodeIdx].aabbMin = orig.aabbMin, bvhNode[nodeIdx].aabbMax = orig.aabbMax;
 		bvhNode[nodeIdx].triCount = orig.triCount, bvhNode[nodeIdx].parent = parent;
-		bvhNode[nodeIdx].UpdateSA();
 		if (orig.isLeaf())
 		{
 			bvhNode[nodeIdx].firstTri = orig.leftFirst;
@@ -2730,6 +2732,17 @@ int32_t BVH_Verbose::NodeCount() const
 	return retVal;
 }
 
+float BVH_Verbose::SAHCost( const uint32_t nodeIdx ) const
+{
+	// Determine the SAH cost of the tree. This provides an indication
+	// of the quality of the BVH: Lower is better.
+	const BVHNode& n = bvhNode[nodeIdx];
+	const float SAn = SA( n.aabbMin, n.aabbMax );
+	if (n.isLeaf()) return C_INT * SAn * n.triCount;
+	float cost = C_TRAV * SAn + SAHCost( n.left ) + SAHCost( n.right );
+	return nodeIdx == 0 ? (cost / SAn) : cost;
+}
+
 void BVH_Verbose::Refit( const uint32_t nodeIdx )
 {
 	FATAL_ERROR_IF( !refittable, "BVH_Verbose::Refit( .. ), refitting an SBVH." );
@@ -2755,7 +2768,6 @@ void BVH_Verbose::Refit( const uint32_t nodeIdx )
 		node.aabbMin = tinybvh_min( bvhNode[node.left].aabbMin, bvhNode[node.right].aabbMin );
 		node.aabbMax = tinybvh_max( bvhNode[node.left].aabbMax, bvhNode[node.right].aabbMax );
 	}
-	node.UpdateSA();
 	if (nodeIdx == 0) aabbMin = node.aabbMin, aabbMax = node.aabbMax;
 }
 
@@ -2798,15 +2810,17 @@ void BVH_Verbose::Optimize( const uint32_t iterations, const bool extreme )
 			if (node.isLeaf()) continue;
 			if (node.parent == 0) continue;
 			if (bvhNode[node.parent].parent == 0) continue;
-			const float A = node.SA, AL = bvhNode[node.left].SA, AR = bvhNode[node.right].SA;
-			float Mcomb = A * (A / tinybvh_max( 1e-7f, tinybvh_min( AL, AR ) )) * (A / tinybvh_max( 1e-7f, 0.5f * (AL + AR) ));
+			const float A = node.SA(), AL = bvhNode[node.left].SA(), AR = bvhNode[node.right].SA();
+			float Mmin = A / tinybvh_min( 1e-10f, tinybvh_min( AL, AR ) );
+			float Msum = A / tinybvh_min( 1e-10f, 0.5f * (AL + AR) );
+			float Mcomb = A * Msum * Mmin;
 			sortList[interiorNodes].idx = j, sortList[interiorNodes++].cost = Mcomb;
 		}
 		// last couple of iterations we will process more nodes.
-		const int tail = extreme ? (tinybvh_min( 15u, iterations - 1 - i ) * 2) : 30;
+		const int tail = extreme ? (tinybvh_min( 14u, iterations - 1 - i ) * 2) : 30;
 		const int limit = tinybvh_max( (uint32_t)(0.01f * (float)interiorNodes), interiorNodes >> tail );
 		// sort list - partial quick sort.
-		struct Task { uint32_t first, last; } stack[512];
+		struct Task { uint32_t first, last; } stack[64];
 		int pivot, first = 0, last = (int)interiorNodes - 1, stackPtr = 0;
 		while (1)
 		{
@@ -2826,21 +2840,61 @@ void BVH_Verbose::Optimize( const uint32_t iterations, const bool extreme )
 		// reinsert selected nodes
 		for (int j = 0; j < limit; j++)
 		{
+			// prepare change
 			const uint32_t Nid = sortList[j].idx;
-			const BVHNode& N = bvhNode[Nid];
+			BVHNode& N = bvhNode[Nid];
 			if (N.parent == 0) continue;
-			const BVHNode& P = bvhNode[N.parent];
+			const uint32_t Pid = N.parent;
+			BVHNode& P = bvhNode[Pid];
 			if (P.parent == 0) continue;
-			const uint32_t Pid = N.parent, X1 = P.parent;
-			const uint32_t X2 = P.left == Nid ? P.right : P.left;
+			const uint32_t X1 = P.parent, X2 = (P.left == Nid ? P.right : P.left);
+			// backup nodes
+			const BVHNode N_ = N, L_ = bvhNode[N.left];
+			const BVHNode P_ = P, R_ = bvhNode[N.right];
+			const BVHNode X1_ = bvhNode[X1], X2_ = bvhNode[X2];
+			// compute SAH before change
+			float sahBefore = SAHCostUp( Nid );
+			// execute change
 			if (bvhNode[X1].left == Pid) bvhNode[X1].left = X2;
 			else /* verbose[X1].right == Pid */ bvhNode[X1].right = X2;
 			bvhNode[X2].parent = X1;
-			const uint32_t L = N.left, R = N.right;
-			RefitUpVerbose( X1 );
-			ReinsertNodeVerbose( L, Pid, X1 );
-			ReinsertNodeVerbose( R, Nid, X1 );
+			const uint32_t Lid = N.left, Rid = N.right;
+			RefitUp( X2 );
+			// ReinsertNode( L, Nid ); ReinsertNode( R, Pid );
+			const uint32_t Xbest1 = FindBestNewPosition( Lid ), XA = bvhNode[Xbest1].parent;
+			sahBefore += SAHCostUp( Xbest1 );
+			const BVHNode Xbest1_ = bvhNode[Xbest1], XA_ = bvhNode[XA];
+			N.left = Xbest1, N.right = Lid, N.parent = XA;
+			if (bvhNode[XA].left == Xbest1) bvhNode[XA].left = Nid; else bvhNode[XA].right = Nid;
+			bvhNode[Xbest1].parent = bvhNode[Lid].parent = Nid;
+			RefitUp( Nid );
+			const uint32_t Xbest2 = FindBestNewPosition( Rid ), XB = bvhNode[Xbest2].parent;
+			sahBefore += SAHCostUp( Xbest2 );
+			const BVHNode Xbest2_ = bvhNode[Xbest2], XB_ = bvhNode[XB];
+			P.left = Xbest2, P.right = Rid, P.parent = XB;
+			if (bvhNode[XB].left == Xbest2) bvhNode[XB].left = Pid; else bvhNode[XB].right = Pid;
+			bvhNode[Xbest2].parent = bvhNode[Rid].parent = Pid;
+			RefitUp( Pid );
+			// compute SAH after change
+			float sahAfter = SAHCostUp( X1 ) + SAHCostUp( Nid ) + SAHCostUp( Pid );
+			if (sahAfter > sahBefore)
+			{
+				// undo change, mind the order.
+				bvhNode[XB] = XB_, bvhNode[Xbest2] = Xbest2_;
+				bvhNode[XA] = XA_, bvhNode[Xbest1] = Xbest1_;
+				bvhNode[X1] = X1_, bvhNode[X2] = X2_;
+				bvhNode[Pid] = P_, bvhNode[N_.right] = R_;
+				bvhNode[Nid] = N_, bvhNode[N_.left] = L_;
+			#if 1
+				RefitUp( XB );
+				RefitUp( XA );
+				RefitUp( Nid );
+			#else
+				Refit();
+			#endif
+			}
 		}
+		Refit();
 	}
 	AlignedFree( sortList );
 }
@@ -2876,8 +2930,6 @@ void BVH_Verbose::SplitLeafs( const uint32_t maxPrims )
 					fi = primIdx[new2.firstTri + i],
 					new2.aabbMin = tinybvh_min( new2.aabbMin, fragment[fi].bmin ),
 					new2.aabbMax = tinybvh_max( new2.aabbMax, fragment[fi].bmax );
-				new1.UpdateSA();
-				new2.UpdateSA();
 				// recurse
 				if (new1.triCount > 1) stack[stackPtr++] = newIdx1;
 				if (new2.triCount > 1) stack[stackPtr++] = newIdx2;
@@ -2919,7 +2971,7 @@ void BVH_Verbose::MergeLeafs()
 			// cost of leaving things as they are
 			BVHNode& left = bvhNode[node.left];
 			BVHNode& right = bvhNode[node.right];
-			float Ckeepsplit = C_TRAV + C_INT * (left.SA * leftCount + right.SA * rightCount);
+			float Ckeepsplit = C_TRAV + C_INT * (left.SA() * leftCount + right.SA() * rightCount);
 			if (Cunsplit <= Ckeepsplit)
 			{
 				// collapse the subtree
@@ -6680,8 +6732,8 @@ void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, cons
 	leftOK = Nleft > 0, rightOK = Nright > 0;
 }
 
-// RefitUpVerbose: Update bounding boxes of ancestors of the specified node.
-void BVH_Verbose::RefitUpVerbose( uint32_t nodeIdx )
+// RefitUp: Update bounding boxes of ancestors of the specified node.
+void BVH_Verbose::RefitUp( uint32_t nodeIdx )
 {
 	while (nodeIdx != 0xffffffff)
 	{
@@ -6690,9 +6742,21 @@ void BVH_Verbose::RefitUpVerbose( uint32_t nodeIdx )
 		BVHNode& right = bvhNode[node.right];
 		node.aabbMin = tinybvh_min( left.aabbMin, right.aabbMin );
 		node.aabbMax = tinybvh_max( left.aabbMax, right.aabbMax );
-		node.UpdateSA();
 		nodeIdx = node.parent;
 	}
+}
+
+// SAHCostUp: Calculate the SAH cost of a node and its ancestry
+float BVH_Verbose::SAHCostUp( uint32_t nodeIdx ) const
+{
+	float sum = 0;
+	while (nodeIdx != 0xffffffff)
+	{
+		BVHNode& node = bvhNode[nodeIdx];
+		sum += BVH::SA( node.aabbMin, node.aabbMax );
+		nodeIdx = node.parent;
+	}
+	return sum;
 }
 
 #if 1
@@ -6700,30 +6764,31 @@ void BVH_Verbose::RefitUpVerbose( uint32_t nodeIdx )
 // FindBestNewPosition
 // Part of "Fast Insertion-Based Optimization of Bounding Volume Hierarchies"
 // K.I.S.S. version with brute-force array search.
-uint32_t BVH_Verbose::FindBestNewPosition( const uint32_t Lid )
+uint32_t BVH_Verbose::FindBestNewPosition( const uint32_t Lid ) const
 {
-	ALIGNED( 64 ) struct Task { float ci; uint32_t node; } task[1024];
+	ALIGNED( 64 ) struct Task { float ci; uint32_t node; } task[512];
 	float Cbest = BVH_FAR;
 	int tasks = 1 /* doesn't exceed 70 for Crytek Sponza */, Xbest = 0;
 	const BVHNode& L = bvhNode[Lid];
 	// reinsert L into BVH
-	task[0].node = 0 /* root */, task[0].ci = 0;
+	task[0].node = 0, task[0].ci = 0;
 	while (tasks > 0)
 	{
-		// 'pop' task with createst taskInvCi
-		uint32_t bestTask = 0, * tmp = (uint32_t*)task, minCi = tmp[0]; // tnx Brian
-		for (int j = 1; j < tasks; j++) if (tmp[j * 2] < minCi) minCi = tmp[j * 2], bestTask = j;
+		// 'pop' task with smallest Ci
+		uint32_t bestTask = 0;
+		float minCi = task[0].ci; // tnx Brian
+		for (int j = 1; j < tasks; j++) if (task[j].ci < minCi) minCi = task[j].ci, bestTask = j;
 		const uint32_t Xid = task[bestTask].node;
 		const float CiLX = task[bestTask].ci;
-		task[bestTask] = task[--tasks];
+		if (--tasks > 0) task[bestTask] = task[tasks];
 		// execute task
 		const BVHNode& X = bvhNode[Xid];
-		if (CiLX + L.SA >= Cbest) break;
+		if (CiLX + L.SA() >= Cbest) break;
 		const float CdLX = SA( tinybvh_min( L.aabbMin, X.aabbMin ), tinybvh_max( L.aabbMax, X.aabbMax ) );
 		const float CLX = CiLX + CdLX;
-		if (CLX < Cbest) Cbest = CLX, Xbest = Xid;
-		const float Ci = CLX - X.SA;
-		if (Ci + L.SA >= Cbest || X.isLeaf()) continue;
+		if (CLX < Cbest && Xid != 0) Cbest = CLX, Xbest = Xid;
+		const float Ci = CLX - X.SA();
+		if (Ci + L.SA() >= Cbest || X.isLeaf()) continue;
 		task[tasks].node = X.left, task[tasks++].ci = Ci;
 		task[tasks].node = X.right, task[tasks++].ci = Ci;
 	}
@@ -6771,7 +6836,7 @@ uint32_t BVH_Verbose::FindBestNewPosition( const uint32_t Lid )
 		q.pop( Xid, CiLX );
 		// execute task
 		const BVHNode& X = bvhNode[Xid];
-		if (CiLX + L.SA >= Cbest) break;
+		if (CiLX + L.SA() >= Cbest) break;
 		const float CdLX = SA( tinybvh_min( L.aabbMin, X.aabbMin ), tinybvh_max( L.aabbMax, X.aabbMax ) );
 		const float CLX = CiLX + CdLX;
 		if (CLX < Cbest) Cbest = CLX, Xbest = Xid;
@@ -6784,24 +6849,6 @@ uint32_t BVH_Verbose::FindBestNewPosition( const uint32_t Lid )
 }
 
 #endif
-
-// ReinsertNodeVerbose
-// Part of "Fast Insertion-Based Optimization of Bounding Volume Hierarchies"
-void BVH_Verbose::ReinsertNodeVerbose( const uint32_t Lid, const uint32_t Nid, const uint32_t origin )
-{
-	uint32_t Xbest = FindBestNewPosition( Lid );
-	if (Xbest == 0 || bvhNode[Xbest].parent == 0) Xbest = origin;
-	const uint32_t X1 = bvhNode[Xbest].parent;
-	BVHNode& N = bvhNode[Nid];
-	N.left = Xbest, N.right = Lid;
-	N.aabbMin = tinybvh_min( bvhNode[Xbest].aabbMin, bvhNode[Lid].aabbMin );
-	N.aabbMax = tinybvh_max( bvhNode[Xbest].aabbMax, bvhNode[Lid].aabbMax );
-	N.UpdateSA();
-	bvhNode[Nid].parent = X1;
-	if (bvhNode[X1].left == Xbest) bvhNode[X1].left = Nid; else bvhNode[X1].right = Nid;
-	bvhNode[Xbest].parent = bvhNode[Lid].parent = Nid;
-	RefitUpVerbose( Nid );
-}
 
 // Determine for each node in the tree the number of primitives
 // stored in that subtree. Helper function for MergeLeafs.
