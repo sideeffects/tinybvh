@@ -12,21 +12,21 @@
 // tests to perform
 // #define BUILD_MIDPOINT
 #define BUILD_REFERENCE
-// #define BUILD_DOUBLE
-// #define BUILD_AVX
-// #define BUILD_SBVH
+#define BUILD_DOUBLE
+#define BUILD_AVX
+#define BUILD_SBVH
 // #define REFIT_BVH2
-// #define REFIT_MBVH4
-// #define REFIT_MBVH8
+#define REFIT_MBVH4
+#define REFIT_MBVH8
 // #define BUILD_AVX_SBVH
 #define TRAVERSE_2WAY_ST
-// #define TRAVERSE_ALT2WAY_ST
-// #define TRAVERSE_SOA2WAY_ST
-// #define TRAVERSE_4WAY
-// #define TRAVERSE_2WAY_DBL
-// #define TRAVERSE_CWBVH
-// #define TRAVERSE_2WAY_MT
-// #define TRAVERSE_2WAY_MT_PACKET
+#define TRAVERSE_ALT2WAY_ST
+#define TRAVERSE_SOA2WAY_ST
+#define TRAVERSE_4WAY
+#define TRAVERSE_2WAY_DBL
+#define TRAVERSE_CWBVH
+#define TRAVERSE_2WAY_MT
+#define TRAVERSE_2WAY_MT_PACKET
 #define TRAVERSE_OPTIMIZED_ST
 #define TRAVERSE_4WAY_OPTIMIZED
 // #define EMBREE_BUILD // win64-only for now.
@@ -727,6 +727,7 @@ int main()
 #if defined TRAVERSE_OPTIMIZED_ST || defined TRAVERSE_4WAY_OPTIMIZED
 
 	printf( "Optimized BVH performance - Optimizing... " );
+	bvh->Build( triangles, verts / 3 );
 	float prevSAH = bvh->SAHCost();
 	if (!bvh_verbose)
 	{
@@ -734,7 +735,7 @@ int main()
 		bvh_verbose->ConvertFrom( *bvh );
 	}
 	t.reset();
-	bvh_verbose->Optimize( 50, true ); // optimize the raw SBVH
+	bvh_verbose->Optimize( 50, true );
 	bvh->ConvertFrom( *bvh_verbose );
 	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
 	printf( "done (%.2fs). New: %i nodes, SAH=%.2f to %.2f, rayCost=%.2f\n", t.elapsed(), bvh->NodeCount(), prevSAH, bvh->SAHCost(), avgCost );
