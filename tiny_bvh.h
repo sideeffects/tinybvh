@@ -4152,7 +4152,7 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 // This code produces BVHs nearly identical to reference, but much faster.
 // On a 12th gen laptop i7 CPU, Sponza Crytek (~260k tris) is processed in 51ms.
 // The code relies on the availability of AVX instructions. AVX2 is not needed.
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #define LANE(a,b) a.m128_f32[b]
 #define LANE8(a,b) a.m256_f32[b]
 // Not using clang/g++ method under MSCC; compiler may benefit from .m128_i32.
