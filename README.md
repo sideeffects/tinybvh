@@ -72,7 +72,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.3.4
+# Version 1.3.5
 
 Version 1.3.0 changed the names of vector math functions, which are now prepended with ````tinybvh_````, e.g. ````tinybvh_cross````, ````tinybvh_normalize````. This avoids name clashes in applications that override the vector types with their own. Basically tinybvh evades these so you don't have to. 
 
@@ -145,26 +145,22 @@ The current version of the library is rapidly gaining functionality. Please expe
 Plans, ordered by priority:
 
 * NEW: We now also use the "Issues" list for this!
-* TLAS/BLAS traversal with BLAS transforms
-  * Support more than two levels
-* Documentation:
-  * Wiki
-  * Article on architecture and intended use
 * Bridge to rt hw / layouts:
   * Produce a BVH for Intel rt hw (mind the quads)
   * Produce a BVH for AMD rt hw
   * Use inline asm on AMD for aabb/tri intersect
   * Support templated N-wide BVH
-* Example renderers:
-  * CPU WHitted-style ray tracer
-  * CPU and GPU path tracer
-  * CPU and GPU wavefront path tracer
-* BVH::Optimize:
-  * Faster Optimize algorithm (complete paper implementation)
-  * Understanding optimized SBVH performance
+* Demo of tinybvh on GPU using other apis:
+  * Ray tracing in pure OpenGL
+  * Ray tracing in pure DirectX
+* Comparisons / experiments:
+  * Other ray distributions in speedtest
+  * Memory use analysis in speedtest
+  * DXR renderer to compare against hw rt
 * CPU single-ray performance
   * Reverse-engineer Embree & PhysX
   * Implement Fuetterling et al.'s 2017 paper
+  * Combination of TLAS and packet traversal
   
 # tinybvh in the Wild
 A list of projects using tinybvh:
