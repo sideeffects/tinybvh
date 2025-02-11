@@ -5147,9 +5147,9 @@ inline void IntersectCompactTri( Ray& r, __m128& t4, const float* T )
 	const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 	const bool hit = u >= 0 && v >= 0 && u + v < 1;
 #if INST_IDX_BITS == 32
-	if (hit) r.hit = { 0, ta, u, v, *(uint32_t*)&T[15] }, t4 = _mm_set1_ps( ta );
+	if (hit) r.hit = { r.instIdx, ta, u, v, *(uint32_t*)&T[15] }, t4 = _mm_set1_ps( ta );
 #else
-	if (hit) r.hit = { ta, u, v, *(uint32_t*)&T[15] }, t4 = _mm_set1_ps( ta );
+	if (hit) r.hit = { ta, u, v, *(uint32_t*)&T[15] + r.instIdx }, t4 = _mm_set1_ps( ta );
 #endif
 }
 int32_t BVH4_CPU::Intersect( Ray& ray ) const
