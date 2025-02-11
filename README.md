@@ -145,6 +145,9 @@ The current version of the library is rapidly gaining functionality. Please expe
 Plans, ordered by priority:
 
 * NEW: We now also use the "Issues" list for this!
+* Speed improvements:
+  * Faster optimizer for AVX-capable CPUs
+  * Improve speed of SBVH builder
 * Bridge to rt hw / layouts:
   * Produce a BVH for Intel rt hw (mind the quads)
   * Produce a BVH for AMD rt hw
