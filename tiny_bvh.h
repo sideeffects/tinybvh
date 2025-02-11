@@ -163,7 +163,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	3
-#define TINY_BVH_VERSION_SUB	4
+#define TINY_BVH_VERSION_SUB	5
 
 // ============================================================================
 //
@@ -850,6 +850,8 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Optimize( const uint32_t iterations = 25, bool extreme = false );
+	float SAHCost( const uint32_t nodeIdx = 0 ) const { return bvh.SAHCost( nodeIdx ); }
 	void ConvertFrom( const BVH& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
@@ -881,6 +883,8 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Optimize( const uint32_t iterations = 25, bool extreme = false );
+	float SAHCost( const uint32_t nodeIdx = 0 ) const { return bvh.SAHCost( nodeIdx ); }
 	void Save( const char* fileName );
 	bool Load( const char* fileName, const bvhvec4* vertices, const uint32_t primCount );
 	bool Load( const char* fileName, const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
@@ -921,7 +925,7 @@ public:
 	void Compact();
 	void SplitLeafs( const uint32_t maxPrims = 1 );
 	void MergeLeafs();
-	void Optimize( const uint32_t iterations, const bool extreme = false );
+	void Optimize( const uint32_t iterations = 25, bool extreme = false );
 private:
 	struct SortItem { uint32_t idx; float cost; };
 	void RefitUp( uint32_t nodeIdx );
@@ -961,7 +965,9 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Optimize( const uint32_t iterations = 25, bool extreme = false );
 	void Refit( const uint32_t nodeIdx = 0 );
+	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	void ConvertFrom( const BVH& original, bool compact = true );
 	void SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims );
 	// BVH data
@@ -1003,7 +1009,9 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Optimize( const uint32_t iterations = 25, bool extreme = false );
 	void ConvertFrom( const MBVH<4>& original, bool compact = true );
+	float SAHCost( const uint32_t nodeIdx = 0 ) const { return bvh4.SAHCost( nodeIdx ); }
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
 	// BVH data
@@ -1038,8 +1046,10 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Optimize( const uint32_t iterations = 25, bool extreme = false );
 	void Save( const char* fileName );
 	bool Load( const char* fileName, const uint32_t primCount );
+	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	void ConvertFrom( const MBVH<4>& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
@@ -1066,7 +1076,9 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
+	void Optimize( const uint32_t iterations = 25, bool extreme = false );
 	void ConvertFrom( MBVH<8>& original, bool compact = true );
+	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const { FALLBACK_SHADOW_QUERY( ray ); }
 	// BVH8 data
@@ -2801,11 +2813,6 @@ void BVH_Verbose::CheckFit( const uint32_t nodeIdx, bool skipLeafs )
 		bmin = tinybvh_min( bvhNode[node.left].aabbMin, bvhNode[node.right].aabbMin );
 		bmax = tinybvh_max( bvhNode[node.left].aabbMax, bvhNode[node.right].aabbMax );
 	}
-	if (node.aabbMin.x != bmin.x || node.aabbMin.y != bmin.y || node.aabbMin.z != bmin.z ||
-		node.aabbMax.x != bmax.x || node.aabbMax.y != bmax.y || node.aabbMax.z != bmax.z)
-	{
-		int w = 0;
-	}
 }
 
 void BVH_Verbose::Compact()
@@ -2854,15 +2861,9 @@ void BVH_Verbose::Optimize( const uint32_t iterations, const bool extreme )
 			sortList[interiorNodes].idx = j, sortList[interiorNodes++].cost = Mcomb;
 		}
 		// last couple of iterations we will process more nodes.
-	#if 0
-		const int tail = extreme ? (tinybvh_min( 14u, iterations - 1 - i ) * 2) : 30;
-		const int limit = tinybvh_max( (uint32_t)(0.01f * (float)interiorNodes), interiorNodes >> tail );
-		const int step = 1;
-	#else
 		const float portion = extreme ? (0.01f + (0.6f * (float)i) / (float)iterations) : 0.01f;
 		const int limit = (uint32_t)(portion * (float)interiorNodes);
 		const int step = tinybvh_max( 1, (int)(portion / 0.02f) );
-	#endif
 		// sort list - partial quick sort.
 		struct Task { uint32_t first, last; } stack[64];
 		int pivot, first = 0, last = (int)interiorNodes - 1, stackPtr = 0;
@@ -3097,6 +3098,12 @@ void BVH_GPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, ui
 	ConvertFrom( bvh, false );
 }
 
+void BVH_GPU::Optimize( const uint32_t iterations, bool extreme )
+{
+	bvh.Optimize( iterations, extreme );
+	ConvertFrom( bvh, false );
+}
+
 void BVH_GPU::ConvertFrom( const BVH& original, bool compact )
 {
 	// get a copy of the original bvh
@@ -3251,6 +3258,12 @@ void BVH_SoA::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, ui
 	ConvertFrom( bvh, false );
 }
 
+void BVH_SoA::Optimize( const uint32_t iterations, bool extreme )
+{
+	bvh.Optimize( iterations, extreme );
+	ConvertFrom( bvh, false );
+}
+
 void BVH_SoA::Save( const char* fileName )
 {
 	bvh.Save( fileName );
@@ -3382,6 +3395,12 @@ template<int M> void MBVH<M>::BuildHQ( const bvhvec4slice& vertices, const uint3
 	ConvertFrom( bvh, true );
 }
 
+template<int M> void MBVH<M>::Optimize( const uint32_t iterations, bool extreme )
+{
+	bvh.Optimize( iterations, extreme );
+	ConvertFrom( bvh, true );
+}
+
 template<int M> void MBVH<M>::Refit( const uint32_t nodeIdx )
 {
 	MBVHNode& node = mbvhNode[nodeIdx];
@@ -3424,6 +3443,18 @@ template<int M> void MBVH<M>::Refit( const uint32_t nodeIdx )
 		}
 	}
 	if (nodeIdx == 0) aabbMin = node.aabbMin, aabbMax = node.aabbMax;
+}
+
+template<int M> float MBVH<M>::SAHCost( const uint32_t nodeIdx ) const
+{
+	// Determine the SAH cost of the tree. This provides an indication
+	// of the quality of the BVH: Lower is better.
+	const MBVHNode& n = mbvhNode[nodeIdx];
+	const float sa = BVH::SA( n.aabbMin, n.aabbMax );
+	if (n.isLeaf()) return C_INT * sa * n.triCount;
+	float cost = C_TRAV * sa;
+	for (unsigned i = 0; i < M; i++) if (n.child[i] != 0) cost += SAHCost( n.child[i] );
+	return nodeIdx == 0 ? (cost / sa) : cost;
 }
 
 template<int M> void MBVH<M>::ConvertFrom( const BVH& original, bool compact )
@@ -3598,6 +3629,17 @@ void BVH4_CPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, u
 	bvh4.context = context;
 	bvh4.BuildHQ( vertices, indices, prims );
 	ConvertFrom( bvh4, true );
+}
+
+void BVH4_CPU::Optimize( const uint32_t iterations, bool extreme )
+{
+	bvh4.Optimize( iterations, extreme );
+	ConvertFrom( bvh4, true );
+}
+
+float BVH4_CPU::SAHCost( const uint32_t nodeIdx ) const
+{
+	return bvh4.SAHCost( nodeIdx );
 }
 
 void BVH4_CPU::Save( const char* fileName )
@@ -3785,6 +3827,12 @@ void BVH4_GPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, u
 {
 	bvh4.context = context;
 	bvh4.BuildHQ( vertices, indices, prims );
+	ConvertFrom( bvh4, true );
+}
+
+void BVH4_GPU::Optimize( const uint32_t iterations, bool extreme )
+{
+	bvh4.Optimize( iterations, extreme );
 	ConvertFrom( bvh4, true );
 }
 
@@ -4036,6 +4084,17 @@ BVH8_CWBVH::~BVH8_CWBVH()
 	if (!ownBVH8) bvh8 = MBVH<8>(); // clear out pointers we don't own.
 	AlignedFree( bvh8Data );
 	AlignedFree( bvh8Tris );
+}
+
+void BVH8_CWBVH::Optimize( const uint32_t iterations, bool extreme )
+{
+	bvh8.Optimize( iterations, extreme );
+	ConvertFrom( bvh8, true );
+}
+
+float BVH8_CWBVH::SAHCost( const uint32_t nodeIdx ) const
+{
+	return bvh8.SAHCost( nodeIdx );
 }
 
 void BVH8_CWBVH::Save( const char* fileName )
@@ -6808,7 +6867,8 @@ float BVH_Verbose::SAHCostUp( uint32_t nodeIdx ) const
 // K.I.S.S. version with brute-force array search.
 uint32_t BVH_Verbose::FindBestNewPosition( const uint32_t Lid ) const
 {
-	ALIGNED( 64 ) struct Task { float ci; uint32_t node; } task[512];
+	struct Task { float ci; uint32_t node; };
+	ALIGNED( 64 ) Task task[512];
 	float Cbest = BVH_FAR;
 	int tasks = 1 /* doesn't exceed 70 for Crytek Sponza */, Xbest = 0;
 	const BVHNode& L = bvhNode[Lid];

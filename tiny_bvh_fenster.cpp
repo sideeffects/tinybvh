@@ -4,9 +4,9 @@
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
 //#define COLOR_PRIM // compute color as hashed triangle Index
-//#define COLOR_DEPTH // compute color as depth of intersection 
+//#define COLOR_DEPTH // compute color as depth of intersection
 
-// #define LOADSCENE
+#define LOADSCENE
 
 #define TINYBVH_IMPLEMENTATION
 #include "tiny_bvh.h"
@@ -14,7 +14,7 @@
 
 using namespace tinybvh;
 
-BVH4_CPU bvh;
+BVH bvh;
 int frameIdx = 0;
 Ray* rays = 0;
 #ifdef COLOR_DEPTH
@@ -180,7 +180,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	for (int i = 0; i < N; i++) {
 	#ifdef COLOR_DEPTH
 		depths[i] = bvh.Intersect( rays[i] );
-	#else 
+	#else
 		bvh.Intersect( rays[i] );
 	#endif
 	}
@@ -191,7 +191,6 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++, i++) if (rays[i].hit.t < 10000)
 		{
 			int pixel_x = tx * 4 + x, pixel_y = ty * 4 + y, primIdx = rays[i].hit.prim;
-
 
 		#ifdef COLOR_DEPTH
 			buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
@@ -214,7 +213,7 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	char title[50];
 	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
 	fenster_update_title( &f, title );
-}
+	}
 
 void Shutdown()
 {
