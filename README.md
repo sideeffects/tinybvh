@@ -21,7 +21,7 @@ Note that the ````tiny_bvh.h```` library will work without ````tiny_ocl.h```` an
 # BVH?
 A Bounding Volume Hierarchy is a data structure used to quickly find intersections in a virtual scene; most commonly between a ray and a group of triangles. You can read more about this in a series of articles on the subject: https://jacco.ompf2.com/2022/04/13/how-to-build-a-bvh-part-1-basics .
 
-Right now tiny_bvh comes with the following builders:
+Right now tinybvh comes with the following builders:
 * ````BVH::Build```` : Efficient plain-C/C+ binned SAH BVH builder which should run on any platform.
 * ````BVH::BuildAVX```` : A highly optimized version of BVH::Build for Intel CPUs.
 * ````BVH::BuildHQ```` : A 'spatial splits' BVH builder, for highest BVH quality.
