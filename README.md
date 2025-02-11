@@ -24,13 +24,7 @@ A Bounding Volume Hierarchy is a data structure used to quickly find intersectio
 Right now tiny_bvh comes with the following builders:
 * ````BVH::Build```` : Efficient plain-C/C+ binned SAH BVH builder which should run on any platform.
 * ````BVH::BuildAVX```` : A highly optimized version of BVH::Build for Intel CPUs.
-* ````BVH::BuildNEON```` : An optimized version of BVH::Build for ARM/NEON.
 * ````BVH::BuildHQ```` : A 'spatial splits' BVH builder, for highest BVH quality.
-
-Several special-purpose builders are also available:
-* ````BVH::BuildQuick```` : Simple mid-point split BVH builder. For reference only.
-* ````BVH::BuildEx```` : Double-precision version of ````BVH::Build````. Takes ````bvhdbl3```` vertices as input.
-* ````BVH::BuildTLAS```` : Builds a BVH over an array of ````bvhaabb````s or ````BVHInstance````s.
 
 A constructed BVH can be used to quickly intersect a ray with the geometry, using ````BVH::Intersect```` or ````BVH::IsOccluded````, for shadow rays. The double-precision BVH is traversed using ````BVH::IntersectEx````.
 
@@ -47,7 +41,7 @@ Apart from the default BVH layout (simply named ````BVH````), several other layo
 
 A BVH in the ````BVH```` format may be _refitted_, in case the triangles moved, using ````BVH::Refit````. Refitting is substantially faster than rebuilding and works well if the animation is subtle. Refitting does not work if polygon counts change.
 
-New in version 1.1.3: 'Self-contained' formats may be serialized and de-serialized via ````::Save```` and ````::Load````. Currently this is supported for ````BVH8_CWBVH````, which stores vertex data in a custom format and thus does not rely on the input vertices for traversal.
+New in version 1.1.3: 'Self-contained' formats may be serialized and de-serialized via ````::Save```` and ````::Load````.
 
 # How To Use
 The library ````tiny_bvh.h```` is designed to be easy to use. Please have a look at tiny_bvh_minimal.cpp for an example. A Visual Studio 'solution' (.sln/.vcxproj) is included, as well as a CMake file. That being said: The examples consists of only a single source file, which can be compiled with clang or g++, e.g.:
