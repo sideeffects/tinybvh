@@ -5610,7 +5610,7 @@ bool BVH_SoA::IsOccluded( const Ray& ray ) const
 	{
 		if (node->isLeaf())
 		{
-			for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+			for (uint32_t i = 0; i < node->triCount; i++)
 			{
 				const uint32_t tidx = primIdx[node->firstTri + i], vertIdx = tidx * 3;
 				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
