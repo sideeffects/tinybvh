@@ -3899,7 +3899,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 				stack[stackPtr++] = (uint32_t)(((float*)&nodeBase[3] + i) - (float*)bvh4Data);
 				stack[stackPtr++] = orig.child[i];
 			}
-	}
+		}
 		// store child node bounds, quantized
 		const bvhvec3 extent = orig.aabbMax - orig.aabbMin;
 		bvhvec3 scale;
@@ -3947,7 +3947,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 		if (stackPtr == 0) break;
 		nodeIdx = stack[--stackPtr];
 		retValPos = stack[--stackPtr];
-}
+	}
 	usedBlocks = newAlt4Ptr;
 }
 
@@ -4309,7 +4309,7 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 		bvh8Data[currentNodeAddr + 1].y = *(float*)&triangleBaseIndex;
 	}
 	usedBlocks = nodeDataPtr;
-	}
+}
 
 // ============================================================================
 //
@@ -4910,20 +4910,10 @@ bool BVH_SoA::IsOccluded( const Ray& ray ) const
 		uint32_t lidx = node->left, ridx = node->right;
 		const __m128 min4 = _mm_max_ps( _mm_max_ps( _mm_max_ps( x4, y4 ), z4 ), _mm_setzero_ps() );
 		const __m128 max4 = _mm_min_ps( _mm_min_ps( _mm_min_ps( x4, y4 ), z4 ), _mm_set1_ps( ray.hit.t ) );
-	#if 0
-		// TODO: why is this slower on gen14?
-		const float tmina_0 = LANE( min4, 0 ), tmaxa_1 = LANE( max4, 1 );
-		const float tminb_2 = LANE( min4, 2 ), tmaxb_3 = LANE( max4, 3 );
-		t0 = _mm_shuffle_ps( max4, max4, _MM_SHUFFLE( 1, 3, 1, 3 ) );
-		t1 = _mm_shuffle_ps( min4, min4, _MM_SHUFFLE( 0, 2, 0, 2 ) );
-		t0 = _mm_blendv_ps( inf4, t1, _mm_cmpge_ps( t0, t1 ) );
-		float dist1 = LANE( t0, 1 ), dist2 = LANE( t0, 0 );
-	#else
 		const float tmina_0 = LANE( min4, 0 ), tmaxa_1 = LANE( max4, 1 );
 		const float tminb_2 = LANE( min4, 2 ), tmaxb_3 = LANE( max4, 3 );
 		float dist1 = tmaxa_1 >= tmina_0 ? tmina_0 : BVH_FAR;
 		float dist2 = tmaxb_3 >= tminb_2 ? tminb_2 : BVH_FAR;
-	#endif
 		if (dist1 > dist2)
 		{
 			float t = dist1; dist1 = dist2; dist2 = t;
@@ -5098,11 +5088,11 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 							hitAddr = as_uint( blasTris[triAddr + 2].w );
 						}
 					}
-		}
-	}
+				}
+			}
 		#endif
 			tgroup.y -= 1 << triangleIndex;
-}
+		}
 		if (ngroup.y <= 0x00FFFFFF)
 		{
 			if (stackPtr > 0) { STACK_POP( /* nodeGroup */ ); }
@@ -5115,7 +5105,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 				break;
 			}
 		}
-} while (true);
+	} while (true);
 	return 0;
 }
 
@@ -5280,7 +5270,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 		// get next task
 		if (nodeIdx) continue;
 		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
-}
+	}
 	return cost;
 }
 
@@ -5443,7 +5433,7 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 		// get next task
 		if (nodeIdx) continue;
 		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
-}
+	}
 	return false;
 }
 #ifdef __GNUC__
@@ -5585,20 +5575,10 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		uint32_t lidx = node->left, ridx = node->right;
 		const float32x4_t min4 = vmaxq_f32( vmaxq_f32( vmaxq_f32( x4, y4 ), z4 ), vdupq_n_f32( 0 ) );
 		const float32x4_t max4 = vminq_f32( vminq_f32( vminq_f32( x4, y4 ), z4 ), vdupq_n_f32( ray.hit.t ) );
-	#if 0
-		// TODO: why is this slower on gen14?
-		const float tmina_0 = vgetq_lane_f32( min4, 0 ), tmaxa_1 = vgetq_lane_f32( max4, 1 );
-		const float tminb_2 = vgetq_lane_f32( min4, 2 ), tmaxb_3 = vgetq_lane_f32( max4, 3 );
-		t0 = __builtin_shufflevector( max4, max4, 3, 1, 3, 1 );
-		t1 = __builtin_shufflevector( min4, min4, 2, 0, 2, 0 );
-		t0 = vbslq_f32( vcgeq_f32( t0, t1 ), t1, inf4 );
-		float dist1 = vgetq_lane_f32( t0, 1 ), dist2 = vgetq_lane_f32( t0, 0 );
-	#else
 		const float tmina_0 = vgetq_lane_f32( min4, 0 ), tmaxa_1 = vgetq_lane_f32( max4, 1 );
 		const float tminb_2 = vgetq_lane_f32( min4, 2 ), tmaxb_3 = vgetq_lane_f32( max4, 3 );
 		float dist1 = tmaxa_1 >= tmina_0 ? tmina_0 : BVH_FAR;
 		float dist2 = tmaxb_3 >= tminb_2 ? tminb_2 : BVH_FAR;
-	#endif
 		if (dist1 > dist2)
 		{
 			float t = dist1; dist1 = dist2; dist2 = t;
@@ -5615,6 +5595,84 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		}
 	}
 	return cost;
+}
+
+bool BVH_SoA::IsOccluded( const Ray& ray ) const
+{
+	BVHNode* node = &bvhNode[0], * stack[64];
+	const bvhvec4slice& verts = bvh.verts;
+	const uint32_t* primIdx = bvh.primIdx;
+	uint32_t stackPtr = 0;
+	const float32x4_t Ox4 = vdupq_n_f32( ray.O.x ), rDx4 = vdupq_n_f32( ray.rD.x );
+	const float32x4_t Oy4 = vdupq_n_f32( ray.O.y ), rDy4 = vdupq_n_f32( ray.rD.y );
+	const float32x4_t Oz4 = vdupq_n_f32( ray.O.z ), rDz4 = vdupq_n_f32( ray.rD.z );
+	while (1)
+	{
+		if (node->isLeaf())
+		{
+			for (uint32_t i = 0; i < node->triCount; i++, cost += C_INT)
+			{
+				const uint32_t tidx = primIdx[node->firstTri + i], vertIdx = tidx * 3;
+				const bvhvec3 edge1 = verts[vertIdx + 1] - verts[vertIdx];
+				const bvhvec3 edge2 = verts[vertIdx + 2] - verts[vertIdx];
+				const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
+				const float a = tinybvh_dot( edge1, h );
+				if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
+				const float f = 1 / a;
+				const bvhvec3 s = ray.O - bvhvec3( verts[vertIdx] );
+				const float u = f * tinybvh_dot( s, h );
+				if (u < 0 || u > 1) continue;
+				const bvhvec3 q = tinybvh_cross( s, edge1 );
+				const float v = f * tinybvh_dot( ray.D, q );
+				if (v < 0 || u + v > 1) continue;
+				const float t = f * tinybvh_dot( edge2, q );
+				if (t > 0 && t <= ray.hit.t) return true;
+			}
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
+			continue;
+		}
+		float32x4_t x4 = vmulq_f32( vsubq_f32( node->xxxx, Ox4 ), rDx4 );
+		float32x4_t y4 = vmulq_f32( vsubq_f32( node->yyyy, Oy4 ), rDy4 );
+		float32x4_t z4 = vmulq_f32( vsubq_f32( node->zzzz, Oz4 ), rDz4 );
+		// transpose
+		float32x4_t t0 = vzip1q_f32( x4, y4 ), t2 = vzip1q_f32( z4, z4 );
+		float32x4_t t1 = vzip2q_f32( x4, y4 ), t3 = vzip2q_f32( z4, z4 );
+		float32x4_t xyzw1a = vcombine_f32( vget_low_f32( t0 ), vget_low_f32( t2 ) );
+		float32x4_t xyzw2a = vcombine_f32( vget_high_f32( t0 ), vget_high_f32( t2 ) );
+		float32x4_t xyzw1b = vcombine_f32( vget_low_f32( t1 ), vget_low_f32( t3 ) );
+		float32x4_t xyzw2b = vcombine_f32( vget_high_f32( t1 ), vget_high_f32( t3 ) );
+		// process
+		float32x4_t tmina4 = vminq_f32( xyzw1a, xyzw2a ), tmaxa4 = vmaxq_f32( xyzw1a, xyzw2a );
+		float32x4_t tminb4 = vminq_f32( xyzw1b, xyzw2b ), tmaxb4 = vmaxq_f32( xyzw1b, xyzw2b );
+		// transpose back
+		t0 = vzip1q_f32( tmina4, tmaxa4 ), t2 = vzip1q_f32( tminb4, tmaxb4 );
+		t1 = vzip2q_f32( tmina4, tmaxa4 ), t3 = vzip2q_f32( tminb4, tmaxb4 );
+		x4 = vcombine_f32( vget_low_f32( t0 ), vget_low_f32( t2 ) );
+		y4 = vcombine_f32( vget_high_f32( t0 ), vget_high_f32( t2 ) );
+		z4 = vcombine_f32( vget_low_f32( t1 ), vget_low_f32( t3 ) );
+		uint32_t lidx = node->left, ridx = node->right;
+		const float32x4_t min4 = vmaxq_f32( vmaxq_f32( vmaxq_f32( x4, y4 ), z4 ), vdupq_n_f32( 0 ) );
+		const float32x4_t max4 = vminq_f32( vminq_f32( vminq_f32( x4, y4 ), z4 ), vdupq_n_f32( ray.hit.t ) );
+		const float tmina_0 = vgetq_lane_f32( min4, 0 ), tmaxa_1 = vgetq_lane_f32( max4, 1 );
+		const float tminb_2 = vgetq_lane_f32( min4, 2 ), tmaxb_3 = vgetq_lane_f32( max4, 3 );
+		float dist1 = tmaxa_1 >= tmina_0 ? tmina_0 : BVH_FAR;
+		float dist2 = tmaxb_3 >= tminb_2 ? tminb_2 : BVH_FAR;
+		if (dist1 > dist2)
+		{
+			float t = dist1; dist1 = dist2; dist2 = t;
+			uint32_t i = lidx; lidx = ridx; ridx = i;
+		}
+		if (dist1 == BVH_FAR)
+		{
+			if (stackPtr == 0) break; else node = stack[--stackPtr];
+		}
+		else
+		{
+			node = bvhNode + lidx;
+			if (dist2 != BVH_FAR) stack[stackPtr++] = bvhNode + ridx;
+		}
+	}
+	return false;
 }
 
 // Traverse a 4-way BVH stored in 'Atilla Áfra' layout.
@@ -6906,8 +6964,6 @@ float BVH_Verbose::SAHCostUp( uint32_t nodeIdx ) const
 	return sum;
 }
 
-#if 1
-
 // FindBestNewPosition
 // Part of "Fast Insertion-Based Optimization of Bounding Volume Hierarchies"
 // K.I.S.S. version with brute-force array search.
@@ -6943,61 +6999,6 @@ uint32_t BVH_Verbose::FindBestNewPosition( const uint32_t Lid ) const
 	return Xbest;
 }
 
-#else
-
-// FindBestNewPosition
-// Part of "Fast Insertion-Based Optimization of Bounding Volume Hierarchies"
-// Custom priority queue version - Slower than the K.I.S.S. version.
-uint32_t BVH_Verbose::FindBestNewPosition( const uint32_t Lid )
-{
-	struct PriorityQueue
-	{
-		struct Task { float ci; uint32_t node; } task[512], t;
-		uint32_t tasks = 0;
-		void push( const uint32_t n, const float c )
-		{
-			int first = 0, last = tasks - 1, pos = 0;
-			if (tasks > 0) while (1)
-			{
-				uint32_t mid = (first + last) >> 1;
-				if (c <= task[mid].ci) { if (first < last) last = mid; else { pos = first; break; } }
-				else { if (first < last) first = mid + 1; else { pos = first + 1; break; } }
-			}
-			t.node = n, t.ci = c;
-			if (pos == tasks) { task[tasks++] = t; return; }
-			memcpy( task + pos + 1, task + pos, (tasks - pos) * 8 );
-			task[pos] = t, tasks++;
-		}
-		void pop( uint32_t& n, float& c ) { n = task[--tasks].node, c = task[tasks].ci; }
-	};
-	const BVHNode& L = bvhNode[Lid];
-	PriorityQueue q;
-	q.push( 0, 0.0f );
-	// reinsert L into BVH
-	uint32_t Xbest = 0;
-	float Cbest = BVH_FAR;
-	while (q.tasks > 0)
-	{
-		// 'pop' task with createst taskInvCi
-		float CiLX = 0;
-		uint32_t Xid;
-		q.pop( Xid, CiLX );
-		// execute task
-		const BVHNode& X = bvhNode[Xid];
-		if (CiLX + L.SA() >= Cbest) break;
-		const float CdLX = SA( tinybvh_min( L.aabbMin, X.aabbMin ), tinybvh_max( L.aabbMax, X.aabbMax ) );
-		const float CLX = CiLX + CdLX;
-		if (CLX < Cbest) Cbest = CLX, Xbest = Xid;
-		const float Ci = CLX - X.SA;
-		if (Ci + L.SA >= Cbest || X.isLeaf()) continue;
-		q.push( X.left, Ci );
-		q.push( X.right, Ci );
-	}
-	return Xbest;
-}
-
-#endif
-
 // Determine for each node in the tree the number of primitives
 // stored in that subtree. Helper function for MergeLeafs.
 uint32_t BVH_Verbose::CountSubtreeTris( const uint32_t nodeIdx, uint32_t* counters )
@@ -7026,7 +7027,7 @@ void BVH_Verbose::MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32
 		MergeSubtree( node.right, newIdx, newIdxPtr );
 	}
 }
-		} // namespace tinybvh
+} // namespace tinybvh
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
