@@ -625,7 +625,8 @@ public:
 		LAYOUT_BVH4_CPU,
 		LAYOUT_BVH4_GPU,
 		LAYOUT_MBVH8,
-		LAYOUT_CWBVH
+		LAYOUT_CWBVH,
+		LAYOUT_BVH4_AVX2
 	};
 	struct ALIGNED( 32 ) Fragment
 	{
@@ -1138,50 +1139,22 @@ public:
 		// 4-way BVH node, optimized for CPU rendering.
 		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units",
 		// Fuetterling1 et al., 2017.
-		union { SIMDVEC4 xmin4; float xmin[4]; };
-		union { SIMDVEC4 xmax4; float xmax[4]; };
-		union { SIMDVEC4 ymin4; float ymin[4]; };
-		union { SIMDVEC4 ymax4; float ymax[4]; };
-		union { SIMDVEC4 zmin4; float zmin[4]; };
-		union { SIMDVEC4 zmax4; float zmax[4]; };
-		// ORSTRec rec[4];
+		union { SIMDVEC8 xminmax8; float xminmax[8]; }; // x0max,x0min,...x7max,x7min
+		union { SIMDVEC8 yminmax8; float yminmax[8]; }; // y0max,y0min,...y7max,y7min
+		union { SIMDVEC8 zminmax8; float zminmax[8]; }; // z0max,z0min,...z7max,z7min
+		union { SIMDVEC8 sn8; float sn[8]; }; //  total size =  128 bytes.
 	};
-	BVH4_WiVe( BVHContext ctx = {} ) { context = ctx; }
-	~BVH4_WiVe() { AlignedFree( bvh4Node ); }
-	BVH4_WiVe( const bvhvec4* vertices, const uint32_t primCount );
-	BVH4_WiVe( const bvhvec4slice& vertices );
+	BVH4_WiVe( BVHContext ctx = {} ) { layout = LAYOUT_BVH4_AVX2; context = ctx; }
+	~BVH4_WiVe();
+	void Build( const bvhvec4* vertices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices );
+	void ConvertFrom( MBVH<4>& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
 	// BVH4 data
 	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
 	uint32_t* primIdx = 0;			// primitive index array - pointer copied from original.
 	BVHNode* bvh4Node = 0;			// 128-byte 4-wide BVH node for efficient CPU rendering.
-};
-
-class QBVH6
-{
-public:
-	// based on https://github.com/RenderKit/embree/blob/master/kernels/rthwif/rtbuild/qnode.h
-	struct QBVH6BasicNode
-	{
-		// 16 bytes specify the quantization grid
-		bvhvec3 lower;				// world space origin of quantization grid
-		int8_t exp_x;				// 2^exp_x is the size of the grid in x dimension
-		int8_t exp_y;				// 2^exp_y is the size of the grid in y dimension
-		int8_t exp_z;				// 2^exp_z is the size of the grid in z dimension
-		uint8_t pad;				// unused byte
-		// 12 bytes for...
-		uint32_t childPtr;			// offset to consequtive list of child nodes, in 64-byte multiples
-		uint32_t primCount;			// 6x4=24bit prim count (1..16) for each leaf node, 8 bits: offset of leaf 6.
-		uint32_t offset;			// 4x8=32bit leaf 1, 2, 3, 4 offsets (leaf 0 offset = 0).
-		// 36 bytes of quantized child node bounds
-		uint8_t lower_x[6];			// the quantized lower bounds in x-dimension
-		uint8_t upper_x[6];			// the quantized upper bounds in x-dimension
-		uint8_t lower_y[6];			// the quantized lower bounds in y-dimension
-		uint8_t upper_y[6];			// the quantized upper bounds in y-dimension
-		uint8_t lower_z[6];			// the quantized lower bounds in z-dimension
-		uint8_t upper_z[6];			// the quantized upper bounds in z-dimension
-	};
 };
 
 } // namespace tinybvh
@@ -2332,6 +2305,7 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
 				tmp.instIdx = instIdx << (32 - INST_IDX_BITS);
 				tmp.hit = ray.hit;
+				tmp.rD = tinybvh_safercp( tmp.D );
 				// 2. Traverse BLAS with the transformed ray
 				// Note: Valid BVH layout options for BLASses are the regular BVH layout,
 				// the AVX-optimized BVH_SOA layout and the wide BVH4_CPU layout. If all
@@ -2341,12 +2315,10 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				if (blas->layout == LAYOUT_BVH)
 				{
 					// regular (triangle) BVH traversal
-					tmp.rD = tinybvh_safercp( tmp.D );
 					cost += ((BVH*)blas)->Intersect( tmp );
 				}
 				else
 				{
-					tmp.rD = tinybvh_safercp( tmp.D );
 					if (blas->layout == LAYOUT_BVH4_CPU) cost += ((BVH4_CPU*)blas)->Intersect( tmp );
 					else if (blas->layout == LAYOUT_BVH_SOA) cost += ((BVH_SoA*)blas)->Intersect( tmp );
 				}
@@ -2427,17 +2399,29 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 	{
 		if (node->isLeaf())
 		{
+			Ray tmp;
 			for (uint32_t i = 0; i < node->triCount; i++)
 			{
 				// BLAS traversal
 				BLASInstance& inst = instList[primIdx[node->leftFirst + i]];
-				BVH* blas = (BVH*)blasList[inst.blasIdx]; // TODO: actually we don't know BVH type.
+				const BVHBase* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
 				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
 				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
+				tmp.hit.t = ray.hit.t;
 				tmp.rD = tinybvh_safercp( tmp.D );
 				// 2. Traverse BLAS with the transformed ray
-				if (blas->IsOccluded( tmp )) return true;
+				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU || blas->layout == LAYOUT_BVH_SOA );
+				if (blas->layout == LAYOUT_BVH)
+				{
+					// regular (triangle) BVH traversal
+					if (((BVH*)blas)->IsOccluded( tmp )) return true;
+				}
+				else
+				{
+					if (blas->layout == LAYOUT_BVH4_CPU) { if (((BVH4_CPU*)blas)->IsOccluded( tmp )) return true; }
+					else if (blas->layout == LAYOUT_BVH_SOA) { if (((BVH_SoA*)blas)->IsOccluded( tmp )) return true; }
+				}
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
@@ -3915,7 +3899,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 				stack[stackPtr++] = (uint32_t)(((float*)&nodeBase[3] + i) - (float*)bvh4Data);
 				stack[stackPtr++] = orig.child[i];
 			}
-		}
+	}
 		// store child node bounds, quantized
 		const bvhvec3 extent = orig.aabbMax - orig.aabbMin;
 		bvhvec3 scale;
@@ -3963,7 +3947,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 		if (stackPtr == 0) break;
 		nodeIdx = stack[--stackPtr];
 		retValPos = stack[--stackPtr];
-	}
+}
 	usedBlocks = newAlt4Ptr;
 }
 
@@ -4325,7 +4309,7 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 		bvh8Data[currentNodeAddr + 1].y = *(float*)&triangleBaseIndex;
 	}
 	usedBlocks = nodeDataPtr;
-}
+	}
 
 // ============================================================================
 //
@@ -5114,11 +5098,11 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 							hitAddr = as_uint( blasTris[triAddr + 2].w );
 						}
 					}
-				}
-			}
+		}
+	}
 		#endif
 			tgroup.y -= 1 << triangleIndex;
-		}
+}
 		if (ngroup.y <= 0x00FFFFFF)
 		{
 			if (stackPtr > 0) { STACK_POP( /* nodeGroup */ ); }
@@ -5131,7 +5115,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 				break;
 			}
 		}
-	} while (true);
+} while (true);
 	return 0;
 }
 
@@ -5296,7 +5280,7 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 		// get next task
 		if (nodeIdx) continue;
 		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
-	}
+}
 	return cost;
 }
 
@@ -5459,11 +5443,76 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 		// get next task
 		if (nodeIdx) continue;
 		if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr];
-	}
+}
 	return false;
 }
 #ifdef __GNUC__
 #pragma GCC pop_options
+#endif
+
+#if 0 // under construction
+
+uint32_t signShiftAmount( const bool positiveX, bool positiveY, bool positiveZ )
+{
+	return ((positiveX ? 0b001 : 0u) | (positiveY ? 0b010 : 0u) | (positiveZ ? 0b100 : 0u)) * 3;
+}
+
+int32_t BVH4_WiVe::Intersect( Ray& ray ) const
+{
+	__m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
+	__m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
+	__m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
+	__m256 t8 = _mm256_set1_ps( ray.hit.t );
+	__m256i signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
+	struct StackEntry { uint32_t node; float dist; };
+	ALIGNED( 64 ) StackEntry stack[64];
+	// std::fill( std::begin( stackDistances ), std::end( stackDistances ), std::numeric_limits<float>::max() );
+	uint32_t stackPtr = 1;
+	stack[0].node = 0, stack[0].dist = 0;
+	while (stackPtr > 0)
+	{
+		stackPtr--;
+		uint32_t nodeIdx = stack[--stackPtr].node; // mask with ((1u << 29) - 1) ?
+		const BVHNode& node = bvh4Node[nodeIdx];
+		if (!node.isLeaf())
+		{
+			__m256i child8;
+			__m256 dist8;
+			uint32_t numChildren = intersectInnerNode( node, simdRay, childrenSIMD, distancesSIMD );
+			if (numChildren > 0)
+			{
+				_mm256_storeu_si256( child8, .. ); // childrenSIMD.store( std::span( stackCompressedNodeHandles.data() + stackPtr, 8 ) );
+				_mm256_storeu_ps( dist8, .. ); // distancesSIMD.store( std::span( stackDistances.data() + stackPtr, 8 ) );
+				stackPtr += numChildren;
+			}
+		}
+		else // leaf
+		{
+			if (intersectLeaf( &m_leafIndexAllocator.get( handle ), leafNodePrimitiveCount( compressedNodeHandle ), ray, si ))
+			{
+				t8 = _mm256_set1_ps( ray.hit.t );
+				// compress stack
+				uint32_t outStackPtr = 0;
+				for (size_t i = 0; i < stackPtr; i += 8)
+				{
+					__m256i node8 = _mm256_load_si256( .. ); // node8.loadAligned( std::span( stackCompressedNodeHandles.data() + i, 8 ) );
+					__m256 dist8 = _mm256_load_ps( .. ); // dist8.loadAligned( std::span( stackDistances.data() + i, 8 ) );
+					__m256 mask8 = _mm256_cmp_ps( _CMP_LT_OQ, dist8, t8 );
+					__m256i cpi = mask8.computeCompressPermutation(); // ?
+					dist8 = dist8.permute( cpi );
+					node8 = node8.permute( cpi );
+					_mm256_storeu_ps( dist8, .. ); // dist8.store( std::span( stackDistances.data() + outStackPtr, 8 ) );
+					_mm256_storeu_si256( node8, .. ); // node8.store( std::span( stackCompressedNodeHandles.data() + outStackPtr, 8 ) );
+					uint32_t numItems = tinybvh_min( 8, stackPtr - i );
+					uint32_t validMask = (1 << numItems) - 1;
+					outStackPtr += mask8.count( validMask ); // ?
+				}
+				stackPtr = outStackPtr;
+			}
+		}
+	}
+}
+
 #endif
 
 #endif // BVH_USEAVX
@@ -5620,10 +5669,8 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 		const float32x4_t txmax = vmaxq_f32( tx1, tx2 ), tymax = vmaxq_f32( ty1, ty2 ), tzmax = vmaxq_f32( tz1, tz2 );
 		const float32x4_t tmin = vmaxq_f32( vmaxq_f32( txmin, tymin ), tzmin );
 		const float32x4_t tmax = vminq_f32( vminq_f32( txmax, tymax ), tzmax );
-
 		uint32x4_t hit = vandq_u32( vandq_u32( vcgeq_f32( tmax, tmin ), vcltq_f32( tmin, t4 ) ), vcgeq_f32( tmax, zero4 ) );
 		int32_t hitBits = ARMVecMovemask( hit ), hits = vcnt_s8( vreinterpret_s8_s32( vcreate_u32( hitBits ) ) )[0];
-
 		if (hits == 1 /* 43% */)
 		{
 			// just one node was hit - no sorting needed.
@@ -5766,7 +5813,6 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 	const uint32x4_t idx4 = SIMD_SETRVECU( 0, 1, 2, 3 );
 	const uint32x4_t idxMask = vdupq_n_u32( 0xfffffffc );
 	const float32x4_t inf4 = vdupq_n_f32( BVH_FAR );
-
 	while (1)
 	{
 		const BVHNode& node = bvh4Node[nodeIdx];
@@ -6980,7 +7026,7 @@ void BVH_Verbose::MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32
 		MergeSubtree( node.right, newIdx, newIdxPtr );
 	}
 }
-} // namespace tinybvh
+		} // namespace tinybvh
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
