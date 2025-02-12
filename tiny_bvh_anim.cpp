@@ -164,6 +164,7 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				BLASInstance& instance = inst[instIdx];
 				uint32_t blasIdx = instance.blasIdx;
 				bvhvec3 N;
+				bvhvec3 I = ray.O + ray.hit.t * ray.D;
 				if (blasIdx != 0)
 				{
 					// we hit the Sponza mesh, which consists of triangles
@@ -178,10 +179,15 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				{
 					// we hit a sphere
 					bvhvec3 C = tinybvh_transform_point( spheres[primIdx].pos, instance.transform );
-					bvhvec3 I = ray.O + ray.hit.t * ray.D;
 					N = tinybvh_normalize( I - C );
 				}
-				int c = (int)(255.9f * fabs( tinybvh_dot( N, L ) ));
+				// add a shadow
+				bvhvec3 L = bvhvec3( 20, 27, 3 ) - I;
+				const float d = tinybvh_length( L );
+				L *= 1.0f / d;
+				bool occluded = tlas.IsOccluded( Ray( I + L * 0.001f, L, d ) );
+				// plot
+				int c = (int)((occluded ? 50.0f : 255.9f) * fabs( tinybvh_dot( N, L ) ));
 				buf[pixelIdx] = c + (c << 8) + (c << 16);
 			}
 		}
