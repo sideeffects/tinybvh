@@ -86,7 +86,8 @@ THE SOFTWARE.
 #define TINY_BVH_H_
 
 // Run-time checks; disabled by default.
-// #define PARANOID
+// #define PARANOID // checks out-of-bound access of slices
+// #define SLICEDUMP // dumps the slice used for building to a file - debug feature.
 
 // Binned BVH building: bin count.
 #ifndef BVHBINS
@@ -163,7 +164,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	3
-#define TINY_BVH_VERSION_SUB	6
+#define TINY_BVH_VERSION_SUB	7
 
 // ============================================================================
 //
@@ -444,6 +445,8 @@ inline bvhdbl3 operator*( double b, const bvhdbl3& a ) { return bvhdbl3( b * a.x
 inline bvhdbl3 operator/( double b, const bvhdbl3& a ) { return bvhdbl3( b / a.x, b / a.y, b / a.z ); }
 inline bvhdbl3 operator*=( bvhdbl3& a, const double b ) { return bvhdbl3( a.x * b, a.y * b, a.z * b ); }
 
+#endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
+
 inline double tinybvh_length( const bvhdbl3& a ) { return sqrt( a.x * a.x + a.y * a.y + a.z * a.z ); }
 inline bvhdbl3 tinybvh_normalize( const bvhdbl3& a )
 {
@@ -464,8 +467,6 @@ inline bvhdbl3 tinybvh_transform_vector( const bvhdbl3& v, const double* T )
 	return bvhdbl3( T[0] * v.x + T[1] * v.y + T[2] * v.z, T[4] * v.x +
 		T[5] * v.y + T[6] * v.z, T[8] * v.x + T[9] * v.y + T[10] * v.z );
 }
-
-#endif // TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
 inline bvhdbl3 tinybvh_cross( const bvhdbl3& a, const bvhdbl3& b )
 {
@@ -730,7 +731,7 @@ public:
 	bool IsOccluded( const Ray& ray ) const;
 	void Intersect256Rays( Ray* first ) const;
 	void Intersect256RaysSSE( Ray* packet ) const; // requires BVH_USEAVX
-private:
+	// private:
 	void PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
 	void Build();
 	bool IsOccludedTLAS( const Ray& ray ) const;
@@ -1587,6 +1588,18 @@ void BVH::Build( BLASInstance* instances, const uint32_t instCount, BVHBase** bl
 
 void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims )
 {
+#ifdef SLICEDUMP
+	// this code dumps the passed geometry data to a file - for debugging only.
+	std::fstream df{ "dump.bin", df.binary | df.out };
+	uint32_t vcount = vertices.count, indexed = indices == 0 ? 0 : 1, stride = vertices.stride;
+	uint32_t pcount = indices ? prims : (vertices.count / 3);
+	df.write( (char*)&pcount, 4 );
+	df.write( (char*)&vcount, 4 );
+	df.write( (char*)&stride, 4 );
+	df.write( (char*)&indexed, sizeof( uint32_t ) );
+	df.write( (char*)vertices.data, vertices.stride * vertices.count );
+	if (indexed) df.write( (char*)indices, prims * 3 * 4 );
+#endif
 	uint32_t primCount = prims > 0 ? prims : vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2; // upper limit
 	// allocate memory on first build
@@ -1951,7 +1964,7 @@ void BVH::BuildHQ()
 					for (uint32_t i = 0; i < HQBVHBINS - 1; i++)
 					{
 						const float Cspatial = C_TRAV + C_INT * rSAV * (ANL[i] + ANR[i]);
-						if (Cspatial < splitCost && NL[i] + NR[i] < budget)
+						if (Cspatial < splitCost && NL[i] + NR[i] < budget && ANL[i] * ANR[i] > 0)
 						{
 							spatial = true, splitCost = Cspatial, bestAxis = a, bestPos = i;
 							bestLMin = lBMin[i], bestLMax = lBMax[i], bestRMin = rBMin[i], bestRMax = rBMax[i];
@@ -1965,7 +1978,6 @@ void BVH::BuildHQ()
 			float noSplitCost = (float)node.triCount * C_INT;
 			if (splitCost >= noSplitCost)
 			{
-				bvhvec3 nodeMin( BVH_FAR ), nodeMax( -BVH_FAR );
 				for (uint32_t i = 0; i < node.triCount; i++)
 					primIdx[node.leftFirst + i] = fragment[primIdx[node.leftFirst + i]].primIdx;
 				break; // not splitting is better.
@@ -2053,7 +2065,15 @@ void BVH::BuildHQ()
 			memcpy( triIdxA + sliceStart, triIdxB + sliceStart, (sliceEnd - sliceStart) * 4 );
 			// create child nodes
 			uint32_t leftCount = A - sliceStart, rightCount = sliceEnd - B;
-			if (leftCount == 0 || rightCount == 0) break;
+			if (leftCount == 0 || rightCount == 0)
+			{
+				// spatial split failed. We shouldn't get here, but we do sometimes..
+				for (uint32_t i = 0; i < node.triCount; i++)
+					primIdx[node.leftFirst + i] = fragment[primIdx[node.leftFirst + i]].primIdx;
+				node.aabbMin = tinybvh_min( bestLMin, bestRMin );
+				node.aabbMax = tinybvh_max( bestLMax, bestRMax );
+				break;
+			}
 			int32_t leftChildIdx = newNodePtr++, rightChildIdx = newNodePtr++;
 			bvhNode[leftChildIdx].aabbMin = bestLMin, bvhNode[leftChildIdx].aabbMax = bestLMax;
 			bvhNode[leftChildIdx].leftFirst = sliceStart, bvhNode[leftChildIdx].triCount = leftCount;
