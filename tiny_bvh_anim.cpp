@@ -8,7 +8,6 @@
 #define INSTCOUNT (GRIDSIZE * GRIDSIZE * GRIDSIZE)
 
 #define TINYBVH_IMPLEMENTATION
-#define TINYBVH_NO_SIMD
 #define INST_IDX_BITS 8 // override default; space for 256 instances.
 #include "tiny_bvh.h"
 #include <fstream>
@@ -18,10 +17,10 @@ using namespace tinybvh;
 
 struct Sphere { bvhvec3 pos; float r; };
 
-BVH sponza;
+BVH4_CPU sponza;
 BVH obj; // custom geometry BVH must be regular BVH layout.
 BVH tlas; // TLAS must for now be in regular BVH layout.
-BVHBase* bvhList[] = { &sponza, &obj };
+BVHBase* bvhList[] = { &obj, &sponza };
 BLASInstance inst[INSTCOUNT + 1 /* one extra for sponza */];
 int frameIdx = 0, verts = 0, bverts = 0;
 bvhvec4* triangles = 0;
@@ -100,15 +99,16 @@ void Init()
 	obj.customIsOccluded = &sphereIsOccluded;
 
 	// build a TLAS
-	inst[0] = BLASInstance( 0 /* sponza */ );
-	for (int b = 1, x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, b++)
+	int idx = 0;
+	for (int x = 0; x < GRIDSIZE; x++) for (int y = 0; y < GRIDSIZE; y++) for (int z = 0; z < GRIDSIZE; z++, idx++)
 	{
-		inst[b] = BLASInstance( 1 /* bunny */ );
-		inst[b].transform[0] = inst[b].transform[5] = inst[b].transform[10] = 0.6f; // scale
-		inst[b].transform[3] = (float)x * 5 - GRIDSIZE * 2.5f;
-		inst[b].transform[7] = (float)y * 5 - GRIDSIZE * 2.5f + 7;
-		inst[b].transform[11] = (float)z * 5 - GRIDSIZE * 2.5f + 1;
+		inst[idx] = BLASInstance( 0 /* bunny */ );
+		inst[idx].transform[0] = inst[idx].transform[5] = inst[idx].transform[10] = 0.6f; // scale
+		inst[idx].transform[3] = (float)x * 5 - GRIDSIZE * 2.5f;
+		inst[idx].transform[7] = (float)y * 5 - GRIDSIZE * 2.5f + 7;
+		inst[idx].transform[11] = (float)z * 5 - GRIDSIZE * 2.5f + 1;
 	}
+	inst[idx] = BLASInstance( 1 /* sponza */ );
 	tlas.Build( inst, 1 + INSTCOUNT, bvhList, 2 ); // just move build to Tick if instance transforms are not static.
 }
 
@@ -164,7 +164,8 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				BLASInstance& instance = inst[instIdx];
 				uint32_t blasIdx = instance.blasIdx;
 				bvhvec3 N;
-				if (blasIdx == 0)
+				bvhvec3 I = ray.O + ray.hit.t * ray.D;
+				if (blasIdx != 0)
 				{
 					// we hit the Sponza mesh, which consists of triangles
 					bvhvec3 v0 = triangles[primIdx * 3];
@@ -178,10 +179,15 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				{
 					// we hit a sphere
 					bvhvec3 C = tinybvh_transform_point( spheres[primIdx].pos, instance.transform );
-					bvhvec3 I = ray.O + ray.hit.t * ray.D;
 					N = tinybvh_normalize( I - C );
 				}
-				int c = (int)(255.9f * fabs( tinybvh_dot( N, L ) ));
+				// add a shadow
+				bvhvec3 L = bvhvec3( 20, 27, 3 ) - I;
+				const float d = tinybvh_length( L );
+				L *= 1.0f / d;
+				bool occluded = tlas.IsOccluded( Ray( I + L * 0.001f, L, d ) );
+				// plot
+				int c = (int)((occluded ? 50.0f : 255.9f) * fabs( tinybvh_dot( N, L ) ));
 				buf[pixelIdx] = c + (c << 8) + (c << 16);
 			}
 		}
@@ -200,8 +206,12 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 	// render tiles
 	tileIdx = threadCount;
 	std::vector<std::thread> threads;
+#ifdef _DEBUG
+	TraceWorkerThread( buf, 0 );
+#else
 	for (uint32_t i = 0; i < threadCount; i++)
 		threads.emplace_back( &TraceWorkerThread, buf, i );
+#endif
 	for (auto& thread : threads) thread.join();
 }
 

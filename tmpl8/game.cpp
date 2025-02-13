@@ -44,7 +44,11 @@ void Game::Init()
 	AddMesh( "./testdata/dragon.bin", 1, float3( 0 ) );
 	swap( verts, dragonVerts );
 	swap( triCount, dragonTriCount );
-	dragon.Build( dragonVerts, dragonTriCount );
+	if (!dragon.Load( "dragon.bvh", dragonTriCount ))
+	{
+		dragon.BuildHQ( dragonVerts, dragonTriCount );
+		dragon.Save( "dragon.bvh" );
+	}
 
 	// create dragon instances
 	for (int d = 0; d < DRAGONS; d++)
@@ -71,7 +75,12 @@ void Game::Init()
 	AddMesh( "./testdata/bistro_ext_part2.bin", 1, float3( 0 ) );
 
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-	bistro.Build( verts, triCount );
+	if (!bistro.Load( "bistro.bvh", triCount ))
+	{
+		bistro.BuildHQ( verts, triCount );
+		bistro.Save( "bistro.bvh" );
+	}
+
 	instance[0] = BLASInstance( 0 /* static geometry */ );
 	tlas.Build( instance, DRAGONS + 1, blasList, 2 );
 
