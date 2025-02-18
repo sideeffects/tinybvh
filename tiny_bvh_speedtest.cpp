@@ -14,6 +14,7 @@
 #define BUILD_REFERENCE
 #define BUILD_DOUBLE
 #define BUILD_AVX
+#define BUILD_NEON
 #define BUILD_SBVH
 // #define REFIT_BVH2
 #define REFIT_MBVH4
@@ -483,6 +484,19 @@ int main()
 	printf( "- fast AVX builder:  " );
 	t.reset();
 	for (int pass = 0; pass < 3; pass++) bvh->BuildAVX( triangles, verts / 3 );
+	buildTime = t.elapsed() / 3.0f;
+	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
+	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
+	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
+
+#endif
+
+#if defined BUILD_NEON && defined BVH_USENEON
+
+	// measure single-core bvh construction time - NEON builder
+	printf( "- fast NEON builder:  " );
+	t.reset();
+	for (int pass = 0; pass < 3; pass++) bvh->BuildNEON( triangles, verts / 3 );
 	buildTime = t.elapsed() / 3.0f;
 	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
 	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
