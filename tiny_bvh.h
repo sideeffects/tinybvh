@@ -479,12 +479,16 @@ inline double tinybvh_dot( const bvhdbl3& a, const bvhdbl3& b ) { return a.x * b
 // SIMD typedef, helps keeping the interface generic
 #ifdef BVH_USEAVX
 typedef __m128 SIMDVEC4;
+typedef __m128i SIMDIVEC4;
 typedef __m256 SIMDVEC8;
+typedef __m256i SIMDIVEC8;
 #define SIMD_SETVEC(a,b,c,d) _mm_set_ps( a, b, c, d )
 #define SIMD_SETRVEC(a,b,c,d) _mm_set_ps( d, c, b, a )
 #elif defined(BVH_USENEON)
 typedef float32x4_t SIMDVEC4;
+typedef int32x4_t SIMDIVEC4;
 typedef float32x4x2_t SIMDVEC8;
+typedef int32x4x2_t SIMDIVEC8;
 inline float32x4_t SIMD_SETVEC( float w, float z, float y, float x )
 {
 	ALIGNED( 64 ) float data[4] = { x, y, z, w };
@@ -1160,7 +1164,7 @@ public:
 	void Build( const bvhvec4slice& vertices );
 	void ConvertFrom( MBVH<4>& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
-	uint32_t IntersectInnerNode( const BVHNode& n, const Ray& ray, __m256i& outChildren, __m256& outDistances ) const;
+	uint32_t IntersectInnerNode( const BVHNode& n, const Ray& ray, SIMDIVEC8& outChildren, SIMDVEC8& outDistances ) const;
 	bool IsOccluded( const Ray& ray ) const;
 	// BVH4 data
 	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
@@ -4540,7 +4544,7 @@ void BVH::BuildAVX()
 				binbox[i0] = r0, i0 = ILANE( bc4, 0 );
 				binbox[AVXBINS + i1] = r1, i1 = ILANE( bc4, 1 );
 				binbox[2 * AVXBINS + i2] = r2, i2 = ILANE( bc4, 2 );
-			}
+		}
 			// final business for final fragment
 			const __m256 b0 = binbox[i0], b1 = binbox[AVXBINS + i1], b2 = binbox[2 * AVXBINS + i2];
 			count[0][i0]++, count[1][i1]++, count[2][i2]++;
@@ -4593,10 +4597,10 @@ void BVH::BuildAVX()
 			*(__m256*)& bvhNode[n] = _mm256_xor_ps( bestRBox, signFlip8 );
 			bvhNode[n].leftFirst = j, bvhNode[n].triCount = rightCount;
 			task[taskCount++] = n, nodeIdx = n - 1;
-		}
+	}
 		// fetch subdivision task from stack
 		if (taskCount == 0) break; else nodeIdx = task[--taskCount];
-	}
+}
 	// all done.
 	aabbMin = bvhNode[0].aabbMin, aabbMax = bvhNode[0].aabbMax;
 	refittable = true; // not using spatial splits: can refit this BVH
@@ -5096,7 +5100,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 				const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 				const bool hit = u >= 0 && v >= 0 && u + v < 1;
 				if (hit) triangleuv = bvhvec2( u, v ), tmax = ta, hitAddr = *(uint32_t*)&T[15];
-			}
+	}
 		#else
 			int32_t triAddr = tgroup.x + triangleIndex * 3;
 			const bvhvec3 edge2 = bvhvec3( blasTris[triAddr + 0] );
@@ -5126,7 +5130,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 			}
 		#endif
 			tgroup.y -= 1 << triangleIndex;
-		}
+}
 		if (ngroup.y <= 0x00FFFFFF)
 		{
 			if (stackPtr > 0) { STACK_POP( /* nodeGroup */ ); }
