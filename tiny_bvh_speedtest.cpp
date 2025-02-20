@@ -717,7 +717,7 @@ int main()
 
 #endif
 
-#ifdef TRAVERSE_WIVE
+#if defined TRAVERSE_WIVE && defined BVH_USEAVX
 
 	// BVH8_CPU
 	if (!bvh8_cpu)
