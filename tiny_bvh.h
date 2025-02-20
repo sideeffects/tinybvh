@@ -6130,7 +6130,8 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 		{
 			// blend in lane indices
 			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
-
+            
+#if false
 			// sort
 			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
 			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
@@ -6155,11 +6156,49 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 				for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
+#else
+            ALIGNED( 64 ) float d[4];
+            vst1q_f32(d, tm);
+            // sort
+            float tmp;
+            if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
+            if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
+            if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
+            if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
+            if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
+            
+            const uint32_t lanes[4] =
+            {
+                (uint32_t)-1,
+                *(uint32_t*)&d[1] & 3,
+                *(uint32_t*)&d[2] & 3,
+                *(uint32_t*)&d[3] & 3,
+            };
+            
+            nodeIdx = 0;
+            for (int32_t i = 1; i < 4; i++)
+            {
+                uint32_t lane = lanes[i];
+                if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
+                if (node.triCount[lane] == 0)
+                {
+                    const uint32_t childIdx = node.childFirst[lane];
+                    if (nodeIdx) stack[stackPtr++] = nodeIdx;
+                    nodeIdx = childIdx;
+                    continue;
+                }
+                const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
+                for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
+                    IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
+            }
+
+#endif
 		}
 		else /* hits == 4, 2%: rare */
 		{
 			// blend in lane indices
 			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
+#if false
 			// sort
 			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
 			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
@@ -6185,6 +6224,43 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 				for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
+#else
+            ALIGNED( 64 ) float d[4];
+            vst1q_f32(d, tm);
+            // sort
+            float tmp;
+            if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
+            if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
+            if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
+            if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
+            if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
+            
+            const uint32_t lanes[4] =
+            {
+                *(uint32_t*)&d[0] & 3,
+                *(uint32_t*)&d[1] & 3,
+                *(uint32_t*)&d[2] & 3,
+                *(uint32_t*)&d[3] & 3,
+            };
+            
+            nodeIdx = 0;
+            for (int32_t i = 0; i < 4; i++)
+            {
+                uint32_t lane = lanes[i];
+                
+                if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
+                if (node.triCount[lane] == 0)
+                {
+                    const uint32_t childIdx = node.childFirst[lane];
+                    if (nodeIdx) stack[stackPtr++] = nodeIdx;
+                    nodeIdx = childIdx;
+                    continue;
+                }
+                const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
+                for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
+                    IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
+            }
+#endif
 		}
 		// get next task
 		if (nodeIdx) continue;
@@ -6291,6 +6367,7 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 		{
 			// blend in lane indices
 			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
+#if false
 			// sort
 			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
 			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
@@ -6315,11 +6392,48 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
+#else
+            ALIGNED( 64 ) float d[4];
+            vst1q_f32(d, tm);
+            // sort
+            float tmp;
+            if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
+            if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
+            if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
+            if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
+            if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
+            
+            const uint32_t lanes[4] =
+            {
+                (uint32_t)-1,
+                *(uint32_t*)&d[1] & 3,
+                *(uint32_t*)&d[2] & 3,
+                *(uint32_t*)&d[3] & 3,
+            };
+            
+            nodeIdx = 0;
+            for (int32_t i = 1; i < 4; i++)
+            {
+                uint32_t lane = lanes[i];
+                if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
+                if (node.triCount[lane] == 0)
+                {
+                    const uint32_t childIdx = node.childFirst[lane];
+                    if (nodeIdx) stack[stackPtr++] = nodeIdx;
+                    nodeIdx = childIdx;
+                    continue;
+                }
+                const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
+                for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+                    if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
+            }
+#endif
 		}
 		else /* hits == 4, 2%: rare */
 		{
 			// blend in lane indices
 			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
+#if false
 			// sort
 			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
 			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
@@ -6345,6 +6459,43 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
+#else
+            ALIGNED( 64 ) float d[4];
+            vst1q_f32(d, tm);
+            // sort
+            float tmp;
+            if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
+            if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
+            if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
+            if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
+            if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
+            
+            const uint32_t lanes[4] =
+            {
+                *(uint32_t*)&d[0] & 3,
+                *(uint32_t*)&d[1] & 3,
+                *(uint32_t*)&d[2] & 3,
+                *(uint32_t*)&d[3] & 3,
+            };
+            
+            nodeIdx = 0;
+            for (int32_t i = 0; i < 4; i++)
+            {
+                uint32_t lane = lanes[i];
+                
+                if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
+                if (node.triCount[lane] == 0)
+                {
+                    const uint32_t childIdx = node.childFirst[lane];
+                    if (nodeIdx) stack[stackPtr++] = nodeIdx;
+                    nodeIdx = childIdx;
+                    continue;
+                }
+                const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
+                for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+                    if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
+            }
+#endif
 		}
 		// get next task
 		if (nodeIdx) continue;
