@@ -631,7 +631,7 @@ public:
 		LAYOUT_BVH4_GPU,
 		LAYOUT_MBVH8,
 		LAYOUT_CWBVH,
-		LAYOUT_BVH4_AVX2
+		LAYOUT_BVH8_AVX2
 	};
 	struct ALIGNED( 32 ) Fragment
 	{
@@ -960,7 +960,7 @@ template <int M> class MBVH : public BVHBase
 public:
 	struct MBVHNode
 	{
-		// 4-wide (aka 'shallow') BVH layout.
+		// M-wide (aka 'shallow') BVH layout.
 		bvhvec3 aabbMin; uint32_t firstTri;
 		bvhvec3 aabbMax; uint32_t triCount;
 		uint32_t child[M];
@@ -986,7 +986,7 @@ public:
 	void SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims );
 	// BVH data
 	MBVHNode* mbvhNode = 0;			// BVH node for M-wide BVH.
-	BVH bvh;						// BVH4 is created from BVH and uses its data.
+	BVH bvh;						// MBVH<M> is created from BVH and uses its data.
 	bool ownBVH = true;				// False when ConvertFrom receives an external bvh.
 };
 
@@ -1122,6 +1122,50 @@ public:
 	void InvertTransform();
 };
 
+class BVH8_WiVe : public BVHBase
+{
+public:
+	struct BVHNode
+	{
+		// 4-way BVH node, optimized for CPU rendering.
+		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units", Fuetterling1 et al., 2017,
+		// and the implementation by Mathijs Molenaar, https://github.com/mathijs727/pandora
+		SIMDVEC8 xmin8, xmax8;
+		SIMDVEC8 ymin8, ymax8;
+		SIMDVEC8 zmin8, zmax8;
+		SIMDIVEC8 child8; // bits: 31..29 = flags, 28..0: node index.
+		SIMDIVEC8 permOffs8;
+		// flag bits: 000 is an empty node, 010 is an interior node. 1xx is leaf; xx = tricount.
+	};
+	struct RayWiVe
+	{
+		__m256 ox8, oy8, oz8, rdx8, rdy8, rdz8, t8;
+		__m256i signShift8;
+	};
+	BVH8_WiVe( BVHContext ctx = {} ) { layout = LAYOUT_BVH8_AVX2; context = ctx; }
+	~BVH8_WiVe();
+	void Build( const bvhvec4* vertices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims );
+	void Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims );
+	void Optimize( const uint32_t iterations, bool extreme );
+	float SAHCost( const uint32_t nodeIdx ) const;
+	void ConvertFrom( const MBVH<8>& original, bool compact = true );
+	SIMDIVEC8 CalculatePermOffsets( const uint32_t nodeIdx ) const;
+	int32_t Intersect( Ray& ray ) const;
+	bool IsOccluded( const Ray& ray ) const;
+	// BVH8 data
+	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
+	uint32_t* primIdx = 0;			// primitive index array - pointer copied from original.
+	BVHNode* bvh8Node = 0;			// 256-byte 8-wide BVH node for efficient CPU rendering.
+	MBVH<8> bvh8;					// BVH8_WiVe is created from BVH8 and uses its data.
+	bool ownBVH8 = true;			// false when ConvertFrom receives an external bvh8.
+};
+
 #ifdef DOUBLE_PRECISION_SUPPORT
 
 // BLASInstanceEx: Double-precision version of BLASInstance.
@@ -1141,36 +1185,6 @@ public:
 };
 
 #endif
-
-// Experimental & 'under construction' structs
-
-class BVH4_WiVe : public BVHBase
-{
-public:
-	struct BVHNode
-	{
-		// 4-way BVH node, optimized for CPU rendering.
-		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units",
-		// Fuetterling1 et al., 2017.
-		union { SIMDVEC8 xmin8, xmax8; };
-		union { SIMDVEC8 ymin8, ymax8; };
-		union { SIMDVEC8 zmin8, zmax8; };
-		union { SIMDVEC8 sn8; float sn[8]; }; // n0..3, s0..3; total size =  128 bytes.
-		// n_i: inner node flag + child node cluster offset
-	};
-	BVH4_WiVe( BVHContext ctx = {} ) { layout = LAYOUT_BVH4_AVX2; context = ctx; }
-	~BVH4_WiVe();
-	void Build( const bvhvec4* vertices, const uint32_t primCount );
-	void Build( const bvhvec4slice& vertices );
-	void ConvertFrom( MBVH<4>& original, bool compact = true );
-	int32_t Intersect( Ray& ray ) const;
-	uint32_t IntersectInnerNode( const BVHNode& n, const Ray& ray, SIMDIVEC8& outChildren, SIMDVEC8& outDistances ) const;
-	bool IsOccluded( const Ray& ray ) const;
-	// BVH4 data
-	bvhvec4slice verts = {};		// pointer to input primitive array: 3x16 bytes per tri.
-	uint32_t* primIdx = 0;			// primitive index array - pointer copied from original.
-	BVHNode* bvh4Node = 0;			// 128-byte 4-wide BVH node for efficient CPU rendering.
-};
 
 } // namespace tinybvh
 
@@ -4544,7 +4558,7 @@ void BVH::BuildAVX()
 				binbox[i0] = r0, i0 = ILANE( bc4, 0 );
 				binbox[AVXBINS + i1] = r1, i1 = ILANE( bc4, 1 );
 				binbox[2 * AVXBINS + i2] = r2, i2 = ILANE( bc4, 2 );
-		}
+			}
 			// final business for final fragment
 			const __m256 b0 = binbox[i0], b1 = binbox[AVXBINS + i1], b2 = binbox[2 * AVXBINS + i2];
 			count[0][i0]++, count[1][i1]++, count[2][i2]++;
@@ -4597,10 +4611,10 @@ void BVH::BuildAVX()
 			*(__m256*)& bvhNode[n] = _mm256_xor_ps( bestRBox, signFlip8 );
 			bvhNode[n].leftFirst = j, bvhNode[n].triCount = rightCount;
 			task[taskCount++] = n, nodeIdx = n - 1;
-	}
+		}
 		// fetch subdivision task from stack
 		if (taskCount == 0) break; else nodeIdx = task[--taskCount];
-}
+	}
 	// all done.
 	aabbMin = bvhNode[0].aabbMin, aabbMax = bvhNode[0].aabbMax;
 	refittable = true; // not using spatial splits: can refit this BVH
@@ -5100,7 +5114,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 				const float v = T[4] * wr.x + T[5] * wr.y + T[6] * wr.z + T[7];
 				const bool hit = u >= 0 && v >= 0 && u + v < 1;
 				if (hit) triangleuv = bvhvec2( u, v ), tmax = ta, hitAddr = *(uint32_t*)&T[15];
-	}
+			}
 		#else
 			int32_t triAddr = tgroup.x + triangleIndex * 3;
 			const bvhvec3 edge2 = bvhvec3( blasTris[triAddr + 0] );
@@ -5130,7 +5144,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 			}
 		#endif
 			tgroup.y -= 1 << triangleIndex;
-}
+		}
 		if (ngroup.y <= 0x00FFFFFF)
 		{
 			if (stackPtr > 0) { STACK_POP( /* nodeGroup */ ); }
@@ -5478,11 +5492,194 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 #pragma GCC pop_options
 #endif
 
-#if 0 // under construction
-
-uint32_t signShiftAmount( const bool positiveX, bool positiveY, bool positiveZ )
+BVH8_WiVe::~BVH8_WiVe()
 {
-	return ((positiveX ? 0b001 : 0u) | (positiveY ? 0b010 : 0u) | (positiveZ ? 0b100 : 0u)) * 3;
+	if (!ownBVH8) bvh8 = MBVH<8>(); // clear out pointers we don't own.
+	AlignedFree( bvh8Node );
+}
+
+void BVH8_WiVe::Build( const bvhvec4* vertices, const uint32_t primCount )
+{
+	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+
+void BVH8_WiVe::Build( const bvhvec4slice& vertices )
+{
+	bvh8.context = context; // properly propagate context to fix issue #66.
+	bvh8.Build( vertices );
+	ConvertFrom( bvh8, true );
+}
+
+void BVH8_WiVe::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH8_WiVe::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	bvh8.context = context;
+	bvh8.Build( vertices, indices, prims );
+	ConvertFrom( bvh8, true );
+}
+
+void BVH8_WiVe::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+
+void BVH8_WiVe::BuildHQ( const bvhvec4slice& vertices )
+{
+	bvh8.context = context;
+	bvh8.BuildHQ( vertices );
+	ConvertFrom( bvh8, true );
+}
+
+void BVH8_WiVe::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH8_WiVe::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	bvh8.context = context;
+	bvh8.BuildHQ( vertices, indices, prims );
+	ConvertFrom( bvh8, true );
+}
+
+void BVH8_WiVe::Optimize( const uint32_t iterations, bool extreme )
+{
+	bvh8.Optimize( iterations, extreme );
+	ConvertFrom( bvh8, true );
+}
+
+float BVH8_WiVe::SAHCost( const uint32_t nodeIdx ) const
+{
+	return bvh8.SAHCost( nodeIdx );
+}
+
+#define SORT(a,b) { if (dist[a] > dist[b]) { float h = dist[a]; dist[a] = dist[b], dist[b] = h; } }
+SIMDIVEC8 BVH8_WiVe::CalculatePermOffsets( const uint32_t nodeIdx ) const
+{
+	const MBVH<8>::MBVHNode& n = bvh8.mbvhNode[nodeIdx];
+	union { uint32_t permOffs[8]; __m256i permOffs8; };
+	permOffs8 = _mm256_set1_epi32( 0 );
+	static const bvhvec3 D[8] = {
+		bvhvec3( -1, -1, -1 ), bvhvec3( 1, -1, -1 ), bvhvec3( -1,  1, -1 ), bvhvec3( 1,  1, -1 ),
+		bvhvec3( -1, -1, 1 ), bvhvec3( 1, -1, 1 ), bvhvec3( -1,  1, 1 ), bvhvec3( 1,  1, 1 )
+	};
+	for (uint32_t q = 0; q < 8; q++)
+	{
+		union { float dist[8]; uint32_t idist[8]; };
+		for (int i = 0; i < 8; i++) if (n.child[i] == 0) dist[i] = 1e30f; else
+		{
+			const MBVH<8>::MBVHNode& c = bvh8.mbvhNode[n.child[i]];
+			const bvhvec3 p( q & 1 ? c.aabbMin.x : c.aabbMax.x, q & 2 ? c.aabbMin.y : c.aabbMax.y, q & 4 ? c.aabbMin.z : c.aabbMax.z );
+			dist[i] = tinybvh_dot( D[q], p ), idist[i] = (idist[i] & 0xfffffff8) + i;
+		}
+		// apply sorting network - https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
+		SORT( 0, 2 ); SORT( 1, 3 ); SORT( 4, 6 ); SORT( 5, 7 ); SORT( 0, 4 );
+		SORT( 1, 5 ); SORT( 2, 6 ); SORT( 3, 7 ); SORT( 0, 1 ); SORT( 2, 3 );
+		SORT( 4, 5 ); SORT( 6, 7 ); SORT( 2, 4 ); SORT( 3, 5 ); SORT( 1, 4 );
+		SORT( 3, 6 ); SORT( 1, 2 ); SORT( 3, 4 ); SORT( 5, 6 );
+		for (int i = 0; i < 8; i++) permOffs[i] += (idist[i] & 7) << (q * 3);
+	}
+	return permOffs8;
+}
+
+void BVH8_WiVe::ConvertFrom( const MBVH<8>& original, bool compact )
+{
+	// get a copy of the original bvh4
+	if (&original != &bvh8) ownBVH8 = false; // bvh isn't ours; don't delete in destructor.
+	bvh8 = original;
+	uint32_t spaceNeeded = compact ? bvh8.usedNodes : bvh8.allocatedNodes;
+	if (allocatedNodes < spaceNeeded)
+	{
+		AlignedFree( bvh8Node );
+		bvh8Node = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
+		allocatedNodes = spaceNeeded;
+	}
+	memset( bvh8Node, 0, spaceNeeded * sizeof( BVHNode ) );
+	CopyBasePropertiesFrom( bvh8 );
+	// start conversion
+	uint32_t newAlt4Ptr = 0, nodeIdx = 0, stack[128], stackPtr = 0;
+	while (1)
+	{
+		const MBVH<8>::MBVHNode& orig = bvh8.mbvhNode[nodeIdx];
+		BVHNode& newNode = bvh8Node[newAlt4Ptr++];
+		int32_t cidx = 0;
+		for (int32_t i = 0; i < 8; i++) if (orig.child[i])
+		{
+			const MBVH<8>::MBVHNode& child = bvh8.mbvhNode[orig.child[i]];
+			((float*)&newNode.xmin8)[cidx] = child.aabbMin.x;
+			((float*)&newNode.ymin8)[cidx] = child.aabbMin.y;
+			((float*)&newNode.zmin8)[cidx] = child.aabbMin.z;
+			((float*)&newNode.xmax8)[cidx] = child.aabbMax.x;
+			((float*)&newNode.ymax8)[cidx] = child.aabbMax.y;
+			((float*)&newNode.zmax8)[cidx] = child.aabbMax.z;
+			newNode.permOffs8 = CalculatePermOffsets( nodeIdx );
+			if (child.isLeaf())
+			{
+				((uint32_t*)&newNode.child8)[cidx] = child.firstTri + (child.triCount << 29) + (1 << 31);
+			}
+			else
+			{
+				uint32_t* slot = (uint32_t*)&newNode.child8 + cidx;
+				stack[stackPtr++] = (uint32_t)(slot - (uint32_t*)bvh8Node);
+				stack[stackPtr++] = orig.child[i];
+			}
+			cidx++;
+		}
+		for (; cidx < 8; cidx++)
+		{
+			((float*)&newNode.xmin8)[cidx] = 1e30f, ((float*)&newNode.xmax8)[cidx] = 1.00001e30f; // why?
+			((float*)&newNode.ymin8)[cidx] = 1e30f, ((float*)&newNode.ymax8)[cidx] = 1.00001e30f;
+			((float*)&newNode.zmin8)[cidx] = 1e30f, ((float*)&newNode.zmax8)[cidx] = 1.00001e30f;
+		}
+		// pop next task
+		if (!stackPtr) break;
+		nodeIdx = stack[--stackPtr];
+		uint32_t offset = stack[--stackPtr];
+		((uint32_t*)bvh8Node)[offset] = newAlt4Ptr;
+	}
+#if 0
+	// Convert index list: store primitives 'by value'.
+	// This also allows us to compact and reorder them for best performance.
+	stackPtr = 0, nodeIdx = 0;
+	uint32_t triPtr = 0;
+	while (1)
+	{
+		BVHNode& node = bvh4Node[nodeIdx];
+		for (int32_t i = 0; i < 4; i++) if (node.triCount[i] + node.childFirst[i] > 0)
+		{
+			if (!node.triCount[i]) stack[stackPtr++] = node.childFirst[i]; else
+			{
+				uint32_t first = node.childFirst[i];
+				uint32_t count = node.triCount[i];
+				node.childFirst[i] = triPtr;
+				// assign vertex data
+				for (uint32_t j = 0; j < count; j++)
+				{
+					const uint32_t fi = bvh4.bvh.primIdx[first + j];
+					uint32_t ti0, ti1, ti2;
+					if (bvh4.bvh.vertIdx)
+						ti0 = bvh4.bvh.vertIdx[fi * 3],
+						ti1 = bvh4.bvh.vertIdx[fi * 3 + 1],
+						ti2 = bvh4.bvh.vertIdx[fi * 3 + 2];
+					else
+						ti0 = fi * 3, ti1 = fi * 3 + 1, ti2 = fi * 3 + 2;
+					PrecomputeTriangle( bvh4.bvh.verts, ti0, ti1, ti2, (float*)&bvh4Tris[triPtr] );
+					bvh4Tris[triPtr + 3] = bvhvec4( 0, 0, 0, *(float*)&fi );
+					triPtr += 4;
+				}
+			}
+		}
+		if (!stackPtr) break;
+		nodeIdx = stack[--stackPtr];
+	}
+#endif
+	usedNodes = newAlt4Ptr;
 }
 
 constexpr uint64_t idxLUT[256] = {
@@ -5509,86 +5706,79 @@ constexpr uint64_t idxLUT[256] = {
 	7722435347201,1976943448883456,7722435347202,1976943448883712,1976943448883713,506097522914230528
 };
 
-uint32_t BVH4_WiVe::IntersectInnerNode( const BVHNode& n, const Ray& ray, __m256i& outChildren, __m256& outDistances ) const
+int32_t BVH8_WiVe::Intersect( Ray& ray ) const
 {
-	const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, _mm256_set1_ps( ray.O.x ) ), _mm256_set1_ps( ray.rD.x ) );
-	const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( n.xmax8, _mm256_set1_ps( ray.O.x ) ), _mm256_set1_ps( ray.rD.x ) );
-	const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( n.ymin8, _mm256_set1_ps( ray.O.y ) ), _mm256_set1_ps( ray.rD.y ) );
-	const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( n.ymax8, _mm256_set1_ps( ray.O.y ) ), _mm256_set1_ps( ray.rD.y ) );
-	const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( n.zmin8, _mm256_set1_ps( ray.O.z ) ), _mm256_set1_ps( ray.rD.z ) );
-	const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( n.zmax8, _mm256_set1_ps( ray.O.z ) ), _mm256_set1_ps( ray.rD.z ) );
-	const __m256 txMin = _mm256_min_ps( tx1, tx2 ), tyMin = _mm256_min_ps( ty1, ty2 ), tzMin = _mm256_min_ps( tz1, tz2 );
-	const __m256 txMax = _mm256_max_ps( tx1, tx2 ), tyMax = _mm256_max_ps( ty1, ty2 ), tzMax = _mm256_max_ps( tz1, tz2 );
-	__m256 tmin = _mm256_max_ps( _mm256_setzero_ps(), _mm256_max_ps( txMin, _mm256_max_ps( tyMin, tzMin ) ) );
-	__m256 tmax = _mm256_min_ps( _mm256_set1_ps( ray.hit.t ), _mm256_min_ps( txMax, _mm256_min_ps( tyMax, tzMax ) ) );
-	const __m256i indexMask = _mm256_set1_epi32( 0b111 );
-	const __m256i index = _mm256_and_si256( _mm256_srlv_epi32( n.permutationOffsets, ray.raySignShiftAmount ), indexMask );
-	tmin = _mm256_permutevar8x32_ps( tmin, index );
-	tmax = _mm256_permutevar8x32_ps( tmax, index );
-	uint32_t mask = _mm256_movemask_ps( _mm256_cmp_ps( tmin, tmax, _CMP_LE_OQ ) );
-	__m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT[mask] ) );
-	outChildren = _mm256_permutevar8x32_ps( _mm256_permutevar8x32_ps( n.children, index ), cpi );
-	outDistances = _mm256_permutevar8x32_ps( tmin, cpi );
-	return __popc( mask );
-}
-
-int32_t BVH4_WiVe::Intersect( Ray& ray ) const
-{
-	__m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
-	__m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
-	__m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
-	__m256 t8 = _mm256_set1_ps( ray.hit.t );
-	__m256i signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
-	struct StackEntry { uint32_t node; float dist; };
-	ALIGNED( 64 ) StackEntry stack[64];
-	// std::fill( std::begin( stackDistances ), std::end( stackDistances ), std::numeric_limits<float>::max() );
+	RayWiVe rw;
+	rw.ox8 = _mm256_set1_ps( ray.O.x ), rw.rdx8 = _mm256_set1_ps( ray.rD.x );
+	rw.oy8 = _mm256_set1_ps( ray.O.y ), rw.rdy8 = _mm256_set1_ps( ray.rD.y );
+	rw.oz8 = _mm256_set1_ps( ray.O.z ), rw.rdz8 = _mm256_set1_ps( ray.rD.z );
+	rw.t8 = _mm256_set1_ps( ray.hit.t );
+	rw.signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
+	ALIGNED( 64 ) uint32_t nodeStack[64];
+	ALIGNED( 64 ) float distStack[64];
+	for (int i = 0; i < 64; i++) distStack[i] = 1e30f; // TODO: is this needed?
+	nodeStack[0] = 0, distStack[0] = 0;
 	uint32_t stackPtr = 1;
-	stack[0].node = 0, stack[0].dist = 0;
 	while (stackPtr > 0)
 	{
 		stackPtr--;
-		uint32_t nodeIdx = stack[--stackPtr].node; // mask with ((1u << 29) - 1) ?
-		const BVHNode& node = bvh4Node[nodeIdx];
-		if (!node.isLeaf())
+		uint32_t nodeIdx = nodeStack[--stackPtr];
+		const BVHNode& n = bvh8Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
+		if (!(nodeIdx >> 31)) // top bit: leaf flag
 		{
-			__m256i child8;
-			__m256 dist8;
-			uint32_t numChildren = IntersectInnerNode( node, simdRay, childrenSIMD, distancesSIMD );
-			if (numChildren > 0)
-			{
-				_mm256_storeu_si256( child8, .. ); // childrenSIMD.store( std::span( stackCompressedNodeHandles.data() + stackPtr, 8 ) );
-				_mm256_storeu_ps( dist8, .. ); // distancesSIMD.store( std::span( stackDistances.data() + stackPtr, 8 ) );
-				stackPtr += numChildren;
-			}
+			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, rw.ox8 ), rw.rdx8 );
+			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( n.xmax8, rw.ox8 ), rw.rdx8 );
+			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( n.ymin8, rw.oy8 ), rw.rdy8 );
+			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( n.ymax8, rw.oy8 ), rw.rdy8 );
+			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( n.zmin8, rw.oz8 ), rw.rdz8 );
+			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( n.zmax8, rw.oz8 ), rw.rdz8 );
+			const __m256 txMin = _mm256_min_ps( tx1, tx2 ), tyMin = _mm256_min_ps( ty1, ty2 ), tzMin = _mm256_min_ps( tz1, tz2 );
+			const __m256 txMax = _mm256_max_ps( tx1, tx2 ), tyMax = _mm256_max_ps( ty1, ty2 ), tzMax = _mm256_max_ps( tz1, tz2 );
+			__m256 tmin = _mm256_max_ps( _mm256_setzero_ps(), _mm256_max_ps( txMin, _mm256_max_ps( tyMin, tzMin ) ) );
+			__m256 tmax = _mm256_min_ps( rw.t8, _mm256_min_ps( txMax, _mm256_min_ps( tyMax, tzMax ) ) );
+			const __m256i indexMask = _mm256_set1_epi32( 0b111 );
+			const __m256i index = _mm256_and_si256( _mm256_srlv_epi32( n.permOffs8, rw.signShift8 ), indexMask );
+			tmin = _mm256_permutevar8x32_ps( tmin, index ), tmax = _mm256_permutevar8x32_ps( tmax, index );
+			const uint32_t mask = _mm256_movemask_ps( _mm256_cmp_ps( tmin, tmax, _CMP_LE_OQ ) );
+			const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT[mask] ) );
+			const __m256i child8 = _mm256_permutevar8x32_epi32( _mm256_permutevar8x32_epi32( n.child8, index ), cpi );
+			const __m256 dist8 = _mm256_permutevar8x32_ps( tmin, cpi );
+			const uint32_t childCount = __popc( mask );
+			if (childCount == 0) continue;
+			_mm256_storeu_si256( (__m256i*)(nodeStack + stackPtr), child8 );
+			_mm256_storeu_ps( (float*)(distStack + stackPtr), dist8 );
+			stackPtr += childCount;
 		}
-		else // leaf
+		else
 		{
-			if (intersectLeaf( &m_leafIndexAllocator.get( handle ), leafNodePrimitiveCount( compressedNodeHandle ), ray, si ))
+			uint32_t first = nodeIdx & 0x1fffffff;
+			uint32_t count = ((nodeIdx >> 29) & 3) + 1;
+			bool hitSomething = false;
+			for (uint32_t i = 0; i < count; i++)
 			{
-				t8 = _mm256_set1_ps( ray.hit.t );
+				// for now, let's intersect
+			}
+			if (hitSomething)
+			{
 				// compress stack
 				uint32_t outStackPtr = 0;
-				for (size_t i = 0; i < stackPtr; i += 8)
+				for (uint32_t i = 0; i < stackPtr; i += 8)
 				{
-					__m256i node8 = _mm256_load_si256( .. ); // node8.loadAligned( std::span( stackCompressedNodeHandles.data() + i, 8 ) );
-					__m256 dist8 = _mm256_load_ps( .. ); // dist8.loadAligned( std::span( stackDistances.data() + i, 8 ) );
-					__m256 mask8 = _mm256_cmp_ps( _CMP_LT_OQ, dist8, t8 );
-					__m256i cpi = mask8.computeCompressPermutation(); // ?
-					dist8 = dist8.permute( cpi );
-					node8 = node8.permute( cpi );
-					_mm256_storeu_ps( dist8, .. ); // dist8.store( std::span( stackDistances.data() + outStackPtr, 8 ) );
-					_mm256_storeu_si256( node8, .. ); // node8.store( std::span( stackCompressedNodeHandles.data() + outStackPtr, 8 ) );
-					uint32_t numItems = tinybvh_min( 8, stackPtr - i );
-					uint32_t validMask = (1 << numItems) - 1;
-					outStackPtr += mask8.count( validMask ); // ?
+					__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
+					__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
+					const uint32_t mask = _mm256_movemask_ps( _mm256_cmp_ps( dist8, rw.t8, _CMP_LT_OQ ) );
+					const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT[mask] ) );
+					dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
+					_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
+					_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
+					const uint32_t numItems = tinybvh_min( 8u, stackPtr - i ), validMask = (1 << numItems) - 1;
+					outStackPtr += __popc( mask & validMask );
 				}
 				stackPtr = outStackPtr;
 			}
 		}
 	}
 }
-
-#endif
 
 #endif // BVH_USEAVX
 
@@ -6130,88 +6320,20 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 		{
 			// blend in lane indices
 			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
-            
-#if false
+			ALIGNED( 64 ) float d[4];
+			vst1q_f32( d, tm );
 			// sort
-			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
-			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
-			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
-			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
-			if (d2 < d3) tmp = d2, d2 = d3, d3 = tmp;
-			if (d1 < d2) tmp = d1, d1 = d2, d2 = tmp;
-			// process hits
-			float d[4] = { d0, d1, d2, d3 };
+			float tmp;
+			if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
+			if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
+			if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
+			if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
+			if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
+			const uint32_t lanes[4] = { (uint32_t)-1, *(uint32_t*)&d[1] & 3, *(uint32_t*)&d[2] & 3, *(uint32_t*)&d[3] & 3 };
 			nodeIdx = 0;
 			for (int32_t i = 1; i < 4; i++)
 			{
-				uint32_t lane = *(uint32_t*)&d[i] & 3;
-				if (node.triCount[lane] == 0)
-				{
-					const uint32_t childIdx = node.childFirst[lane];
-					if (nodeIdx) stack[stackPtr++] = nodeIdx;
-					nodeIdx = childIdx;
-					continue;
-				}
-				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-				for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
-					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
-			}
-#else
-            ALIGNED( 64 ) float d[4];
-            vst1q_f32(d, tm);
-            // sort
-            float tmp;
-            if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
-            if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
-            if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
-            if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
-            if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
-            
-            const uint32_t lanes[4] =
-            {
-                (uint32_t)-1,
-                *(uint32_t*)&d[1] & 3,
-                *(uint32_t*)&d[2] & 3,
-                *(uint32_t*)&d[3] & 3,
-            };
-            
-            nodeIdx = 0;
-            for (int32_t i = 1; i < 4; i++)
-            {
-                uint32_t lane = lanes[i];
-                if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
-                if (node.triCount[lane] == 0)
-                {
-                    const uint32_t childIdx = node.childFirst[lane];
-                    if (nodeIdx) stack[stackPtr++] = nodeIdx;
-                    nodeIdx = childIdx;
-                    continue;
-                }
-                const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-                for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
-                    IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
-            }
-
-#endif
-		}
-		else /* hits == 4, 2%: rare */
-		{
-			// blend in lane indices
-			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
-#if false
-			// sort
-			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
-			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
-			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
-			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
-			if (d2 < d3) tmp = d2, d2 = d3, d3 = tmp;
-			if (d1 < d2) tmp = d1, d1 = d2, d2 = tmp;
-			// process hits
-			float d[4] = { d0, d1, d2, d3 };
-			nodeIdx = 0;
-			for (int32_t i = 0; i < 4; i++)
-			{
-				uint32_t lane = *(uint32_t*)&d[i] & 3;
+				uint32_t lane = lanes[i];
 				if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
 				if (node.triCount[lane] == 0)
 				{
@@ -6224,43 +6346,37 @@ int32_t BVH4_CPU::Intersect( Ray& ray ) const
 				for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
 					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
 			}
-#else
-            ALIGNED( 64 ) float d[4];
-            vst1q_f32(d, tm);
-            // sort
-            float tmp;
-            if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
-            if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
-            if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
-            if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
-            if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
-            
-            const uint32_t lanes[4] =
-            {
-                *(uint32_t*)&d[0] & 3,
-                *(uint32_t*)&d[1] & 3,
-                *(uint32_t*)&d[2] & 3,
-                *(uint32_t*)&d[3] & 3,
-            };
-            
-            nodeIdx = 0;
-            for (int32_t i = 0; i < 4; i++)
-            {
-                uint32_t lane = lanes[i];
-                
-                if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
-                if (node.triCount[lane] == 0)
-                {
-                    const uint32_t childIdx = node.childFirst[lane];
-                    if (nodeIdx) stack[stackPtr++] = nodeIdx;
-                    nodeIdx = childIdx;
-                    continue;
-                }
-                const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-                for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
-                    IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
-            }
-#endif
+		}
+		else /* hits == 4, 2%: rare */
+		{
+			// blend in lane indices
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
+			ALIGNED( 64 ) float d[4];
+			vst1q_f32( d, tm );
+			// sort
+			float tmp;
+			if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
+			if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
+			if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
+			if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
+			if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
+			const uint32_t lanes[4] = { *(uint32_t*)&d[0] & 3, *(uint32_t*)&d[1] & 3, *(uint32_t*)&d[2] & 3, *(uint32_t*)&d[3] & 3 };
+			nodeIdx = 0;
+			for (int32_t i = 0; i < 4; i++)
+			{
+				uint32_t lane = lanes[i];
+				if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
+				if (node.triCount[lane] == 0)
+				{
+					const uint32_t childIdx = node.childFirst[lane];
+					if (nodeIdx) stack[stackPtr++] = nodeIdx;
+					nodeIdx = childIdx;
+					continue;
+				}
+				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
+				for (uint32_t j = 0; j < count; j++, cost += C_INT) // TODO: aim for 4 prims per leaf
+					IntersectCompactTri( ray, t4, (float*)(bvh4Tris + first + j * 4) );
+			}
 		}
 		// get next task
 		if (nodeIdx) continue;
@@ -6367,86 +6483,20 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 		{
 			// blend in lane indices
 			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
-#if false
+			ALIGNED( 64 ) float d[4];
+			vst1q_f32( d, tm );
 			// sort
-			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
-			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
-			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
-			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
-			if (d2 < d3) tmp = d2, d2 = d3, d3 = tmp;
-			if (d1 < d2) tmp = d1, d1 = d2, d2 = tmp;
-			// process hits
-			float d[4] = { d0, d1, d2, d3 };
+			float tmp;
+			if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
+			if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
+			if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
+			if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
+			if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
+			const uint32_t lanes[4] = { (uint32_t)-1, *(uint32_t*)&d[1] & 3, *(uint32_t*)&d[2] & 3, *(uint32_t*)&d[3] & 3 };
 			nodeIdx = 0;
 			for (int32_t i = 1; i < 4; i++)
 			{
-				uint32_t lane = *(uint32_t*)&d[i] & 3;
-				if (node.triCount[lane] == 0)
-				{
-					const uint32_t childIdx = node.childFirst[lane];
-					if (nodeIdx) stack[stackPtr++] = nodeIdx;
-					nodeIdx = childIdx;
-					continue;
-				}
-				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
-					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
-			}
-#else
-            ALIGNED( 64 ) float d[4];
-            vst1q_f32(d, tm);
-            // sort
-            float tmp;
-            if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
-            if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
-            if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
-            if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
-            if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
-            
-            const uint32_t lanes[4] =
-            {
-                (uint32_t)-1,
-                *(uint32_t*)&d[1] & 3,
-                *(uint32_t*)&d[2] & 3,
-                *(uint32_t*)&d[3] & 3,
-            };
-            
-            nodeIdx = 0;
-            for (int32_t i = 1; i < 4; i++)
-            {
-                uint32_t lane = lanes[i];
-                if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
-                if (node.triCount[lane] == 0)
-                {
-                    const uint32_t childIdx = node.childFirst[lane];
-                    if (nodeIdx) stack[stackPtr++] = nodeIdx;
-                    nodeIdx = childIdx;
-                    continue;
-                }
-                const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-                for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
-                    if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
-            }
-#endif
-		}
-		else /* hits == 4, 2%: rare */
-		{
-			// blend in lane indices
-			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
-#if false
-			// sort
-			float tmp, d0 = tm[0], d1 = tm[1], d2 = tm[2], d3 = tm[3];
-			if (d0 < d2) tmp = d0, d0 = d2, d2 = tmp;
-			if (d1 < d3) tmp = d1, d1 = d3, d3 = tmp;
-			if (d0 < d1) tmp = d0, d0 = d1, d1 = tmp;
-			if (d2 < d3) tmp = d2, d2 = d3, d3 = tmp;
-			if (d1 < d2) tmp = d1, d1 = d2, d2 = tmp;
-			// process hits
-			float d[4] = { d0, d1, d2, d3 };
-			nodeIdx = 0;
-			for (int32_t i = 0; i < 4; i++)
-			{
-				uint32_t lane = *(uint32_t*)&d[i] & 3;
+				uint32_t lane = lanes[i];
 				if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
 				if (node.triCount[lane] == 0)
 				{
@@ -6459,43 +6509,38 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
 					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
 			}
-#else
-            ALIGNED( 64 ) float d[4];
-            vst1q_f32(d, tm);
-            // sort
-            float tmp;
-            if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
-            if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
-            if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
-            if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
-            if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
-            
-            const uint32_t lanes[4] =
-            {
-                *(uint32_t*)&d[0] & 3,
-                *(uint32_t*)&d[1] & 3,
-                *(uint32_t*)&d[2] & 3,
-                *(uint32_t*)&d[3] & 3,
-            };
-            
-            nodeIdx = 0;
-            for (int32_t i = 0; i < 4; i++)
-            {
-                uint32_t lane = lanes[i];
-                
-                if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
-                if (node.triCount[lane] == 0)
-                {
-                    const uint32_t childIdx = node.childFirst[lane];
-                    if (nodeIdx) stack[stackPtr++] = nodeIdx;
-                    nodeIdx = childIdx;
-                    continue;
-                }
-                const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
-                for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
-                    if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
-            }
-#endif
+		}
+		else /* hits == 4, 2%: rare */
+		{
+			// blend in lane indices
+			float32x4_t tm = vreinterpretq_f32_u32( vorrq_u32( vandq_u32( vreinterpretq_u32_f32( vbslq_f32( hit, tmin, inf4 ) ), idxMask ), idx4 ) );
+			ALIGNED( 64 ) float d[4];
+			vst1q_f32( d, tm );
+			// sort
+			float tmp;
+			if (d[0] < d[2]) tmp = d[0], d[0] = d[2], d[2] = tmp;
+			if (d[1] < d[3]) tmp = d[1], d[1] = d[3], d[3] = tmp;
+			if (d[0] < d[1]) tmp = d[0], d[0] = d[1], d[1] = tmp;
+			if (d[2] < d[3]) tmp = d[2], d[2] = d[3], d[3] = tmp;
+			if (d[1] < d[2]) tmp = d[1], d[1] = d[2], d[2] = tmp;
+			const uint32_t lanes[4] = { *(uint32_t*)&d[0] & 3, *(uint32_t*)&d[1] & 3, *(uint32_t*)&d[2] & 3, *(uint32_t*)&d[3] & 3 };
+			nodeIdx = 0;
+			for (int32_t i = 0; i < 4; i++)
+			{
+				uint32_t lane = lanes[i];
+
+				if (node.triCount[lane] + node.childFirst[lane] == 0) continue; // TODO - never happens?
+				if (node.triCount[lane] == 0)
+				{
+					const uint32_t childIdx = node.childFirst[lane];
+					if (nodeIdx) stack[stackPtr++] = nodeIdx;
+					nodeIdx = childIdx;
+					continue;
+				}
+				const uint32_t first = node.childFirst[lane], count = node.triCount[lane];
+				for (uint32_t j = 0; j < count; j++) // TODO: aim for 4 prims per leaf
+					if (OccludedCompactTri( ray, (float*)(bvh4Tris + first + j * 4) )) return true;
+			}
 		}
 		// get next task
 		if (nodeIdx) continue;
