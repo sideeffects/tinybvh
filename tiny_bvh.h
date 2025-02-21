@@ -1161,7 +1161,7 @@ public:
 	void Optimize( const uint32_t iterations, bool extreme );
 	float SAHCost( const uint32_t nodeIdx ) const;
 	void ConvertFrom( const MBVH<8>& original, bool compact = true );
-	void CalculatePermOffsets( const uint32_t nodeIdx, __m256i& permOffs8 ) const;
+	void CalculatePermOffsets( const uint32_t nodeIdx, SIMDIVEC8& permOffs8 ) const;
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
 	// BVH8 data
