@@ -681,6 +681,7 @@ class BVH : public BVHBase
 public:
 	friend class BVH_GPU;
 	friend class BVH_SoA;
+	friend class BVH8_CPU;
 	template <int M> friend class MBVH;
 	enum BuildFlags : uint32_t
 	{
@@ -706,6 +707,7 @@ public:
 	void ConvertFrom( const BVH_Verbose& original, bool compact = true );
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	int32_t NodeCount() const;
+	int32_t LeafCount() const;
 	int32_t PrimCount( const uint32_t nodeIdx = 0 ) const;
 	void Compact();
 	void Save( const char* fileName );
@@ -739,6 +741,7 @@ public:
 #endif
 	void Refit( const uint32_t nodeIdx = 0 );
 	void Optimize( const uint32_t iterations = 25, bool extreme = false );
+	void CombineLeafs( const uint32_t primCount );
 	int32_t Intersect( Ray& ray ) const;
 	bool IntersectSphere( const bvhvec3& pos, const float r ) const;
 	bool IsOccluded( const Ray& ray ) const;
@@ -2230,6 +2233,37 @@ void BVH::Refit( const uint32_t /* unused */ )
 	aabbMin = bvhNode[0].aabbMin, aabbMax = bvhNode[0].aabbMax;
 }
 
+// CombineLeafs: Collapse subtrees if the summed leaf prim count does not
+// exceed the specified number. For BVH8_CPU construction.
+void BVH::CombineLeafs( const uint32_t primCount )
+{
+	for (uint32_t i = 0; i < primCount - 1; i++)
+	{
+		uint32_t stackPtr = 1, stack[64];
+		stack[0] = 0;
+		while (stackPtr)
+		{
+			const uint32_t nodeIdx = stack[--stackPtr];
+			BVHNode& node = bvhNode[nodeIdx];
+			const BVHNode& left = bvhNode[node.leftFirst];
+			const BVHNode& right = bvhNode[node.leftFirst + 1];
+			if (left.isLeaf() && right.isLeaf())
+			{
+				if (left.triCount + right.triCount <= primCount)
+				{
+					node.triCount = left.triCount + right.triCount;
+					node.leftFirst = left.leftFirst;
+				}
+			}
+			else
+			{
+				if (!left.isLeaf()) stack[stackPtr++] = node.leftFirst;
+				if (!right.isLeaf()) stack[stackPtr++] = node.leftFirst + 1;
+			}
+		}
+	}
+}
+
 bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
 {
 	const bvhvec3 bmin = pos - bvhvec3( r ), bmax = pos + bvhvec3( r );
@@ -2696,7 +2730,22 @@ int32_t BVH::NodeCount() const
 	return retVal;
 }
 
-// Compact: Reduce the size of a BVH by removing any unsed nodes.
+int32_t BVH::LeafCount() const
+{
+	// Determine the number of nodes in the tree. Typically the result should
+	// be usedNodes - 1 (second node is always unused), but some builders may
+	// have unused nodes besides node 1. TODO: Support more layouts.
+	uint32_t retVal = 0, nodeIdx = 0, stack[64], stackPtr = 0;
+	while (1)
+	{
+		const BVHNode& n = bvhNode[nodeIdx];
+		if (n.isLeaf()) { retVal++; if (stackPtr == 0) break; else nodeIdx = stack[--stackPtr]; }
+		else nodeIdx = n.leftFirst, stack[stackPtr++] = n.leftFirst + 1;
+	}
+	return retVal;
+}
+
+// Compact: Reduce the size of a BVH by removing any unused nodes.
 // This is useful after an SBVH build or multi-threaded build, but also after
 // calling MergeLeafs. Some operations, such as Optimize, *require* a
 // compacted tree to work correctly.
@@ -2704,25 +2753,38 @@ void BVH::Compact()
 {
 	FATAL_ERROR_IF( bvhNode == 0, "BVH::Compact(), bvhNode == 0." );
 	BVHNode* tmp = (BVHNode*)AlignedAlloc( sizeof( BVHNode ) * allocatedNodes /* do *not* trim */ );
+	uint32_t* idx = (uint32_t*)AlignedAlloc( sizeof( uint32_t ) * idxCount );
 	memcpy( tmp, bvhNode, 2 * sizeof( BVHNode ) );
 	newNodePtr = 2;
+	uint32_t newIdxPtr = 0;
 	uint32_t nodeIdx = 0, stack[128], stackPtr = 0;
 	while (1)
 	{
 		BVHNode& node = tmp[nodeIdx];
-		const BVHNode& left = bvhNode[node.leftFirst];
-		const BVHNode& right = bvhNode[node.leftFirst + 1];
-		tmp[newNodePtr] = left, tmp[newNodePtr + 1] = right;
-		const uint32_t todo1 = newNodePtr, todo2 = newNodePtr + 1;
-		node.leftFirst = newNodePtr, newNodePtr += 2;
-		if (!left.isLeaf()) stack[stackPtr++] = todo1;
-		if (!right.isLeaf()) stack[stackPtr++] = todo2;
-		if (!stackPtr) break;
-		nodeIdx = stack[--stackPtr];
+		if (node.isLeaf())
+		{
+			const uint32_t leafStart = newIdxPtr;
+			for (uint32_t i = 0; i < node.triCount; i++) idx[newIdxPtr++] = primIdx[node.leftFirst + i];
+			node.leftFirst = leafStart;
+			if (!stackPtr) break;
+			nodeIdx = stack[--stackPtr];
+		}
+		else
+		{
+			const BVHNode& left = bvhNode[node.leftFirst];
+			const BVHNode& right = bvhNode[node.leftFirst + 1];
+			tmp[newNodePtr] = left, tmp[newNodePtr + 1] = right;
+			const uint32_t todo1 = newNodePtr, todo2 = newNodePtr + 1;
+			node.leftFirst = newNodePtr, newNodePtr += 2;
+			nodeIdx = todo1;
+			stack[stackPtr++] = todo2;
+		}
 	}
 	usedNodes = newNodePtr;
 	AlignedFree( bvhNode );
+	AlignedFree( primIdx );
 	bvhNode = tmp;
+	primIdx = idx;
 }
 
 // BVH_Verbose implementation
@@ -5520,8 +5582,10 @@ void BVH8_CPU::Build( const bvhvec4* vertices, const uint32_t primCount )
 
 void BVH8_CPU::Build( const bvhvec4slice& vertices )
 {
-	bvh8.context = context; // properly propagate context to fix issue #66.
-	bvh8.Build( vertices );
+	bvh8.bvh.context = bvh8.context = context;
+	bvh8.bvh.BuildDefault( vertices );
+	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.ConvertFrom( bvh8.bvh, false );
 	ConvertFrom( bvh8, true );
 }
 
@@ -5534,8 +5598,10 @@ void BVH8_CPU::Build( const bvhvec4* vertices, const uint32_t* indices, const ui
 void BVH8_CPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
-	bvh8.context = context;
-	bvh8.Build( vertices, indices, prims );
+	bvh8.bvh.context = bvh8.context = context;
+	bvh8.bvh.BuildDefault( vertices, indices, prims );
+	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.ConvertFrom( bvh8.bvh, true );
 	ConvertFrom( bvh8, true );
 }
 
@@ -5546,8 +5612,10 @@ void BVH8_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 
 void BVH8_CPU::BuildHQ( const bvhvec4slice& vertices )
 {
-	bvh8.context = context;
-	bvh8.BuildHQ( vertices );
+	bvh8.bvh.context = bvh8.context = context;
+	bvh8.bvh.BuildHQ( vertices );
+	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.ConvertFrom( bvh8.bvh, true );
 	ConvertFrom( bvh8, true );
 }
 
@@ -5558,8 +5626,10 @@ void BVH8_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const 
 
 void BVH8_CPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
-	bvh8.context = context;
-	bvh8.BuildHQ( vertices, indices, prims );
+	bvh8.bvh.context = bvh8.context = context;
+	bvh8.bvh.BuildHQ( vertices, indices, prims );
+	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.ConvertFrom( bvh8.bvh, true );
 	ConvertFrom( bvh8, true );
 }
 
