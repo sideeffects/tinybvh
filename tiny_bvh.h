@@ -5971,14 +5971,14 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 					stackPtr = outStackPtr;
 				#endif
 				}
-				}
-		#endif
 			}
+		#endif
+		}
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];
-		}
-	return 0;
 	}
+	return 0;
+}
 
 #endif // BVH_USEAVX
 
@@ -7364,7 +7364,7 @@ void BVHBase::IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t 
 		ray.hit.prim = idx + ray.instIdx;
 	#endif
 	}
-	}
+}
 
 // IntersectTriIndexed
 void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const
@@ -7395,7 +7395,7 @@ void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const ui
 		ray.hit.prim = idx + ray.instIdx;
 	#endif
 	}
-	}
+}
 
 // TriOccludes
 bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const
