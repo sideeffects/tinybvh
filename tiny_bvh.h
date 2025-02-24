@@ -2762,29 +2762,40 @@ int32_t BVH::LeafCount() const
 void BVH::Compact()
 {
 	FATAL_ERROR_IF( bvhNode == 0, "BVH::Compact(), bvhNode == 0." );
+	if (bvhNode[0].isLeaf()) return; // nothing to compact.
 	BVHNode* tmp = (BVHNode*)AlignedAlloc( sizeof( BVHNode ) * allocatedNodes /* do *not* trim */ );
+	uint32_t* idx = (uint32_t*)AlignedAlloc( sizeof( uint32_t ) * idxCount );
 	memcpy( tmp, bvhNode, 2 * sizeof( BVHNode ) );
 	newNodePtr = 2;
+	uint32_t newIdxPtr = 0;
 	uint32_t nodeIdx = 0, stack[128], stackPtr = 0;
-	if (!tmp[nodeIdx].isLeaf())
-	{ // If the root node is a leaf the BVH is already as compact as it can be.
-		while (1)
+	while (1)
+	{
+		BVHNode& node = tmp[nodeIdx];
+		if (node.isLeaf())
 		{
-			BVHNode& node = tmp[nodeIdx];
+			const uint32_t leafStart = newIdxPtr;
+			for (uint32_t i = 0; i < node.triCount; i++) idx[newIdxPtr++] = primIdx[node.leftFirst + i];
+			node.leftFirst = leafStart;
+			if (!stackPtr) break;
+			nodeIdx = stack[--stackPtr];
+		}
+		else
+		{
 			const BVHNode& left = bvhNode[node.leftFirst];
 			const BVHNode& right = bvhNode[node.leftFirst + 1];
 			tmp[newNodePtr] = left, tmp[newNodePtr + 1] = right;
 			const uint32_t todo1 = newNodePtr, todo2 = newNodePtr + 1;
 			node.leftFirst = newNodePtr, newNodePtr += 2;
-			if (!left.isLeaf()) stack[stackPtr++] = todo1;
-			if (!right.isLeaf()) stack[stackPtr++] = todo2;
-			if (!stackPtr) break;
-			nodeIdx = stack[--stackPtr];
+			nodeIdx = todo1;
+			stack[stackPtr++] = todo2;
 		}
 	}
 	usedNodes = newNodePtr;
 	AlignedFree( bvhNode );
+	AlignedFree( primIdx );
 	bvhNode = tmp;
+	primIdx = idx;
 }
 
 // BVH_Verbose implementation
@@ -2922,24 +2933,22 @@ void BVH_Verbose::CheckFit( const uint32_t nodeIdx, bool skipLeafs )
 void BVH_Verbose::Compact()
 {
 	FATAL_ERROR_IF( bvhNode == 0, "BVH_Verbose::Compact(), bvhNode == 0." );
+	if (bvhNode[0].isLeaf()) return; // nothing to compact.
 	BVHNode* tmp = (BVHNode*)AlignedAlloc( sizeof( BVHNode ) * usedNodes );
 	memcpy( tmp, bvhNode, 2 * sizeof( BVHNode ) );
 	uint32_t newNodePtr = 2, nodeIdx = 0, stack[64], stackPtr = 0;
-	if (!tmp[nodeIdx].isLeaf())
-	{ // If the root node is a leaf the BVH is already as compact as it can be.
-		while (1)
-		{
-			BVHNode& node = tmp[nodeIdx];
-			const BVHNode& left = bvhNode[node.left];
-			const BVHNode& right = bvhNode[node.right];
-			tmp[newNodePtr] = left, tmp[newNodePtr + 1] = right;
-			const uint32_t todo1 = newNodePtr, todo2 = newNodePtr + 1;
-			node.left = newNodePtr++, node.right = newNodePtr++;
-			if (!left.isLeaf()) stack[stackPtr++] = todo1;
-			if (!right.isLeaf()) stack[stackPtr++] = todo2;
-			if (!stackPtr) break;
-			nodeIdx = stack[--stackPtr];
-		}
+	while (1)
+	{
+		BVHNode& node = tmp[nodeIdx];
+		const BVHNode& left = bvhNode[node.left];
+		const BVHNode& right = bvhNode[node.right];
+		tmp[newNodePtr] = left, tmp[newNodePtr + 1] = right;
+		const uint32_t todo1 = newNodePtr, todo2 = newNodePtr + 1;
+		node.left = newNodePtr++, node.right = newNodePtr++;
+		if (!left.isLeaf()) stack[stackPtr++] = todo1;
+		if (!right.isLeaf()) stack[stackPtr++] = todo2;
+		if (!stackPtr) break;
+		nodeIdx = stack[--stackPtr];
 	}
 	usedNodes = newNodePtr;
 	AlignedFree( bvhNode );
