@@ -4555,6 +4555,7 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 	root.leftFirst = 0, root.triCount = triCount;
 	// initialize fragments and update root bounds
 	__m128 rootMin = min4, rootMax = max4;
+	uint32_t stride4 = verts.stride / 16;
 	if (indices)
 	{
 		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
@@ -4563,7 +4564,7 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 		for (uint32_t i = 0; i < triCount; i++)
 		{
 			const uint32_t i0 = indices[i * 3], i1 = indices[i * 3 + 1], i2 = indices[i * 3 + 2];
-			const __m128 v0 = verts4[i0], v1 = verts4[i1], v2 = verts4[i2];
+			const __m128 v0 = verts4[i0 * stride4], v1 = verts4[i1 * stride4], v2 = verts4[i2 * stride4];
 			const __m128 t1 = _mm_min_ps( _mm_min_ps( v0, v1 ), v2 );
 			const __m128 t2 = _mm_max_ps( _mm_max_ps( v0, v1 ), v2 );
 			frag4[i].bmin4 = t1, frag4[i].bmax4 = t2, rootMin = _mm_min_ps( rootMin, t1 ), rootMax = _mm_max_ps( rootMax, t2 );
@@ -4577,7 +4578,7 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 		// build the BVH over a list of vertices: three per triangle
 		for (uint32_t i = 0; i < triCount; i++)
 		{
-			const __m128 v0 = verts4[i * 3], v1 = verts4[i * 3 + 1], v2 = verts4[i * 3 + 2];
+			const __m128 v0 = verts4[(i * 3) * stride4], v1 = verts4[(i * 3 + 1) * stride4], v2 = verts4[(i * 3 + 2) * stride4];
 			const __m128 t1 = _mm_min_ps( _mm_min_ps( v0, v1 ), v2 );
 			const __m128 t2 = _mm_max_ps( _mm_max_ps( v0, v1 ), v2 );
 			frag4[i].bmin4 = t1, frag4[i].bmax4 = t2, rootMin = _mm_min_ps( rootMin, t1 ), rootMax = _mm_max_ps( rootMax, t2 );
@@ -5665,12 +5666,14 @@ void BVH8_CPU::CalculatePermOffsets( const uint32_t nodeIdx, __m256i& permOffs8 
 	};
 	for (uint32_t q = 0; q < 8; q++)
 	{
+		float odist[8];
 		union { float dist[8]; uint32_t idist[8]; };
 		for (int i = 0; i < 8; i++) if (n.child[i] == 0) dist[i] = 1e30f; else
 		{
 			const MBVH<8>::MBVHNode& c = bvh8.mbvhNode[n.child[i]];
-			const bvhvec3 p( q & 1 ? c.aabbMin.x : c.aabbMax.x, q & 2 ? c.aabbMin.y : c.aabbMax.y, q & 4 ? c.aabbMin.z : c.aabbMax.z );
-			dist[i] = tinybvh_dot( D[q], p ), idist[i] = (idist[i] & 0xfffffff8) + i;
+			const bvhvec3 p( (q & 1) ? c.aabbMin.x : c.aabbMax.x, (q & 2) ? c.aabbMin.y : c.aabbMax.y, (q & 4) ? c.aabbMin.z : c.aabbMax.z );
+			dist[i] = odist[i] = tinybvh_dot( D[q], p );
+			idist[i] = (idist[i] & 0xfffffff8) + i;
 		}
 		// apply sorting network - https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
 		SORT( 0, 2 ); SORT( 1, 3 ); SORT( 4, 6 ); SORT( 5, 7 ); SORT( 0, 4 );
@@ -5806,7 +5809,6 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 #endif
 	__m256 t8 = _mm256_set1_ps( ray.hit.t );
 	const __m256i signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
-	static const __m256i indexMask = _mm256_set1_epi32( 0b111 );
 	__m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	uint32_t stackPtr = 0, nodeIdx = 0;
 	for (int i = 0; i < 64; i++) distStack[i] = 1e30f; // TODO: is this needed?
@@ -5835,7 +5837,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 			const __m256 txMax = _mm256_max_ps( tx1, tx2 ), tyMax = _mm256_max_ps( ty1, ty2 ), tzMax = _mm256_max_ps( tz1, tz2 );
 			__m256 tmin = _mm256_max_ps( _mm256_setzero_ps(), _mm256_max_ps( txMin, _mm256_max_ps( tyMin, tzMin ) ) );
 			__m256 tmax = _mm256_min_ps( t8, _mm256_min_ps( txMax, _mm256_min_ps( tyMax, tzMax ) ) );
-			const __m256i index = _mm256_and_si256( _mm256_srlv_epi32( perm8, signShift8 ), indexMask );
+			const __m256i index = _mm256_and_si256( _mm256_srlv_epi32( perm8, signShift8 ), _mm256_set1_epi32( 7 ) );
 			tmin = _mm256_permutevar8x32_ps( tmin, index ), tmax = _mm256_permutevar8x32_ps( tmax, index );
 			const uint32_t mask = _mm256_movemask_ps( _mm256_cmp_ps( tmin, tmax, _CMP_LE_OQ ) );
 			if (mask > 0)
@@ -5863,46 +5865,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 			const __m128 u4 = _mm_add_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.T0, wrx4 ), _mm_mul_ps( leaf.T1, wry4 ) ), _mm_mul_ps( leaf.T2, wrz4 ) ), leaf.T3 );
 			const __m128 v4 = _mm_add_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.T4, wrx4 ), _mm_mul_ps( leaf.T5, wry4 ) ), _mm_mul_ps( leaf.T6, wrz4 ) ), leaf.T7 );
 			__m128 mask = _mm_and_ps( _mm_cmpge_ps( u4, _mm_setzero_ps() ), _mm_cmpge_ps( v4, _mm_setzero_ps() ) );
-			mask = _mm_and_ps( _mm_and_ps( mask, _mm_cmplt_ps( _mm_add_ps( u4, v4 ), _mm_set1_ps( 1.0f ) ) ), _mm_cmpgt_ps( ta4, _mm_setzero_ps() ) );
-			const __m128 dist4 = _mm_blendv_ps( _mm_set1_ps( 1e30f ), ta4, mask );
-			// compute broadcasted horizontal minimum of dist4
-			const __m128 a = _mm_min_ps( dist4, _mm_shuffle_ps( dist4, dist4, _MM_SHUFFLE( 2, 1, 0, 3 ) ) );
-			const __m128 c = _mm_min_ps( a, _mm_shuffle_ps( a, a, _MM_SHUFFLE( 1, 0, 3, 2 ) ) );
-			const uint32_t lane = __bfind( _mm_movemask_ps( _mm_cmpeq_ps( c, dist4 ) ) );
-			// update hit record
-			const __m128 _d4 = dist4;
-			const float t = ((float*)&_d4)[lane];
-			if (t < ray.hit.t)
-			{
-				const __m128 _u4 = u4, _v4 = v4;
-				ray.hit.t = t;
-				ray.hit.u = ((float*)&_u4)[lane];
-				ray.hit.v = ((float*)&_v4)[lane];
-			#if INST_IDX_BITS == 32
-				ray.hit.prim = leaf.primIdx[3 - lane];
-				ray.hit.inst = ray.instIdx;
-			#else
-				ray.hit.prim = leaf.primIdx[i] + ray.instIdx;
-			#endif
-			#ifdef WIVE_COMPACT_STACK
-				// compress stack
-				t8 = _mm256_set1_ps( ray.hit.t );
-				uint32_t outStackPtr = 0;
-				for (uint32_t i = 0; i < stackPtr; i += 8)
-				{
-					__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
-					__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
-					const uint32_t mask = _mm256_movemask_ps( _mm256_cmp_ps( dist8, t8, _CMP_LT_OQ ) );
-					const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT[mask] ) );
-					dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
-					_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
-					_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
-					const uint32_t numItems = tinybvh_min( 8u, stackPtr - i ), validMask = (1 << numItems) - 1;
-					outStackPtr += __popc( mask & validMask );
-				}
-				stackPtr = outStackPtr;
-			#endif
-			}
+			__m128 combined = _mm_and_ps( _mm_and_ps( mask, _mm_cmplt_ps( _mm_add_ps( u4, v4 ), _mm_set1_ps( 1.0f ) ) ), _mm_cmpgt_ps( ta4, _mm_setzero_ps() ) );
 		#else
 			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
 			const BVHLeaf& leaf = bvh8Leaf[nodeIdx & 0x1fffffff];
@@ -5922,17 +5885,18 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, _mm_set1_ps( -0.0000001f ) ), _mm_cmpge_ps( det4, _mm_set1_ps( 0.0000001f ) ) );
 			const __m128 inv_det4 = _mm_rcp_ps( det4 );
 			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
-			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, _mm_setzero_ps() ), _mm_cmple_ps( u4, _mm_set1_ps( 1.0f ) ) );
 			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf.e1z4 ), _mm_mul_ps( sz4, leaf.e1y4 ) );
 			const __m128 qy4 = _mm_sub_ps( _mm_mul_ps( sz4, leaf.e1x4 ), _mm_mul_ps( sx4, leaf.e1z4 ) );
 			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf.e1y4 ), _mm_mul_ps( sy4, leaf.e1x4 ) );
 			const __m128 v4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( dx4, qx4 ), _mm_mul_ps( dy4, qy4 ) ), _mm_mul_ps( dz4, qz4 ) ), inv_det4 );
+			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, _mm_setzero_ps() ), _mm_cmple_ps( u4, _mm_set1_ps( 1.0f ) ) );
 			const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, _mm_setzero_ps() ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), _mm_set1_ps( 1.0f ) ) );
-			const __m128 newt4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e2x4, qx4 ), _mm_mul_ps( leaf.e2y4, qy4 ) ), _mm_mul_ps( leaf.e2z4, qz4 ) ), inv_det4 );
-			const __m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( newt4, _mm_setzero_ps() ) );
-			const __m128 dist4 = _mm_blendv_ps( _mm_set1_ps( 1e30f ), newt4, combined );
+			const __m128 ta4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e2x4, qx4 ), _mm_mul_ps( leaf.e2y4, qy4 ) ), _mm_mul_ps( leaf.e2z4, qz4 ) ), inv_det4 );
+			const __m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, _mm_setzero_ps() ) );
+		#endif
 			if (_mm_movemask_ps( combined ))
 			{
+				const __m128 dist4 = _mm_blendv_ps( _mm_set1_ps( 1e30f ), ta4, combined );
 				// compute broadcasted horizontal minimum of dist4
 				const __m128 a = _mm_min_ps( dist4, _mm_shuffle_ps( dist4, dist4, _MM_SHUFFLE( 2, 1, 0, 3 ) ) );
 				const __m128 c = _mm_min_ps( a, _mm_shuffle_ps( a, a, _MM_SHUFFLE( 1, 0, 3, 2 ) ) );
@@ -5972,11 +5936,10 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 				#endif
 				}
 			}
-		#endif
-		}
+	}
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];
-	}
+}
 	return 0;
 }
 
