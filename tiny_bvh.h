@@ -2762,6 +2762,7 @@ int32_t BVH::LeafCount() const
 void BVH::Compact()
 {
 	FATAL_ERROR_IF( bvhNode == 0, "BVH::Compact(), bvhNode == 0." );
+	if (bvhNode[0].isLeaf()) return; // nothing to compact.
 	BVHNode* tmp = (BVHNode*)AlignedAlloc( sizeof( BVHNode ) * allocatedNodes /* do *not* trim */ );
 	uint32_t* idx = (uint32_t*)AlignedAlloc( sizeof( uint32_t ) * idxCount );
 	memcpy( tmp, bvhNode, 2 * sizeof( BVHNode ) );
@@ -5914,7 +5915,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 					ray.hit.prim = leaf.primIdx[3 - lane];
 					ray.hit.inst = ray.instIdx;
 				#else
-					ray.hit.prim = leaf.primIdx[i] + ray.instIdx;
+					ray.hit.prim = leaf.primIdx[3 - lane] + ray.instIdx;
 				#endif
 				#ifdef WIVE_COMPACT_STACK
 					// compress stack
