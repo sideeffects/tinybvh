@@ -2415,7 +2415,9 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				{
 					if (blas->layout == LAYOUT_BVH4_CPU) cost += ((BVH4_CPU*)blas)->Intersect( tmp );
 					else if (blas->layout == LAYOUT_BVH_SOA) cost += ((BVH_SoA*)blas)->Intersect( tmp );
+				#ifdef BVH_USEAVX2
 					else if (blas->layout == LAYOUT_BVH8_AVX2) cost += ((BVH8_CPU*)blas)->Intersect( tmp );
+				#endif
 				}
 				// 3. Restore ray
 				ray.hit = tmp.hit;
@@ -2517,7 +2519,9 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 				{
 					if (blas->layout == LAYOUT_BVH4_CPU) { if (((BVH4_CPU*)blas)->IsOccluded( tmp )) return true; }
 					else if (blas->layout == LAYOUT_BVH_SOA) { if (((BVH_SoA*)blas)->IsOccluded( tmp )) return true; }
+				#ifdef BVH_USEAVX2
 					else if (blas->layout == LAYOUT_BVH8_AVX2) { if (((BVH8_CPU*)blas)->IsOccluded( tmp )) return true; }
+				#endif
 				}
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -5881,10 +5885,10 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 					const __m128 _u4 = u4, _v4 = v4;
 					ray.hit.t = t, ray.hit.u = ((float*)&_u4)[lane], ray.hit.v = ((float*)&_v4)[lane];
 				#if INST_IDX_BITS == 32
-					ray.hit.prim = leaf.primIdx[3 - lane];
+					ray.hit.prim = leaf.primIdx[lane];
 					ray.hit.inst = ray.instIdx;
 				#else
-					ray.hit.prim = leaf.primIdx[3 - lane] + ray.instIdx;
+					ray.hit.prim = leaf.primIdx[lane] + ray.instIdx;
 				#endif
 					t8 = _mm256_set1_ps( t );
 					// compress stack
@@ -5965,15 +5969,16 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
 			const __m128 inv_det4 = _mm_div_ps( one4, det4 ); // _mm_rcp_ps( det4 );
 			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
-			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf.e1y4 ), _mm_mul_ps( sy4, leaf.e1x4 ) );
 			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf.e1z4 ), _mm_mul_ps( sz4, leaf.e1y4 ) );
 			const __m128 qy4 = _mm_sub_ps( _mm_mul_ps( sz4, leaf.e1x4 ), _mm_mul_ps( sx4, leaf.e1z4 ) );
+			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf.e1y4 ), _mm_mul_ps( sy4, leaf.e1x4 ) );
 			const __m128 v4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( dx4, qx4 ), _mm_mul_ps( dy4, qy4 ) ), _mm_mul_ps( dz4, qz4 ) ), inv_det4 );
 			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, one4 ) );
 			const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 ) );
 			const __m128 ta4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e2x4, qx4 ), _mm_mul_ps( leaf.e2y4, qy4 ) ), _mm_mul_ps( leaf.e2z4, qz4 ) ), inv_det4 );
 			__m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
-			if (_mm_movemask_ps( _mm_and_ps( combined, _mm_cmplt_ps( ta4, t4 ) ) )) return true;
+			combined = _mm_and_ps( combined, _mm_cmplt_ps( ta4, t4 ) );
+			if (_mm_movemask_ps( combined )) return true;
 		}
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];
