@@ -4388,7 +4388,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 				BVHLeaf& leaf = bvh8Leaf[newLeafPtr++];
 				for (uint32_t l = 0; l < 4; l++)
 				{
-					uint32_t primIdx = bvh8.bvh.primIdx[child.firstTri + tinybvh_min( child.triCount - 1u, l )];
+					uint32_t primIdx = bvh8.bvh.primIdx[child.firstTri + tinybvh_min( l, child.triCount - 1u )];
 					uint32_t i0, i1, i2;
 					if (indexedEnabled && bvh8.bvh.vertIdx != 0)
 						i0 = bvh8.bvh.vertIdx[primIdx * 3], i1 = bvh8.bvh.vertIdx[primIdx * 3 + 1], i2 = bvh8.bvh.vertIdx[primIdx * 3 + 2];
@@ -5845,7 +5845,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 	const __m256i permMask8 = _mm256_set1_epi32( 7 );
 	const __m256i signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
 	__m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
-	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f );
+	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), one4 = _mm_set1_ps( 1.0f );
 	uint32_t stackPtr = 0, nodeIdx = 0, steps = 0;
 	while (1)
 	{
@@ -5895,7 +5895,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 			const __m128 sz4 = _mm_sub_ps( _mm256_extractf128_ps( oz8, 0 ), leaf.v0z4 );
 			const __m128 det4 = _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e1x4, hx4 ), _mm_mul_ps( leaf.e1y4, hy4 ) ), _mm_mul_ps( leaf.e1z4, hz4 ) );
 			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
-			const __m128 inv_det4 = _mm_rcp_ps( det4 );
+			const __m128 inv_det4 = _mm_div_ps( one4, det4 ); // _mm_rcp_ps( det4 );
 			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
 			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf.e1y4 ), _mm_mul_ps( sy4, leaf.e1x4 ) );
 			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf.e1z4 ), _mm_mul_ps( sz4, leaf.e1y4 ) );
@@ -5994,34 +5994,6 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 		{
 			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
 			const BVHLeaf& leaf = bvh8Leaf[nodeIdx & 0x1fffffff];
-		#if 1
-			const uint32_t triCount = ((nodeIdx >> 29) & 3) + 1;
-			for( uint32_t i = 0; i < triCount; i++ )
-			{
-			#if 1
-				uint32_t primIdx = leaf.primIdx[i];
-				bvhvec3 v0 = bvhvec3( bvh8.bvh.verts[primIdx * 3 + 0] );
-				bvhvec3 e1 = bvhvec3( bvh8.bvh.verts[primIdx * 3 + 1] ) - v0;
-				bvhvec3 e2 = bvhvec3( bvh8.bvh.verts[primIdx * 3 + 2] ) - v0;
-			#else
-				bvhvec3 v0( ((float*)&leaf.v0x4)[i], ((float*)&leaf.v0y4)[i], ((float*)&leaf.v0z4)[i] );
-				bvhvec3 e1( ((float*)&leaf.e1x4)[i], ((float*)&leaf.e1y4)[i], ((float*)&leaf.e1z4)[i] );
-				bvhvec3 e2( ((float*)&leaf.e2x4)[i], ((float*)&leaf.e2y4)[i], ((float*)&leaf.e2z4)[i] );
-			#endif
-				const bvhvec3 h = tinybvh_cross( ray.D, e2 );
-				const float a = tinybvh_dot( e1, h );
-				if (fabs( a ) < 0.001f) continue; // ray parallel to triangle
-				const float f = 1 / a;
-				const bvhvec3 s = ray.O - v0;
-				const float u = f * tinybvh_dot( s, h );
-				if (u < 0 || u > 1) continue;
-				const bvhvec3 q = tinybvh_cross( s, e1 );
-				const float v = f * tinybvh_dot( ray.D, q );
-				if (v < 0 || u + v > 1) continue;
-				const float t = f * tinybvh_dot( e2, q );
-				if (t >= 0 && t < ray.hit.t) return true;
-			}
-		#else
 			const __m128 hx4 = _mm_sub_ps( _mm_mul_ps( dy4, leaf.e2z4 ), _mm_mul_ps( dz4, leaf.e2y4 ) );
 			const __m128 hy4 = _mm_sub_ps( _mm_mul_ps( dz4, leaf.e2x4 ), _mm_mul_ps( dx4, leaf.e2z4 ) );
 			const __m128 hz4 = _mm_sub_ps( _mm_mul_ps( dx4, leaf.e2y4 ), _mm_mul_ps( dy4, leaf.e2x4 ) );
@@ -6042,7 +6014,6 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 			__m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
 			combined = _mm_and_ps( combined, _mm_cmplt_ps( ta4, t4 ) );
 			if (_mm_movemask_ps( combined )) return true;
-		#endif
 		}
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];
