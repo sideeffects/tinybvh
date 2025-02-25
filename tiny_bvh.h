@@ -706,6 +706,7 @@ public:
 	BVH( const bvhvec4slice& vertices ) { layout = LAYOUT_BVH; Build( vertices ); }
 	~BVH();
 	void ConvertFrom( const BVH_Verbose& original, bool compact = true );
+	void SplitLeafs( const uint32_t maxPrims );
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	int32_t NodeCount() const;
 	int32_t LeafCount() const;
@@ -1109,24 +1110,6 @@ public:
 	bool ownBVH8 = true;			// false when ConvertFrom receives an external bvh8.
 };
 
-// BLASInstance: A TLAS is built over BLAS instances, where a single BLAS can be
-// used with multiple transforms, and multiple BLASses can be combined in a complex
-// scene. The TLAS is built over the world-space AABBs of the BLAS root nodes.
-class ALIGNED( 64 ) BLASInstance
-{
-public:
-	BLASInstance() = default;
-	BLASInstance( uint32_t idx ) : blasIdx( idx ) {}
-	float transform[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }; // identity
-	float invTransform[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }; // identity
-	bvhvec3 aabbMin = bvhvec3( BVH_FAR );
-	uint32_t blasIdx = 0;
-	bvhvec3 aabbMax = bvhvec3( -BVH_FAR );
-	uint32_t dummy[9]; // pad struct to 64 byte
-	void Update( BVHBase * blas );
-	void InvertTransform();
-};
-
 class BVH8_CPU : public BVHBase
 {
 public:
@@ -1174,6 +1157,24 @@ public:
 	MBVH<8> bvh8;					// BVH8_CPU is created from BVH8 and uses its data.
 	bool ownBVH8 = true;			// false when ConvertFrom receives an external bvh8.
 	uint32_t allocatedLeafs = 0;	// separate buffer for SoA triangle data.
+};
+
+// BLASInstance: A TLAS is built over BLAS instances, where a single BLAS can be
+// used with multiple transforms, and multiple BLASses can be combined in a complex
+// scene. The TLAS is built over the world-space AABBs of the BLAS root nodes.
+class ALIGNED( 64 ) BLASInstance
+{
+public:
+	BLASInstance() = default;
+	BLASInstance( uint32_t idx ) : blasIdx( idx ) {}
+	float transform[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }; // identity
+	float invTransform[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }; // identity
+	bvhvec3 aabbMin = bvhvec3( BVH_FAR );
+	uint32_t blasIdx = 0;
+	bvhvec3 aabbMax = bvhvec3( -BVH_FAR );
+	uint32_t dummy[9]; // pad struct to 64 byte
+	void Update( BVHBase * blas );
+	void InvertTransform();
 };
 
 #ifdef DOUBLE_PRECISION_SUPPORT
@@ -1456,6 +1457,37 @@ float BVH::SAHCost( const uint32_t nodeIdx ) const
 	if (n.isLeaf()) return C_INT * n.SurfaceArea() * n.triCount;
 	float cost = C_TRAV * n.SurfaceArea() + SAHCost( n.leftFirst ) + SAHCost( n.leftFirst + 1 );
 	return nodeIdx == 0 ? (cost / n.SurfaceArea()) : cost;
+}
+
+void BVH::SplitLeafs( const uint32_t maxPrims )
+{
+	uint32_t stack[64], stackPtr = 0, nodeIdx = 0;
+	while (1)
+	{
+		BVHNode& node = bvhNode[nodeIdx];
+		if (node.isLeaf())
+		{
+			if (node.triCount > maxPrims)
+			{
+				BVHNode& left = bvhNode[newNodePtr], &right = bvhNode[newNodePtr + 1];
+				left = node, right = node;
+				right.leftFirst = node.leftFirst + maxPrims;
+				right.triCount = node.triCount - maxPrims;
+				left.triCount = maxPrims, node.leftFirst = newNodePtr, node.triCount = 0, newNodePtr += 2;
+			}
+			else
+			{
+				if (!stackPtr) break;
+				nodeIdx = stack[--stackPtr];
+			}
+		}
+		else
+		{
+			nodeIdx = node.leftFirst;
+			stack[stackPtr++] = node.leftFirst + 1;
+		}
+	}
+	usedNodes = newNodePtr;
 }
 
 int32_t BVH::PrimCount( const uint32_t nodeIdx ) const
@@ -2188,7 +2220,7 @@ void BVH::Refit( const uint32_t /* unused */ )
 	FATAL_ERROR_IF( !refittable, "BVH::Refit( .. ), refitting an SBVH." );
 	FATAL_ERROR_IF( bvhNode == 0, "BVH::Refit( .. ), bvhNode == 0." );
 	FATAL_ERROR_IF( may_have_holes, "BVH::Refit( .. ), bvh may have holes." );
-	for (int32_t i = usedNodes - 1; i >= 0; i--)
+	for (int32_t i = usedNodes - 1; i >= 0; i--) if (i != 1)
 	{
 		BVHNode& node = bvhNode[i];
 		if (node.isLeaf()) // leaf: adjust to current triangle vertex positions
@@ -3658,7 +3690,7 @@ template<int M> void MBVH<M>::ConvertFrom( const BVH& original, bool compact )
 
 // SplitBVH8Leaf: CWBVH requires that a leaf has no more than 3 primitives,
 // but regular BVH construction does not guarantee this. So, here we split
-// busy leafs recursively in multiple leaves, until the requirement is met.
+// crowded leafs recursively in multiple leaves, until the requirement is met.
 template<int M> void MBVH<M>::SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims )
 {
 	const uint32_t* primIdx = bvh.primIdx;
@@ -4219,8 +4251,9 @@ void BVH8_CPU::Build( const bvhvec4slice& vertices )
 	bvh8.bvh.context = bvh8.context = context;
 	bvh8.bvh.BuildDefault( vertices );
 	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, false );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8, false );
 }
 
 void BVH8_CPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -4235,8 +4268,9 @@ void BVH8_CPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uin
 	bvh8.bvh.context = bvh8.context = context;
 	bvh8.bvh.BuildDefault( vertices, indices, prims );
 	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8, false );
 }
 
 void BVH8_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
@@ -4249,8 +4283,9 @@ void BVH8_CPU::BuildHQ( const bvhvec4slice& vertices )
 	bvh8.bvh.context = bvh8.context = context;
 	bvh8.bvh.BuildHQ( vertices );
 	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8, false );
 }
 
 void BVH8_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -4263,14 +4298,15 @@ void BVH8_CPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, u
 	bvh8.bvh.context = bvh8.context = context;
 	bvh8.bvh.BuildHQ( vertices, indices, prims );
 	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8, false );
 }
 
 void BVH8_CPU::Optimize( const uint32_t iterations, bool extreme )
 {
 	bvh8.Optimize( iterations, extreme );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8, false );
 }
 
 float BVH8_CPU::SAHCost( const uint32_t nodeIdx ) const
@@ -4348,8 +4384,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 			if (child.isLeaf())
 			{
 				// emit leaf node: group of up to 4 triangles in AoS format.
-				const uint32_t triCount = tinybvh_min( 4u, child.triCount ); // TODO: make it so.
-				((uint32_t*)&newNode.child8)[cidx] = newLeafPtr + ((triCount - 1) << 29) + LEAF_BIT;
+				((uint32_t*)&newNode.child8)[cidx] = newLeafPtr + ((child.triCount - 1) << 29) + LEAF_BIT;
 				BVHLeaf& leaf = bvh8Leaf[newLeafPtr++];
 				for (uint32_t l = 0; l < 4; l++)
 				{
@@ -5111,7 +5146,7 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 	}
 }
 
-// Traverse the second alternative BVH layout (ALT_SOA).
+// Traverse the 'structure of arrays' BVH layout.
 int32_t BVH_SoA::Intersect( Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
@@ -5959,6 +5994,34 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 		{
 			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
 			const BVHLeaf& leaf = bvh8Leaf[nodeIdx & 0x1fffffff];
+		#if 1
+			const uint32_t triCount = ((nodeIdx >> 29) & 3) + 1;
+			for( uint32_t i = 0; i < triCount; i++ )
+			{
+			#if 1
+				uint32_t primIdx = leaf.primIdx[i];
+				bvhvec3 v0 = bvhvec3( bvh8.bvh.verts[primIdx * 3 + 0] );
+				bvhvec3 e1 = bvhvec3( bvh8.bvh.verts[primIdx * 3 + 1] ) - v0;
+				bvhvec3 e2 = bvhvec3( bvh8.bvh.verts[primIdx * 3 + 2] ) - v0;
+			#else
+				bvhvec3 v0( ((float*)&leaf.v0x4)[i], ((float*)&leaf.v0y4)[i], ((float*)&leaf.v0z4)[i] );
+				bvhvec3 e1( ((float*)&leaf.e1x4)[i], ((float*)&leaf.e1y4)[i], ((float*)&leaf.e1z4)[i] );
+				bvhvec3 e2( ((float*)&leaf.e2x4)[i], ((float*)&leaf.e2y4)[i], ((float*)&leaf.e2z4)[i] );
+			#endif
+				const bvhvec3 h = tinybvh_cross( ray.D, e2 );
+				const float a = tinybvh_dot( e1, h );
+				if (fabs( a ) < 0.001f) continue; // ray parallel to triangle
+				const float f = 1 / a;
+				const bvhvec3 s = ray.O - v0;
+				const float u = f * tinybvh_dot( s, h );
+				if (u < 0 || u > 1) continue;
+				const bvhvec3 q = tinybvh_cross( s, e1 );
+				const float v = f * tinybvh_dot( ray.D, q );
+				if (v < 0 || u + v > 1) continue;
+				const float t = f * tinybvh_dot( e2, q );
+				if (t >= 0 && t < ray.hit.t) return true;
+			}
+		#else
 			const __m128 hx4 = _mm_sub_ps( _mm_mul_ps( dy4, leaf.e2z4 ), _mm_mul_ps( dz4, leaf.e2y4 ) );
 			const __m128 hy4 = _mm_sub_ps( _mm_mul_ps( dz4, leaf.e2x4 ), _mm_mul_ps( dx4, leaf.e2z4 ) );
 			const __m128 hz4 = _mm_sub_ps( _mm_mul_ps( dx4, leaf.e2y4 ), _mm_mul_ps( dy4, leaf.e2x4 ) );
@@ -5979,6 +6042,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 			__m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
 			combined = _mm_and_ps( combined, _mm_cmplt_ps( ta4, t4 ) );
 			if (_mm_movemask_ps( combined )) return true;
+		#endif
 		}
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];
