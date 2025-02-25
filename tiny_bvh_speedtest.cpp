@@ -208,7 +208,9 @@ float TestShadowRays( uint32_t layout, unsigned N, unsigned passes )
 		#endif
 		case _GPU2: for (unsigned i = 0; i < N; i++) occluded += bvh_gpu->IsOccluded( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
+	#ifdef BVH_USEAVX2
 		case _CPU8: for (unsigned i = 0; i < N; i++) occluded += bvh8_cpu->IsOccluded( batch[i] ); break;
+	#endif
 		default: break;
 		}
 	}
