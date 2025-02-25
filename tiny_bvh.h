@@ -632,9 +632,7 @@ public:
 		LAYOUT_BVH4_GPU,
 		LAYOUT_MBVH8,
 		LAYOUT_CWBVH,
-	#ifdef BVH_USEAVX2
 		LAYOUT_BVH8_AVX2
-	#endif
 	};
 	struct ALIGNED( 32 ) Fragment
 	{
@@ -2406,7 +2404,8 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				// the AVX-optimized BVH_SOA layout and the wide BVH4_CPU layout. If all
 				// BLASses are of the same layout this reduces to nearly zero cost for
 				// a small set of predictable branches.
-				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU || blas->layout == LAYOUT_BVH_SOA );
+				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU ||
+					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 );
 				if (blas->layout == LAYOUT_BVH)
 				{
 					// regular (triangle) BVH traversal
@@ -2416,6 +2415,7 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				{
 					if (blas->layout == LAYOUT_BVH4_CPU) cost += ((BVH4_CPU*)blas)->Intersect( tmp );
 					else if (blas->layout == LAYOUT_BVH_SOA) cost += ((BVH_SoA*)blas)->Intersect( tmp );
+					else if (blas->layout == LAYOUT_BVH8_AVX2) cost += ((BVH8_CPU*)blas)->Intersect( tmp );
 				}
 				// 3. Restore ray
 				ray.hit = tmp.hit;
@@ -2506,7 +2506,8 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 				tmp.hit.t = ray.hit.t;
 				tmp.rD = tinybvh_safercp( tmp.D );
 				// 2. Traverse BLAS with the transformed ray
-				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU || blas->layout == LAYOUT_BVH_SOA );
+				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU ||
+					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 );
 				if (blas->layout == LAYOUT_BVH)
 				{
 					// regular (triangle) BVH traversal
@@ -2516,6 +2517,7 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 				{
 					if (blas->layout == LAYOUT_BVH4_CPU) { if (((BVH4_CPU*)blas)->IsOccluded( tmp )) return true; }
 					else if (blas->layout == LAYOUT_BVH_SOA) { if (((BVH_SoA*)blas)->IsOccluded( tmp )) return true; }
+					else if (blas->layout == LAYOUT_BVH8_AVX2) { if (((BVH8_CPU*)blas)->IsOccluded( tmp )) return true; }
 				}
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
@@ -5918,6 +5920,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 	const __m256 t8 = _mm256_set1_ps( ray.hit.t );
 	__m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), t4 = _mm_set1_ps( ray.hit.t );
+	const __m128 one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
 	uint32_t stackPtr = 0, nodeIdx = 0;
 	while (1)
 	{
@@ -5938,7 +5941,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( txMax, t8 ), tyMax ), tzMax );
 			const __m256 mask8 = _mm256_cmp_ps( tmin, tmax, _CMP_LE_OQ );
 			const uint32_t mask = _mm256_movemask_ps( mask8 );
-			if (mask) 
+			if (mask)
 			{
 				const uint64_t lutidx = idxLUT[mask];
 				const uint32_t validNodes = __popc( mask );
@@ -5960,17 +5963,17 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 			const __m128 sz4 = _mm_sub_ps( _mm256_extractf128_ps( oz8, 0 ), leaf.v0z4 );
 			const __m128 det4 = _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e1x4, hx4 ), _mm_mul_ps( leaf.e1y4, hy4 ) ), _mm_mul_ps( leaf.e1z4, hz4 ) );
 			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
-			const __m128 inv_det4 = _mm_rcp_ps( det4 );
+			const __m128 inv_det4 = _mm_div_ps( one4, det4 ); // _mm_rcp_ps( det4 );
 			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
 			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf.e1y4 ), _mm_mul_ps( sy4, leaf.e1x4 ) );
 			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf.e1z4 ), _mm_mul_ps( sz4, leaf.e1y4 ) );
 			const __m128 qy4 = _mm_sub_ps( _mm_mul_ps( sz4, leaf.e1x4 ), _mm_mul_ps( sx4, leaf.e1z4 ) );
 			const __m128 v4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( dx4, qx4 ), _mm_mul_ps( dy4, qy4 ) ), _mm_mul_ps( dz4, qz4 ) ), inv_det4 );
-			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, _mm_setzero_ps() ), _mm_cmple_ps( u4, _mm_set1_ps( 1.0f ) ) );
-			const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, _mm_setzero_ps() ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), _mm_set1_ps( 1.0f ) ) );
+			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, one4 ) );
+			const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 ) );
 			const __m128 ta4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e2x4, qx4 ), _mm_mul_ps( leaf.e2y4, qy4 ) ), _mm_mul_ps( leaf.e2z4, qz4 ) ), inv_det4 );
-			__m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, _mm_setzero_ps() ) );
-			if (_mm_movemask_ps( _mm_and_ps( combined, _mm_cmplt_ps( ta4, t4 ) ))) return true;
+			__m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
+			if (_mm_movemask_ps( _mm_and_ps( combined, _mm_cmplt_ps( ta4, t4 ) ) )) return true;
 		}
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];
