@@ -16,10 +16,9 @@
 #define BUILD_AVX
 #define BUILD_NEON
 #define BUILD_SBVH
-// #define REFIT_BVH2
+#define REFIT_BVH2
 #define REFIT_MBVH4
 #define REFIT_MBVH8
-// #define BUILD_AVX_SBVH
 #define TRAVERSE_2WAY_ST
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
@@ -209,7 +208,7 @@ float TestShadowRays( uint32_t layout, unsigned N, unsigned passes )
 		#endif
 		case _GPU2: for (unsigned i = 0; i < N; i++) occluded += bvh_gpu->IsOccluded( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
-			// case _CPU8: for (unsigned i = 0; i < N; i++) occluded += bvh8_cpu->IsOccluded( batch[i] ); break;
+		case _CPU8: for (unsigned i = 0; i < N; i++) occluded += bvh8_cpu->IsOccluded( batch[i] ); break;
 		default: break;
 		}
 	}
@@ -581,19 +580,6 @@ int main()
 
 #endif
 
-#if defined BUILD_AVX_SBVH && defined BVH_USEAVX
-
-	// measure single-core bvh construction time - AVX builder
-	printf( "- AVX SBVH builder:  " );
-	t.reset();
-	for (int pass = 0; pass < 3; pass++) bvh->BuildHQAVX( triangles, verts / 3 );
-	buildTime = t.elapsed() / 3.0f;
-	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
-	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
-
-#endif
-
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 
 	// convert data to correct format for Embree and build a BVH
@@ -717,7 +703,7 @@ int main()
 
 #endif
 
-#if defined TRAVERSE_WIVE && defined BVH_USEAVX
+#if defined TRAVERSE_WIVE && defined BVH_USEAVX && defined BVH_USEAVX2
 
 	// BVH8_CPU
 	if (!bvh8_cpu)
@@ -728,9 +714,9 @@ int main()
 	printf( "- BVH8_CPU    - primary: " );
 	traceTime = TestPrimaryRays( _CPU8, Nsmall, 3 );
 	ValidateTraceResult( refDist, Nsmall, __LINE__ );
-	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
-	// traceTime = TestShadowRays( _CPU8, Nsmall, 3 );
-	// printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+	traceTime = TestShadowRays( _CPU8, Nsmall, 3 );
+	printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 
 #endif
 
@@ -1025,7 +1011,7 @@ int main()
 
 	// trace all rays three times to estimate average performance
 	// - coherent distribution, multi-core, packet traversal, SSE version
-	printf( "- Packet,SSE  - primary: " );
+	printf( "- Packet, SSE - primary: " );
 	for (int pass = 0; pass < 4; pass++)
 	{
 		if (pass == 1) t.reset(); // first pass is cache warming
