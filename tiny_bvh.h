@@ -683,6 +683,7 @@ public:
 	friend class BVH_GPU;
 	friend class BVH_SoA;
 	friend class BVH8_CPU;
+	friend class BVH8_CWBVH;
 	template <int M> friend class MBVH;
 	enum BuildFlags : uint32_t
 	{
@@ -989,7 +990,6 @@ public:
 	uint32_t LeafCount( const uint32_t nodeIdx = 0 ) const;
 	float SAHCost( const uint32_t nodeIdx = 0 ) const;
 	void ConvertFrom( const BVH& original, bool compact = true );
-	void SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims );
 	// BVH data
 	MBVHNode* mbvhNode = 0;			// BVH node for M-wide BVH.
 	BVH bvh;						// MBVH<M> is created from BVH and uses its data.
@@ -2523,12 +2523,10 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
 	Ray tmp;
-	tmp.hit = ray.hit;
 	while (1)
 	{
 		if (node->isLeaf())
 		{
-			Ray tmp;
 			for (uint32_t i = 0; i < node->triCount; i++)
 			{
 				// BLAS traversal
@@ -3688,45 +3686,6 @@ template<int M> void MBVH<M>::ConvertFrom( const BVH& original, bool compact )
 	this->may_have_holes = true;
 }
 
-// SplitBVH8Leaf: CWBVH requires that a leaf has no more than 3 primitives,
-// but regular BVH construction does not guarantee this. So, here we split
-// crowded leafs recursively in multiple leaves, until the requirement is met.
-template<int M> void MBVH<M>::SplitBVHLeaf( const uint32_t nodeIdx, const uint32_t maxPrims )
-{
-	const uint32_t* primIdx = bvh.primIdx;
-	const Fragment* fragment = bvh.fragment;
-	MBVHNode& node = mbvhNode[nodeIdx];
-	if (node.triCount <= maxPrims) return; // also catches interior nodes
-	// place all primitives in a new node and make this the first child of 'node'
-	MBVHNode& firstChild = mbvhNode[node.child[0] = usedNodes++];
-	firstChild.triCount = node.triCount;
-	firstChild.firstTri = node.firstTri;
-	uint32_t nextChild = 1;
-	// share with new sibling nodes
-	while (firstChild.triCount > maxPrims && nextChild < M)
-	{
-		MBVHNode& child = mbvhNode[node.child[nextChild] = usedNodes++];
-		firstChild.triCount -= maxPrims, child.triCount = maxPrims;
-		child.firstTri = firstChild.firstTri + firstChild.triCount;
-		nextChild++;
-	}
-	for (uint32_t i = 0; i < nextChild; i++)
-	{
-		MBVHNode& child = mbvhNode[node.child[i]];
-		if (!refittable) child.aabbMin = node.aabbMin, child.aabbMax = node.aabbMax; else
-		{
-			// TODO: why is this producing wrong aabbs for SBVH?
-			child.aabbMin = bvhvec3( BVH_FAR ), child.aabbMax = bvhvec3( -BVH_FAR );
-			for (uint32_t fi, j = 0; j < child.triCount; j++) fi = primIdx[child.firstTri + j],
-				child.aabbMin = tinybvh_min( child.aabbMin, fragment[fi].bmin ),
-				child.aabbMax = tinybvh_max( child.aabbMax, fragment[fi].bmax );
-		}
-	}
-	node.triCount = 0;
-	// recurse; should be rare
-	if (firstChild.triCount > maxPrims) SplitBVHLeaf( node.child[0], maxPrims );
-}
-
 // BVH4_CPU implementation
 // ----------------------------------------------------------------------------
 
@@ -4253,7 +4212,7 @@ void BVH8_CPU::Build( const bvhvec4slice& vertices )
 	bvh8.bvh.CombineLeafs( 4 );
 	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, false );
-	ConvertFrom( bvh8, false );
+	ConvertFrom( bvh8, true );
 }
 
 void BVH8_CPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -4270,7 +4229,7 @@ void BVH8_CPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uin
 	bvh8.bvh.CombineLeafs( 4 );
 	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, false );
+	ConvertFrom( bvh8, true );
 }
 
 void BVH8_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
@@ -4285,7 +4244,7 @@ void BVH8_CPU::BuildHQ( const bvhvec4slice& vertices )
 	bvh8.bvh.CombineLeafs( 4 );
 	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, false );
+	ConvertFrom( bvh8, true );
 }
 
 void BVH8_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -4300,7 +4259,7 @@ void BVH8_CPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, u
 	bvh8.bvh.CombineLeafs( 4 );
 	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, false );
+	ConvertFrom( bvh8, true );
 }
 
 void BVH8_CPU::Optimize( const uint32_t iterations, bool extreme )
@@ -4491,8 +4450,10 @@ void BVH8_CWBVH::Build( const bvhvec4* vertices, const uint32_t primCount )
 
 void BVH8_CWBVH::Build( const bvhvec4slice& vertices )
 {
-	bvh8.context = context; // properly propagate context to fix issue #66.
-	bvh8.Build( vertices );
+	bvh8.bvh.context = bvh8.context = context;
+	bvh8.bvh.BuildDefault( vertices );
+	bvh8.bvh.SplitLeafs( 3 );
+	bvh8.ConvertFrom( bvh8.bvh, false );
 	ConvertFrom( bvh8, true );
 }
 
@@ -4505,8 +4466,10 @@ void BVH8_CWBVH::Build( const bvhvec4* vertices, const uint32_t* indices, const 
 void BVH8_CWBVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
-	bvh8.context = context;
-	bvh8.Build( vertices, indices, prims );
+	bvh8.bvh.context = bvh8.context = context;
+	bvh8.bvh.BuildDefault( vertices, indices, prims );
+	bvh8.bvh.SplitLeafs( 3 );
+	bvh8.ConvertFrom( bvh8.bvh, true );
 	ConvertFrom( bvh8, true );
 }
 
@@ -4517,8 +4480,10 @@ void BVH8_CWBVH::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 
 void BVH8_CWBVH::BuildHQ( const bvhvec4slice& vertices )
 {
-	bvh8.context = context; // properly propagate context to fix issue #66.
-	bvh8.BuildHQ( vertices );
+	bvh8.bvh.context = bvh8.context = context;
+	bvh8.bvh.BuildHQ( vertices );
+	bvh8.bvh.SplitLeafs( 3 );
+	bvh8.ConvertFrom( bvh8.bvh, true );
 	ConvertFrom( bvh8, true );
 }
 
@@ -4529,26 +4494,23 @@ void BVH8_CWBVH::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, cons
 
 void BVH8_CWBVH::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
-	bvh8.context = context;
-	bvh8.BuildHQ( vertices, indices, prims );
+	bvh8.bvh.context = bvh8.context = context;
+	bvh8.bvh.BuildHQ( vertices, indices, prims );
+	bvh8.bvh.SplitLeafs( 3 );
+	bvh8.ConvertFrom( bvh8.bvh, true );
 	ConvertFrom( bvh8, true );
 }
 
+// Convert a BVH8 to the format specified in: "Efficient Incoherent Ray Traversal on GPUs Through
+// Compressed Wide BVHs", Ylitie et al. 2017. Adapted from code by "AlanWBFT".
 void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 {
 	// get a copy of the original bvh8
 	if (&original != &bvh8) ownBVH8 = false; // bvh isn't ours; don't delete in destructor.
 	bvh8 = original;
-	// Convert a BVH8 to the format specified in: "Efficient Incoherent Ray
-	// Traversal on GPUs Through Compressed Wide BVHs", Ylitie et al. 2017.
-	// Adapted from code by "AlanWBFT".
 	FATAL_ERROR_IF( bvh8.mbvhNode[0].isLeaf(), "BVH8_CWBVH::ConvertFrom( .. ), converting a single-node bvh." );
 	// allocate memory
-	// Note: This can be far lower (specifically: usedNodes) if we know that
-	// none of the BVH8 leafs has more than three primitives.
-	// Without this guarantee, the only safe upper limit is triCount * 2, since
-	// we will be splitting fat BVH8 leafs to as we go.
-	uint32_t spaceNeeded = bvh8.triCount * 2 * 5; // CWBVH nodes use 80 bytes each.
+	uint32_t spaceNeeded = bvh8.triCount * 5; // CWBVH nodes use 80 bytes each.
 	if (spaceNeeded > allocatedBlocks)
 	{
 		bvh8Data = (bvhvec4*)AlignedAlloc( spaceNeeded * 16 );
@@ -4583,7 +4545,6 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 			for (int32_t i = 0; i < 8; i++) if (orig->child[i] == 0) cost[s][i] = BVH_FAR; else
 			{
 				MBVH<8>::MBVHNode* const child = &bvh8.mbvhNode[orig->child[i]];
-				if (child->triCount > 3 /* must be leaf */) bvh8.SplitBVHLeaf( orig->child[i], 3 );
 				bvhvec3 childCentroid = (child->aabbMin + child->aabbMax) * 0.5f;
 				cost[s][i] = tinybvh_dot( childCentroid - nodeCentroid, ds );
 			}
@@ -4640,7 +4601,7 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 				continue;
 			}
 			// leaf node
-			const uint32_t tcount = tinybvh_min( child->triCount, 3u ); // TODO: ensure that's the case; clamping for now.
+			const uint32_t tcount = child->triCount; // will not exceed 3.
 			if (leafChildTriCount == 0) triangleBaseIndex = triDataPtr;
 			int32_t unaryEncodedTriCount = tcount == 1 ? 0b001 : tcount == 2 ? 0b011 : 0b111;
 			// set the meta field - This calculation assumes children are stored contiguously.
