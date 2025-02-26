@@ -1245,12 +1245,12 @@ static uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 #elif defined(__EMSCRIPTEN__)
 	return 31 - __builtin_clz( x );
 #elif defined(__GNUC__) || defined(__clang__)
-#ifndef __APPLE__
+#if defined(__APPLE__) || __has_builtin(__builtin_clz)
+	return 31 - __builtin_clz( x );
+#else
 	uint32_t r;
 	__asm__ __volatile__( "lzcnt{l %1, %0| %0, %1}" : "=r"(r) : "r"(x) : "cc" );
 	return 31 - r;
-#else
-	return 31 - __builtin_clz( x ); // TODO: unverified.
 #endif
 #endif
 }
@@ -1469,7 +1469,7 @@ void BVH::SplitLeafs( const uint32_t maxPrims )
 		{
 			if (node.triCount > maxPrims)
 			{
-				BVHNode& left = bvhNode[newNodePtr], &right = bvhNode[newNodePtr + 1];
+				BVHNode& left = bvhNode[newNodePtr], & right = bvhNode[newNodePtr + 1];
 				left = node, right = node;
 				right.leftFirst = node.leftFirst + maxPrims;
 				right.triCount = node.triCount - maxPrims;
