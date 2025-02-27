@@ -147,6 +147,9 @@ THE SOFTWARE.
 // BVH4 triangle format
 // #define BVH4_GPU_COMPRESSED_TRIS
 
+// BVH8_CPU compact format: So far it doesn't help, sadly.
+// #define BVH8_CPU_COMPACT
+
 // We'll use this whenever a layout has no specialized shadow ray query.
 #define FALLBACK_SHADOW_QUERY( s ) { Ray r = s; float d = s.hit.t; Intersect( r ); return r.hit.t < d; }
 
@@ -1123,9 +1126,20 @@ public:
 		SIMDVEC8 ymin8, ymax8;
 		SIMDVEC8 zmin8, zmax8;
 		SIMDIVEC8 child8; // bits: 31..29 = flags, 28..0: node index.
-		SIMDIVEC8 permOffs8;
+		SIMDIVEC8 perm8;
 		// flag bits: 000 is an empty node, 010 is an interior node. 1xx is leaf; xx = tricount.
 	};
+#ifdef BVH8_CPU_COMPACT
+	struct BVHNodeCompact
+	{
+		// Novel 8-way BVH node, with quantized child node bounds, similar to CWBVH.
+		float bminx, bminy, bminz;	// 12, actually: bmin - ext.
+		float bextx, bexty, bextz;	// 12, extend of the node, scaled conversatively.
+		uint64_t cbminx8;			// 8, stores aabbMin.x for 8 children, quantized.
+		__m256i cbminmaxyz8;		// 32, stores cbminy8, cbminz8, cbmaxy8, cbmaxz8
+		__m256i child8, perm8;		// 64, includes cbmaxx8<<24 in perm8.
+	};
+#endif
 	struct BVHLeaf
 	{
 		// Storage for up to four triangles, in SoA layout.
@@ -1152,6 +1166,9 @@ public:
 	bool IsOccluded( const Ray& ray ) const;
 	// BVH8 data
 	BVHNode* bvh8Node = 0;			// 256-byte 8-wide BVH node for efficient CPU rendering.
+#ifdef BVH8_CPU_COMPACT
+	BVHNodeCompact* bvh8Small = 0;	// 128-byte 8-wide BVH node, quantized.
+#endif
 	BVHLeaf* bvh8Leaf = 0;			// 192-byte leaf node for storing 4 tris in SoA layout.
 	MBVH<8> bvh8;					// BVH8_CPU is created from BVH8 and uses its data.
 	bool ownBVH8 = true;			// false when ConvertFrom receives an external bvh8.
@@ -1237,7 +1254,7 @@ static constexpr bool customEnabled = false;
 namespace tinybvh {
 #if defined BVH_USEAVX || defined BVH_USENEON
 
-static uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
+inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
 {
 #if defined(_MSC_VER) && !defined(__clang__)
 	return 31 - __lzcnt( x );
@@ -4285,6 +4302,9 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 	{
 		AlignedFree( bvh8Node );
 		bvh8Node = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
+	#ifdef BVH8_CPU_COMPACT
+		bvh8Small = (BVHNodeCompact*)AlignedAlloc( spaceNeeded * sizeof( BVHNodeCompact ) );
+	#endif
 		bvh8Leaf = (BVHLeaf*)AlignedAlloc( leafsNeeded * sizeof( BVHLeaf ) );
 		allocatedNodes = spaceNeeded, allocatedLeafs = leafsNeeded;
 	}
@@ -4295,29 +4315,29 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 	{
 		const MBVH<8>::MBVHNode& orig = bvh8.mbvhNode[nodeIdx];
 		BVHNode& newNode = bvh8Node[newAlt8Ptr++];
+		memset( &newNode, 0, sizeof( BVHNode ) );
+		// calculate the permutation offsets for the node
+		for (uint32_t q = 0; q < 8; q++)
+		{
+			const bvhvec3 D( q & 1 ? 1.0f : -1.0f, q & 2 ? 1.0f : -1.0f, q & 4 ? 1.0f : -1.0f );
+			union { float dist[8]; uint32_t idist[8]; };
+			for (int i = 0; i < 8; i++) if (orig.child[i] == 0) dist[i] = 1e30f; else
+			{
+				const MBVH<8>::MBVHNode& c = bvh8.mbvhNode[orig.child[i]];
+				const bvhvec3 p( q & 1 ? c.aabbMin.x : c.aabbMax.x, q & 2 ? c.aabbMin.y : c.aabbMax.y, q & 4 ? c.aabbMin.z : c.aabbMax.z );
+				dist[i] = tinybvh_dot( D, p ), idist[i] = (idist[i] & 0xfffffff8) + i;
+			}
+			// apply sorting network - https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
+			SORT( 0, 2 ); SORT( 1, 3 ); SORT( 4, 6 ); SORT( 5, 7 ); SORT( 0, 4 );
+			SORT( 1, 5 ); SORT( 2, 6 ); SORT( 3, 7 ); SORT( 0, 1 ); SORT( 2, 3 );
+			SORT( 4, 5 ); SORT( 6, 7 ); SORT( 2, 4 ); SORT( 3, 5 ); SORT( 1, 4 );
+			SORT( 3, 6 ); SORT( 1, 2 ); SORT( 3, 4 ); SORT( 5, 6 );
+			for (int i = 0; i < 8; i++) ((uint32_t*)&newNode.perm8)[i] += (idist[i] & 7) << (q * 3);
+		}
+		// fill remaining fields
 		int32_t cidx = 0;
 		for (int32_t i = 0; i < 8; i++) if (orig.child[i])
 		{
-			// calculate the permutation offsets for the node
-			memset( &newNode.permOffs8, 0, sizeof( SIMDIVEC8 ) );
-			for (uint32_t q = 0; q < 8; q++)
-			{
-				const bvhvec3 D( q & 1 ? 1.0f : -1.0f, q & 2 ? 1.0f : -1.0f, q & 4 ? 1.0f : -1.0f );
-				union { float dist[8]; uint32_t idist[8]; };
-				for (int i = 0; i < 8; i++) if (orig.child[i] == 0) dist[i] = 1e30f; else
-				{
-					const MBVH<8>::MBVHNode& c = bvh8.mbvhNode[orig.child[i]];
-					const bvhvec3 p( q & 1 ? c.aabbMin.x : c.aabbMax.x, q & 2 ? c.aabbMin.y : c.aabbMax.y, q & 4 ? c.aabbMin.z : c.aabbMax.z );
-					dist[i] = tinybvh_dot( D, p ), idist[i] = (idist[i] & 0xfffffff8) + i;
-				}
-				// apply sorting network - https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
-				SORT( 0, 2 ); SORT( 1, 3 ); SORT( 4, 6 ); SORT( 5, 7 ); SORT( 0, 4 );
-				SORT( 1, 5 ); SORT( 2, 6 ); SORT( 3, 7 ); SORT( 0, 1 ); SORT( 2, 3 );
-				SORT( 4, 5 ); SORT( 6, 7 ); SORT( 2, 4 ); SORT( 3, 5 ); SORT( 1, 4 );
-				SORT( 3, 6 ); SORT( 1, 2 ); SORT( 3, 4 ); SORT( 5, 6 );
-				for (int i = 0; i < 8; i++) ((uint32_t*)&newNode.permOffs8)[i] += (idist[i] & 7) << (q * 3);
-			}
-			// fill remaining fields
 			const MBVH<8>::MBVHNode& child = bvh8.mbvhNode[orig.child[i]];
 			((float*)&newNode.xmin8)[cidx] = child.aabbMin.x;
 			((float*)&newNode.ymin8)[cidx] = child.aabbMin.y;
@@ -4357,16 +4377,44 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 		}
 		for (; cidx < 8; cidx++)
 		{
-			((float*)&newNode.xmin8)[cidx] = 1e30f, ((float*)&newNode.xmax8)[cidx] = 1.00001e30f; // why was that again?
+			((float*)&newNode.xmin8)[cidx] = 1e30f, ((float*)&newNode.xmax8)[cidx] = 1.00001e30f;
 			((float*)&newNode.ymin8)[cidx] = 1e30f, ((float*)&newNode.ymax8)[cidx] = 1.00001e30f;
 			((float*)&newNode.zmin8)[cidx] = 1e30f, ((float*)&newNode.zmax8)[cidx] = 1.00001e30f;
-			((uint32_t*)&newNode.child8)[cidx] = 0;
 		}
+	#ifdef BVH8_CPU_COMPACT
+		// convert node data to compact layout
+		BVHNodeCompact& compact = bvh8Small[newAlt8Ptr - 1];
+		memset( &compact, 0, sizeof( BVHNodeCompact ) );
+		compact.perm8 = newNode.perm8;
+		compact.bextx = orig.aabbMax.x - orig.aabbMin.x, compact.bminx = orig.aabbMin.x - compact.bextx;
+		compact.bexty = orig.aabbMax.y - orig.aabbMin.y, compact.bminy = orig.aabbMin.y - compact.bexty;
+		compact.bextz = orig.aabbMax.z - orig.aabbMin.z, compact.bminz = orig.aabbMin.z - compact.bextz;
+		for( int i = 0; i < 8; i++ ) if (((float*)&newNode.xmin8)[i] < 1e30f)
+		{
+			unsigned qxmin = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode.xmin8)[i] - orig.aabbMin.x) / compact.bextx), 0, 255 );
+			unsigned qymin = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode.ymin8)[i] - orig.aabbMin.y) / compact.bexty), 0, 255 );
+			unsigned qzmin = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode.zmin8)[i] - orig.aabbMin.z) / compact.bextz), 0, 255 );
+			unsigned qxmax = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode.xmax8)[i] - orig.aabbMin.x) / compact.bextx) + 1, 0, 255 );
+			unsigned qymax = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode.ymax8)[i] - orig.aabbMin.y) / compact.bexty) + 1, 0, 255 );
+			unsigned qzmax = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode.zmax8)[i] - orig.aabbMin.z) / compact.bextz) + 1, 0, 255 );
+			((unsigned char*)&compact.cbminx8)[i] = qxmin;
+			((uint32_t*)&compact.perm8)[i] |= qxmax << 24;
+			((uint32_t*)&compact.cbminmaxyz8)[i] = qzmax + (qzmin << 8) + (qymax << 16) + (qymin << 24);
+		}
+		else ((unsigned char*)&compact.cbminx8)[i] = 255; // marks node as invalid.
+		compact.child8 = newNode.child8;
+	#endif
 		// pop next task
 		if (!stackPtr) break;
 		nodeIdx = stack[--stackPtr];
 		const uint32_t offset = stack[--stackPtr];
 		((uint32_t*)bvh8Node)[offset] = newAlt8Ptr + INNER_BIT;
+	#ifdef BVH8_CPU_COMPACT
+		// figure out for which node we just set the child
+		uint32_t changedNode = offset >> 6;
+		uint32_t slot = offset & 7;
+		((uint32_t*)&bvh8Small[changedNode].child8)[slot] = newAlt8Ptr + INNER_BIT;
+	#endif
 	}
 	usedNodes = newAlt8Ptr;
 }
@@ -5799,7 +5847,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 		if (!(nodeIdx >> 31)) // top bit: leaf flag
 		{
 			const BVHNode& n = bvh8Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
-			const __m256i index = _mm256_and_si256( _mm256_srlv_epi32( n.permOffs8, signShift8 ), permMask8 );
+			const __m256i index = _mm256_and_si256( _mm256_srlv_epi32( n.perm8, signShift8 ), permMask8 );
 			__m256i c8 = n.child8;
 			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, ox8 ), rdx8 );
 			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( n.xmax8, ox8 ), rdx8 );
@@ -5902,7 +5950,9 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 	__m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
 	__m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
 	__m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
-	const __m256 t8 = _mm256_set1_ps( ray.hit.t );
+	const __m256 t8 = _mm256_set1_ps( ray.hit.t ), zero8 = _mm256_setzero_ps();
+	const __m256i mantissa8 = _mm256_set1_epi32( 255 << 15 );
+	const __m256i exponent8 = _mm256_set1_epi32( 0x3f800000 );
 	__m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), t4 = _mm_set1_ps( ray.hit.t );
 	const __m128 one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
@@ -5911,6 +5961,47 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 	{
 		if (!(nodeIdx >> 31)) // top bit: leaf flag
 		{
+		#ifdef BVH8_CPU_COMPACT
+			const BVHNodeCompact& n = bvh8Small[nodeIdx & 0x1fffffff /* bits 0..28 */];
+			const __m256i c8 = n.child8;
+			const __m256 nodeMin8x = _mm256_set1_ps( n.bminx ), nodeExt8x = _mm256_set1_ps( n.bextx );
+			const __m256 nodeMin8y = _mm256_set1_ps( n.bminy ), nodeExt8y = _mm256_set1_ps( n.bexty );
+			const __m256 nodeMin8z = _mm256_set1_ps( n.bminz ), nodeExt8z = _mm256_set1_ps( n.bextz );
+			const __m256i bminx8i = _mm256_slli_epi32( _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( n.cbminx8 ) ), 15 );
+			const __m256i bmaxx8i = _mm256_and_si256( _mm256_srli_epi32( n.perm8, 9 ), mantissa8 );
+			const __m256i bminy8i = _mm256_and_si256( _mm256_srli_epi32( n.cbminmaxyz8, 9 ), mantissa8 );
+			const __m256i bmaxy8i = _mm256_and_si256( _mm256_srli_epi32( n.cbminmaxyz8, 1 ), mantissa8 );
+			const __m256i bminz8i = _mm256_and_si256( _mm256_slli_epi32( n.cbminmaxyz8, 7 ), mantissa8 );
+			const __m256i bmaxz8i = _mm256_and_si256( _mm256_slli_epi32( n.cbminmaxyz8, 15 ), mantissa8 );
+			const __m256 bminx8 = _mm256_fmadd_ps( nodeExt8x, _mm256_castsi256_ps( _mm256_or_si256( bminx8i, exponent8 ) ), nodeMin8x );
+			const __m256 bmaxx8 = _mm256_fmadd_ps( nodeExt8x, _mm256_castsi256_ps( _mm256_or_si256( bmaxx8i, exponent8 ) ), nodeMin8x );
+			const __m256 bminy8 = _mm256_fmadd_ps( nodeExt8y, _mm256_castsi256_ps( _mm256_or_si256( bminy8i, exponent8 ) ), nodeMin8y );
+			const __m256 bmaxy8 = _mm256_fmadd_ps( nodeExt8y, _mm256_castsi256_ps( _mm256_or_si256( bmaxy8i, exponent8 ) ), nodeMin8y );
+			const __m256 bminz8 = _mm256_fmadd_ps( nodeExt8z, _mm256_castsi256_ps( _mm256_or_si256( bminz8i, exponent8 ) ), nodeMin8z );
+			const __m256 bmaxz8 = _mm256_fmadd_ps( nodeExt8z, _mm256_castsi256_ps( _mm256_or_si256( bmaxz8i, exponent8 ) ), nodeMin8z );
+			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( bminx8, ox8 ), rdx8 );
+			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( bmaxx8, ox8 ), rdx8 );
+			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( bminy8, oy8 ), rdy8 );
+			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( bmaxy8, oy8 ), rdy8 );
+			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( bminz8, oz8 ), rdz8 );
+			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( bmaxz8, oz8 ), rdz8 );
+			const __m256 txMin = _mm256_min_ps( tx1, tx2 ), txMax = _mm256_max_ps( tx1, tx2 );
+			const __m256 tyMin = _mm256_min_ps( ty1, ty2 ), tyMax = _mm256_max_ps( ty1, ty2 );
+			const __m256 tzMin = _mm256_min_ps( tz1, tz2 ), tzMax = _mm256_max_ps( tz1, tz2 );
+			const __m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), txMin ), tyMin ), tzMin );
+			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( txMax, t8 ), tyMax ), tzMax );
+			const __m256 mask8 = _mm256_and_ps( _mm256_cmp_ps( tmin, tmax, _CMP_LE_OQ ), _mm256_cmp_ps( bmaxx8, bminx8, _CMP_GE_OQ ) );
+			const uint32_t mask = _mm256_movemask_ps( mask8 );
+			if (mask)
+			{
+				const uint64_t lutidx = idxLUT[mask];
+				const uint32_t validNodes = __popc( mask );
+				const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( lutidx ) );
+				const __m256i child8 = _mm256_permutevar8x32_epi32( c8, cpi );
+				_mm256_storeu_si256( (__m256i*)(nodeStack + stackPtr), child8 );
+				stackPtr += validNodes;
+			}
+		#else
 			const BVHNode& n = bvh8Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
 			const __m256i c8 = n.child8;
 			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, ox8 ), rdx8 );
@@ -5935,6 +6026,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 				_mm256_storeu_si256( (__m256i*)(nodeStack + stackPtr), child8 );
 				stackPtr += validNodes;
 			}
+		#endif
 		}
 		else
 		{
