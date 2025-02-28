@@ -118,10 +118,10 @@ THE SOFTWARE.
 // These are defaults, which initialize the public members c_int and c_trav in
 // BVHBase (and thus each BVH instance). 
 #ifndef C_INT
-#define C_INT_	1
+#define C_INT	1
 #endif
 #ifndef C_TRAV
-#define C_TRAV_	1
+#define C_TRAV	1
 #endif
 
 // SBVH: "Unsplitting"
@@ -663,8 +663,8 @@ public:
 	uint32_t usedNodes = 0;			// number of nodes used for the BVH.
 	uint32_t triCount = 0;			// number of primitives in the BVH.
 	uint32_t idxCount = 0;			// number of primitive indices; can exceed triCount for SBVH.
-	float c_trav = C_TRAV_;			// cost of a traversal step, used to steer SAH construction.
-	float c_int = C_INT_;			// cost of a primitive intersection, used to steer SAH construction.
+	float c_trav = C_TRAV;			// cost of a traversal step, used to steer SAH construction.
+	float c_int = C_INT;			// cost of a primitive intersection, used to steer SAH construction.
 	bvhvec3 aabbMin, aabbMax;		// bounds of the root node of the BVH.
 	// Custom memory allocation
 	void* AlignedAlloc( size_t size );
