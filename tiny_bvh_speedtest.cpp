@@ -16,14 +16,14 @@
 #define BUILD_AVX
 #define BUILD_NEON
 #define BUILD_SBVH
-// #define REFIT_BVH2
+#define REFIT_BVH2
 #define REFIT_MBVH4
 #define REFIT_MBVH8
-// #define BUILD_AVX_SBVH
 #define TRAVERSE_2WAY_ST
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
 #define TRAVERSE_4WAY
+#define TRAVERSE_WIVE
 #define TRAVERSE_2WAY_DBL
 #define TRAVERSE_CWBVH
 #define TRAVERSE_2WAY_MT
@@ -81,7 +81,8 @@ MBVH<4>* bvh4 = 0;
 BVH4_CPU* bvh4_cpu = 0;
 BVH4_GPU* bvh4_gpu = 0;
 BVH8_CWBVH* cwbvh = 0;
-enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _GPU4, _BVH8, _CWBVH };
+BVH8_CPU* bvh8_cpu = 0;
+enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _CPU8, _GPU4, _BVH8, _CWBVH };
 
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 #include "embree4/rtcore.h"
@@ -138,6 +139,7 @@ float TestPrimaryRays( uint32_t layout, unsigned N, unsigned passes, float* avgC
 		#ifdef BVH_USEAVX
 		case _CWBVH: for (unsigned i = 0; i < N; i++) travCost += cwbvh->Intersect( batch[i] ); break;
 		case _SOA: for (unsigned i = 0; i < N; i++) travCost += bvh_soa->Intersect( batch[i] ); break;
+		case _CPU8: for (unsigned i = 0; i < N; i++) travCost += bvh8_cpu->Intersect( batch[i] ); break;
 		#endif
 		default: break;
 		};
@@ -206,6 +208,9 @@ float TestShadowRays( uint32_t layout, unsigned N, unsigned passes )
 		#endif
 		case _GPU2: for (unsigned i = 0; i < N; i++) occluded += bvh_gpu->IsOccluded( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
+	#ifdef BVH_USEAVX2
+		case _CPU8: for (unsigned i = 0; i < N; i++) occluded += bvh8_cpu->IsOccluded( batch[i] ); break;
+	#endif
 		default: break;
 		}
 	}
@@ -577,19 +582,6 @@ int main()
 
 #endif
 
-#if defined BUILD_AVX_SBVH && defined BVH_USEAVX
-
-	// measure single-core bvh construction time - AVX builder
-	printf( "- AVX SBVH builder:  " );
-	t.reset();
-	for (int pass = 0; pass < 3; pass++) bvh->BuildHQAVX( triangles, verts / 3 );
-	buildTime = t.elapsed() / 3.0f;
-	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
-	printf( "%7.2fms for %7i triangles ", buildTime * 1000.0f, verts / 3 );
-	printf( "- %6i nodes, SAH=%.2f, rayCost=%.2f\n", bvh->usedNodes, bvh->SAHCost(), avgCost );
-
-#endif
-
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 
 	// convert data to correct format for Embree and build a BVH
@@ -652,7 +644,7 @@ int main()
 #ifdef TRAVERSE_2WAY_ST
 
 	// WALD_32BYTE - Have this enabled at all times if validation is desired.
-	printf( "- WALD_32BYTE - primary: " );
+	printf( "- BVH (plain) - primary: " );
 	traceTime = TestPrimaryRays( _DEFAULT, Nsmall, 3 );
 	refDist = new float[Nsmall];
 	for (unsigned i = 0; i < Nsmall; i++) refDist[i] = smallBatch[0][i].hit.t;
@@ -670,7 +662,7 @@ int main()
 		bvh_gpu = new BVH_GPU();
 		bvh_gpu->BuildHQ( triangles, verts / 3 );
 	}
-	printf( "- AILA_LAINE  - primary: " );
+	printf( "- BVH_GPU     - primary: " );
 	traceTime = TestPrimaryRays( _GPU2, Nsmall, 3 );
 	ValidateTraceResult( refDist, Nsmall, __LINE__ );
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
@@ -687,7 +679,7 @@ int main()
 		bvh_soa = new BVH_SoA();
 		bvh_soa->BuildHQ( triangles, verts / 3 );
 	}
-	printf( "- ALT_SOA     - primary: " );
+	printf( "- BVH_SOA     - primary: " );
 	traceTime = TestPrimaryRays( _SOA, Nsmall, 3 );
 	ValidateTraceResult( refDist, Nsmall, __LINE__ );
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
@@ -704,7 +696,7 @@ int main()
 		bvh4_cpu = new BVH4_CPU();
 		bvh4_cpu->BuildHQ( triangles, verts / 3 );
 	}
-	printf( "- BVH4_AFRA   - primary: " );
+	printf( "- BVH4_CPU    - primary: " );
 	traceTime = TestPrimaryRays( _CPU4, Nsmall, 3 );
 	ValidateTraceResult( refDist, Nsmall, __LINE__ );
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
@@ -713,10 +705,27 @@ int main()
 
 #endif
 
+#if defined TRAVERSE_WIVE && defined BVH_USEAVX && defined BVH_USEAVX2
+
+	// BVH8_CPU
+	if (!bvh8_cpu)
+	{
+		bvh8_cpu = new BVH8_CPU();
+		bvh8_cpu->BuildHQ( triangles, verts / 3 );
+	}
+	printf( "- BVH8_CPU    - primary: " );
+	traceTime = TestPrimaryRays( _CPU8, Nsmall, 3 );
+	ValidateTraceResult( refDist, Nsmall, __LINE__ );
+	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+	traceTime = TestShadowRays( _CPU8, Nsmall, 3 );
+	printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+
+#endif
+
 #if defined TRAVERSE_2WAY_DBL && defined BUILD_DOUBLE && defined DOUBLE_PRECISION_SUPPORT
 
 	// double-precision Rays/BVH
-	printf( "- WALD_DOUBLE - primary: " );
+	printf( "- BVH_DOUBLE  - primary: " );
 	traceTime = TestPrimaryRaysEx( Nsmall, 3 );
 	ValidateTraceResultEx( refDist, Nsmall, __LINE__ );
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
@@ -1004,7 +1013,7 @@ int main()
 
 	// trace all rays three times to estimate average performance
 	// - coherent distribution, multi-core, packet traversal, SSE version
-	printf( "- Packet,SSE  - primary: " );
+	printf( "- Packet, SSE - primary: " );
 	for (int pass = 0; pass < 4; pass++)
 	{
 		if (pass == 1) t.reset(); // first pass is cache warming
