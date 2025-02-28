@@ -145,6 +145,9 @@ Plans, ordered by priority:
 * Speed improvements:
   * Faster optimizer for AVX-capable CPUs
   * Improve speed of SBVH builder
+* Features & outstanding issues:
+  * 'Watertight' triangle intersection option
+  * Load/save/Optimize/Refit for BVH8_CPU
 * Demo of tinybvh on GPU using other apis:
   * Ray tracing in pure OpenGL
   * Ray tracing in pure DirectX
