@@ -4223,6 +4223,7 @@ BVH8_CPU::~BVH8_CPU()
 {
 	if (!ownBVH8) bvh8 = MBVH<8>(); // clear out pointers we don't own.
 	AlignedFree( bvh8Node );
+	AlignedFree( bvh8Leaf );
 }
 
 void BVH8_CPU::Build( const bvhvec4* vertices, const uint32_t primCount )
