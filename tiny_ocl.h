@@ -359,7 +359,7 @@ private:
 	inline static cl_context context; // simplifies some things, but limits us to one device
 	inline static cl_command_queue queue, queue2;
 	inline static char* log = 0;
-	inline static bool isNVidia = false, isAMD = false, isIntel = false, isOther = false;
+	inline static bool isNVidia = false, isAMD = false, isIntel = false, isApple = false, isOther = false;
 	inline static bool isAmpere = false, isTuring = false, isPascal = false;
 	inline static bool isAda = false, isBlackwell = false, isRubin = false, isHopper = false;
 	inline static int vendorLines = 0;
@@ -753,6 +753,7 @@ Kernel::Kernel( const char* file, const char* entryPoint )
 	if (isNVidia) csText = "#define ISNVIDIA\n" + csText, vendorLines++;
 	if (isAMD) csText = "#define ISAMD\n" + csText, vendorLines++;
 	if (isIntel) csText = "#define ISINTEL\n" + csText, vendorLines++;
+	if (isApple) csText = "#define ISAPPLE\n" + csText, vendorLines++;
 	if (isOther) csText = "#define ISOTHER\n" + csText, vendorLines++;
 	if (isAmpere) csText = "#define ISAMPERE\n" + csText, vendorLines++;
 	if (isTuring) csText = "#define ISTURING\n" + csText, vendorLines++;
@@ -962,7 +963,11 @@ bool Kernel::InitCL()
 			string deviceList( extensions );
 			free( extensions );
 			string mustHave[] = {
+#if defined(__APPLE__) && defined(__MACH__)
+                "cl_APPLE_gl_sharing",
+#else
 				"cl_khr_gl_sharing",
+#endif
 				"cl_khr_global_int32_base_atomics"
 			};
 			bool hasAll = true;
@@ -1067,6 +1072,10 @@ bool Kernel::InitCL()
 	{
 		isIntel = true;
 	}
+	else if (strstr( d, "apple" ))
+    {
+        isApple = true;
+    }
 	else
 	{
 		isOther = true;
@@ -1092,17 +1101,31 @@ bool Kernel::InitCL()
 	{
 		printf( "Intel.\n" );
 	}
+	else if (isApple)
+    {
+        printf( "Apple.\n" );
+    }
 	else
 	{
 		printf( "identification failed.\n" );
 	}
 	// create a command-queue
+#if defined(__APPLE__) && defined(__MACH__)
+    // Cannot find symbol for _clCreateCommandQueueWithProperties on APPLE
+    cl_command_queue_properties props = CL_QUEUE_PROFILING_ENABLE;
+    queue = clCreateCommandQueue( context, devices[deviceUsed], props, &error );
+    if (!CHECKCL( error )) return false;
+    // create a second command queue for asynchronous copies
+    queue2 = clCreateCommandQueue( context, devices[deviceUsed], props, &error );
+    if (!CHECKCL( error )) return false;
+#else
 	cl_queue_properties props[] = { CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0 };
 	queue = clCreateCommandQueueWithProperties( context, devices[deviceUsed], props, &error );
 	if (!CHECKCL( error )) return false;
 	// create a second command queue for asynchronous copies
 	queue2 = clCreateCommandQueueWithProperties( context, devices[deviceUsed], props, &error );
 	if (!CHECKCL( error )) return false;
+#endif
 	// cleanup
 	delete[] devices;
 	clStarted = true;
