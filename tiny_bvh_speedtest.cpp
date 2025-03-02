@@ -48,6 +48,8 @@ using namespace tinybvh;
 #endif
 #ifdef _WIN32
 #include <intrin.h>		// for __cpuidex
+#elif defined(__APPLE__) && defined(__MACH__)
+// Keep ENABLE_OPENCL for APPLE
 #elif defined ENABLE_OPENCL
 #undef ENABLE_OPENCL
 #endif
@@ -733,7 +735,8 @@ int main()
 #endif
 
 #ifdef TRAVERSE_CWBVH
-
+#ifdef BVH_USEAVX
+    
 	// CWBVH - Not efficient on CPU.
 	if (!cwbvh)
 	{
@@ -744,7 +747,8 @@ int main()
 	traceTime = TestPrimaryRays( _CWBVH, Nsmall, 3 );
 	ValidateTraceResult( refDist, Nsmall, __LINE__ );
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
-
+    
+#endif
 #endif
 
 #if defined TRAVERSE_OPTIMIZED_ST || defined TRAVERSE_4WAY_OPTIMIZED
@@ -766,7 +770,8 @@ int main()
 #endif
 
 #ifdef TRAVERSE_OPTIMIZED_ST
-
+#ifdef BVH_USEAVX
+    
 	// ALT_SOA
 	delete bvh_soa;
 	// Building a BVH_SoA over an optimized BVH: Careful, do not delete the
@@ -779,7 +784,8 @@ int main()
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	traceTime = TestShadowRays( _SOA, Nsmall, 3 );
 	printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
-
+    
+#endif
 #endif
 
 #ifdef TRAVERSE_4WAY_OPTIMIZED
