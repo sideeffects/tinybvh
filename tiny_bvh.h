@@ -260,6 +260,7 @@ struct ALIGNED( 16 ) bvhvec4
 	bvhvec4( const bvhvec3 & a );
 	bvhvec4( const bvhvec3 & a, float b );
 	float& operator [] ( const int32_t i ) { return cell[i]; }
+	const float& operator [] ( const int32_t i ) const { return cell[i]; }
 	union { struct { float x, y, z, w; }; float cell[4]; };
 };
 
@@ -270,6 +271,7 @@ struct ALIGNED( 8 ) bvhvec2
 	bvhvec2( const float a ) : x( a ), y( a ) {}
 	bvhvec2( const bvhvec4 a ) : x( a.x ), y( a.y ) {}
 	float& operator [] ( const int32_t i ) { return cell[i]; }
+	const float& operator [] ( const int32_t i ) const { return cell[i]; }
 	union { struct { float x, y; }; float cell[2]; };
 };
 
@@ -279,8 +281,8 @@ struct bvhvec3
 	bvhvec3( const float a, const float b, const float c ) : x( a ), y( b ), z( c ) {}
 	bvhvec3( const float a ) : x( a ), y( a ), z( a ) {}
 	bvhvec3( const bvhvec4 a ) : x( a.x ), y( a.y ), z( a.z ) {}
-	float halfArea() { return x < -BVH_FAR ? 0 : (x * y + y * z + z * x); } // for SAH calculations
 	float& operator [] ( const int32_t i ) { return cell[i]; }
+	const float& operator [] ( const int32_t i ) const { return cell[i]; }
 	union { struct { float x, y, z; }; float cell[3]; };
 };
 
@@ -349,6 +351,7 @@ inline bvhvec4 tinybvh_max( const bvhvec4& a, const bvhvec4& b ) { return bvhvec
 inline float tinybvh_clamp( const float x, const float a, const float b ) { return x > a ? (x < b ? x : b) : a; /* NaN safe */ }
 inline int32_t tinybvh_clamp( const int32_t x, const int32_t a, const int32_t b ) { return x > a ? (x < b ? x : b) : a; /* NaN safe */ }
 template <class T> inline static void tinybvh_swap( T& a, T& b ) { T t = a; a = b; b = t; }
+inline float tinybvh_halfAreaf(const bvhvec3& v) { return v.x < -BVH_FAR ? 0 : (v.x * v.y + v.y * v.z + v.z * v.x); } // for SAH calculations
 
 // Operator overloads.
 // Only a minimal set is provided.
@@ -425,8 +428,8 @@ struct bvhdbl3
 	bvhdbl3( const double a, const double b, const double c ) : x( a ), y( b ), z( c ) {}
 	bvhdbl3( const double a ) : x( a ), y( a ), z( a ) {}
 	bvhdbl3( const bvhvec3 a ) : x( (double)a.x ), y( (double)a.y ), z( (double)a.z ) {}
-	double halfArea() { return x < -BVH_DBL_FAR ? 0 : (x * y + y * z + z * x); } // for SAH calculations
 	double& operator [] ( const int32_t i ) { return cell[i]; }
+	const double& operator [] ( const int32_t i ) const { return cell[i]; }
 	union { struct { double x, y, z; }; double cell[3]; };
 };
 
@@ -479,6 +482,8 @@ inline bvhdbl3 tinybvh_cross( const bvhdbl3& a, const bvhdbl3& b )
 	return bvhdbl3( a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x );
 }
 inline double tinybvh_dot( const bvhdbl3& a, const bvhdbl3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+inline double tinybvh_halfAread(const bvhdbl3& v) { return v.x < -BVH_FAR ? 0 : (v.x * v.y + v.y * v.z + v.z * v.x); } // for SAH calculations
 
 #endif // DOUBLE_PRECISION_SUPPORT
 
@@ -1826,8 +1831,8 @@ void BVH::Build()
 					lBMax[i] = l2 = tinybvh_max( l2, binMax[a][i] );
 					rBMax[BVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[a][BVHBINS - 1 - i] );
 					lN += count[a][i], rN += count[a][BVHBINS - 1 - i];
-					ANL[i] = lN == 0 ? BVH_FAR : ((l2 - l1).halfArea() * (float)lN);
-					ANR[BVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
+					ANL[i] = lN == 0 ? BVH_FAR : (tinybvh_halfAreaf(l2 - l1) * (float)lN);
+					ANR[BVHBINS - 2 - i] = rN == 0 ? BVH_FAR : (tinybvh_halfAreaf(r2 - r1) * (float)rN);
 				}
 				// evaluate bin totals to find best position for object split
 				for (uint32_t i = 0; i < BVHBINS - 1; i++)
@@ -1844,7 +1849,7 @@ void BVH::Build()
 			if (splitCost >= noSplitCost) break; // not splitting is better.
 			// in-place partition
 			uint32_t j = node.leftFirst + node.triCount, src = node.leftFirst;
-			const float rpd = rpd3.cell[bestAxis], nmin = nmin3.cell[bestAxis];
+			const float rpd = rpd3[bestAxis], nmin = nmin3[bestAxis];
 			for (uint32_t i = 0; i < node.triCount; i++)
 			{
 				const uint32_t fi = primIdx[src];
@@ -1977,7 +1982,7 @@ void BVH::BuildHQ()
 	uint32_t nextFrag = triCount;
 	// subdivide recursively
 	BVHNode& root = bvhNode[0];
-	const float rootArea = (root.aabbMax - root.aabbMin).halfArea();
+	const float rootArea = tinybvh_halfAreaf(root.aabbMax - root.aabbMin);
 	struct Task { uint32_t node, sliceStart, sliceEnd, dummy; };
 	ALIGNED( 64 ) Task task[1024];
 	uint32_t taskCount = 0, nodeIdx = 0, sliceStart = 0, sliceEnd = triCount + slack;
@@ -2011,7 +2016,7 @@ void BVH::BuildHQ()
 			// calculate per-split totals
 			float splitCost = 1e30f, rSAV = 1.0f / node.SurfaceArea();
 			uint32_t bestAxis = 0, bestPos = 0;
-			for (int32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
+			for (int32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim[a])
 			{
 				bvhvec3 lBMin[HQBVHBINS - 1], rBMin[HQBVHBINS - 1], l1 = BVH_FAR, l2 = -BVH_FAR;
 				bvhvec3 lBMax[HQBVHBINS - 1], rBMax[HQBVHBINS - 1], r1 = BVH_FAR, r2 = -BVH_FAR;
@@ -2023,8 +2028,8 @@ void BVH::BuildHQ()
 					lBMax[i] = l2 = tinybvh_max( l2, binMax[a][i] );
 					rBMax[HQBVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[a][HQBVHBINS - 1 - i] );
 					lN += count[a][i], rN += count[a][HQBVHBINS - 1 - i];
-					ANL[i] = lN == 0 ? BVH_FAR : ((l2 - l1).halfArea() * (float)lN);
-					ANR[HQBVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
+					ANL[i] = lN == 0 ? BVH_FAR : (tinybvh_halfAreaf(l2 - l1) * (float)lN);
+					ANR[HQBVHBINS - 2 - i] = rN == 0 ? BVH_FAR : (tinybvh_halfAreaf(r2 - r1) * (float)rN);
 				}
 				// evaluate bin totals to find best position for object split
 				for (uint32_t i = 0; i < HQBVHBINS - 1; i++)
@@ -2039,10 +2044,10 @@ void BVH::BuildHQ()
 			bool spatial = false;
 			uint32_t NL[HQBVHBINS - 1], NR[HQBVHBINS - 1], budget = sliceEnd - sliceStart, bestNL = 0, bestNR = 0;
 			bvhvec3 spatialUnion = bestLMax - bestRMin;
-			float spatialOverlap = (spatialUnion.halfArea()) / rootArea;
+			float spatialOverlap = (tinybvh_halfAreaf(spatialUnion)) / rootArea;
 			if (budget > node.triCount && splitCost < 1e30f && spatialOverlap > 1e-5f)
 			{
-				for (uint32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
+				for (uint32_t a = 0; a < 3; a++) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim[a])
 				{
 					// setup bins
 					bvhvec3 binaMin[HQBVHBINS], binaMax[HQBVHBINS];
@@ -2082,8 +2087,8 @@ void BVH::BuildHQ()
 						lBMin[i] = l1 = tinybvh_min( l1, binaMin[i] ), rBMin[HQBVHBINS - 2 - i] = r1 = tinybvh_min( r1, binaMin[HQBVHBINS - 1 - i] );
 						lBMax[i] = l2 = tinybvh_max( l2, binaMax[i] ), rBMax[HQBVHBINS - 2 - i] = r2 = tinybvh_max( r2, binaMax[HQBVHBINS - 1 - i] );
 						lN += countIn[i], rN += countOut[HQBVHBINS - 1 - i], NL[i] = lN, NR[HQBVHBINS - 2 - i] = rN;
-						ANL[i] = lN == 0 ? BVH_FAR : ((l2 - l1).halfArea() * (float)lN);
-						ANR[HQBVHBINS - 2 - i] = rN == 0 ? BVH_FAR : ((r2 - r1).halfArea() * (float)rN);
+						ANL[i] = lN == 0 ? BVH_FAR : (tinybvh_halfAreaf(l2 - l1) * (float)lN);
+						ANR[HQBVHBINS - 2 - i] = rN == 0 ? BVH_FAR : (tinybvh_halfAreaf(r2 - r1) * (float)rN);
 					}
 					// find best position for spatial split
 					for (uint32_t i = 0; i < HQBVHBINS - 1; i++)
@@ -2127,8 +2132,8 @@ void BVH::BuildHQ()
 						{
 							bvhvec3 unsplitLMin = tinybvh_min( bestLMin, fragment[fragIdx].bmin );
 							bvhvec3 unsplitLMax = tinybvh_max( bestLMax, fragment[fragIdx].bmax );
-							float AL = (unsplitLMax - unsplitLMin).halfArea();
-							float AR = (bestRMax - bestRMin).halfArea();
+							float AL = tinybvh_halfAreaf(unsplitLMax - unsplitLMin);
+							float AR = tinybvh_halfAreaf(bestRMax - bestRMin);
 							float CunsplitLeft = c_trav + c_int * rSAV * (AL * bestNL + AR * (bestNR - 1));
 							if (CunsplitLeft < splitCost)
 							{
@@ -2142,8 +2147,8 @@ void BVH::BuildHQ()
 						{
 							const bvhvec3 unsplitRMin = tinybvh_min( bestRMin, fragment[fragIdx].bmin );
 							const bvhvec3 unsplitRMax = tinybvh_max( bestRMax, fragment[fragIdx].bmax );
-							const float AL = (bestLMax - bestLMin).halfArea();
-							const float AR = (unsplitRMax - unsplitRMin).halfArea();
+							const float AL = tinybvh_halfAreaf(bestLMax - bestLMin);
+							const float AR = tinybvh_halfAreaf(unsplitRMax - unsplitRMin);
 							const float CunsplitRight = c_trav + c_int * rSAV * (AL * (bestNL - 1) + AR * bestNR);
 							if (CunsplitRight < splitCost)
 							{
@@ -2177,7 +2182,7 @@ void BVH::BuildHQ()
 			else
 			{
 				// object partitioning
-				const float rpd = rpd3.cell[bestAxis], nmin = nmin3.cell[bestAxis];
+				const float rpd = rpd3[bestAxis], nmin = nmin3[bestAxis];
 				for (uint32_t i = 0; i < node.triCount; i++)
 				{
 					const uint32_t fr = primIdx[src + i];
@@ -4890,7 +4895,7 @@ void BVH::BuildAVX()
 			float splitCost = BVH_FAR, rSAV = 1.0f / node.SurfaceArea();
 			uint32_t bestAxis = 0, bestPos = 0, n = newNodePtr, j = node.leftFirst + node.triCount, src = node.leftFirst;
 			const __m256* bb = binbox;
-			for (int32_t a = 0; a < 3; a++, bb += AVXBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
+			for (int32_t a = 0; a < 3; a++, bb += AVXBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim[a])
 			{
 				// hardcoded bin processing for AVXBINS == 8
 				assert( AVXBINS == 8 );
@@ -6346,7 +6351,7 @@ void BVH::BuildNEON()
 			float splitCost = BVH_FAR, rSAV = 1.0f / node.SurfaceArea();
 			uint32_t bestAxis = 0, bestPos = 0, n = newNodePtr, j = node.leftFirst + node.triCount, src = node.leftFirst;
 			const float32x4x2_t* bb = binbox;
-			for (int32_t a = 0; a < 3; a++, bb += AVXBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim.cell[a])
+			for (int32_t a = 0; a < 3; a++, bb += AVXBINS) if ((node.aabbMax[a] - node.aabbMin[a]) > minDim[a])
 			{
 				// hardcoded bin processing for AVXBINS == 8
 				assert( AVXBINS == 8 );
@@ -7095,8 +7100,8 @@ void BVH_Double::Build()
 					lBMax[i] = l2 = tinybvh_max( l2, binMax[a][i] );
 					rBMax[BVHBINS - 2 - i] = r2 = tinybvh_max( r2, binMax[a][BVHBINS - 1 - i] );
 					lN += count[a][i], rN += count[a][BVHBINS - 1 - i];
-					ANL[i] = lN == 0 ? BVH_DBL_FAR : ((l2 - l1).halfArea() * (double)lN);
-					ANR[BVHBINS - 2 - i] = rN == 0 ? BVH_DBL_FAR : ((r2 - r1).halfArea() * (double)rN);
+					ANL[i] = lN == 0 ? BVH_DBL_FAR : (tinybvh_halfAread(l2 - l1) * (double)lN);
+					ANR[BVHBINS - 2 - i] = rN == 0 ? BVH_DBL_FAR : (tinybvh_halfAread(r2 - r1) * (double)rN);
 				}
 				// evaluate bin totals to find best position for object split
 				for (uint32_t i = 0; i < BVHBINS - 1; i++)
@@ -7113,7 +7118,7 @@ void BVH_Double::Build()
 			if (splitCost >= noSplitCost) break; // not splitting is better.
 			// in-place partition
 			uint64_t j = node.leftFirst + node.triCount, src = node.leftFirst;
-			const double rpd = rpd3.cell[bestAxis], nmin = nmin3.cell[bestAxis];
+			const double rpd = rpd3[bestAxis], nmin = nmin3[bestAxis];
 			for (uint64_t i = 0; i < node.triCount; i++)
 			{
 				const uint64_t fi = primIdx[src];
@@ -7664,8 +7669,8 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 			vin[0] = verts[vidx], vin[1] = verts[vidx + 1], vin[2] = verts[vidx + 2];
 		for (uint32_t a = 0; a < 3; a++)
 		{
-			const float eps = minDim.cell[a];
-			if (extent.cell[a] > eps)
+			const float eps = minDim[a];
+			if (extent[a] > eps)
 			{
 				uint32_t Nout = 0;
 				const float l = bmin[a], r = bmax[a];
@@ -7706,7 +7711,7 @@ bool BVH::ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhve
 		// special case: if this fragment has not been clipped before, only clip against planes on split axis.
 		bool hasVerts = false;
 		bvhvec3 mn( BVH_FAR ), mx( -BVH_FAR ), vout[4], C;
-		if (extent.cell[axis] > minDim.cell[axis])
+		if (extent[axis] > minDim[axis])
 		{
 			const float l = bmin[axis], r = bmax[axis];
 			uint32_t Nout = 0;
@@ -7774,9 +7779,9 @@ void BVH::SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, cons
 	if (!vertIdx) vin[0] = verts[vidx], vin[1] = verts[vidx + 1], vin[2] = verts[vidx + 2];
 	else vin[0] = verts[vertIdx[vidx]], vin[1] = verts[vertIdx[vidx + 1]], vin[2] = verts[vertIdx[vidx + 2]];
 	const bvhvec3 extent = orig.bmax - orig.bmin;
-	if (orig.clipped) for (int a = 0; a < 3; a++) if (extent.cell[a] > minDim.cell[a])
+	if (orig.clipped) for (int a = 0; a < 3; a++) if (extent[a] > minDim[a])
 	{
-		float l = orig.bmin.cell[a], r = orig.bmax.cell[a];
+		float l = orig.bmin[a], r = orig.bmax[a];
 		Nout = 0;
 		for (uint32_t v = 0; v < Nin; v++)
 		{
