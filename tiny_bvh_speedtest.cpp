@@ -23,6 +23,7 @@
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
 #define TRAVERSE_4WAY
+#define TRAVERSE_WIVE4
 #define TRAVERSE_WIVE
 #define TRAVERSE_2WAY_DBL
 // #define TRAVERSE_CWBVH
@@ -84,7 +85,8 @@ BVH4_CPU* bvh4_cpu = 0;
 BVH4_GPU* bvh4_gpu = 0;
 BVH8_CWBVH* cwbvh = 0;
 BVH8_CPU* bvh8_cpu = 0;
-enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _CPU8, _GPU4, _BVH8, _CWBVH };
+BVH4_AVX2* bvh4_avx2 = 0;
+enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _CPU4A, _CPU8, _GPU4, _BVH8, _CWBVH };
 
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 #include "embree4/rtcore.h"
@@ -141,6 +143,7 @@ float TestPrimaryRays( uint32_t layout, unsigned N, unsigned passes, float* avgC
 		#ifdef BVH_USEAVX
 		case _CWBVH: for (unsigned i = 0; i < N; i++) travCost += cwbvh->Intersect( batch[i] ); break;
 		case _SOA: for (unsigned i = 0; i < N; i++) travCost += bvh_soa->Intersect( batch[i] ); break;
+		case _CPU4A: for (unsigned i = 0; i < N; i++) travCost += bvh4_avx2->Intersect( batch[i] ); break;
 		case _CPU8: for (unsigned i = 0; i < N; i++) travCost += bvh8_cpu->Intersect( batch[i] ); break;
 		#endif
 		default: break;
@@ -211,6 +214,7 @@ float TestShadowRays( uint32_t layout, unsigned N, unsigned passes )
 		case _GPU2: for (unsigned i = 0; i < N; i++) occluded += bvh_gpu->IsOccluded( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
 		#ifdef BVH_USEAVX2
+		case _CPU4A: for (unsigned i = 0; i < N; i++) occluded += bvh4_avx2->IsOccluded( batch[i] ); break;
 		case _CPU8: for (unsigned i = 0; i < N; i++) occluded += bvh8_cpu->IsOccluded( batch[i] ); break;
 		#endif
 		default: break;
@@ -703,6 +707,23 @@ int main()
 	ValidateTraceResult( refDist, Nsmall, __LINE__ );
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	traceTime = TestShadowRays( _CPU4, Nsmall, 3 );
+	printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+
+#endif
+
+#if defined TRAVERSE_WIVE4 && defined BVH_USEAVX && defined BVH_USEAVX2
+
+	// BVH8_CPU
+	if (!bvh4_avx2)
+	{
+		bvh4_avx2 = new BVH4_AVX2();
+		bvh4_avx2->BuildHQ( triangles, verts / 3 );
+	}
+	printf( "- BVH4_AVX2   - primary: " );
+	traceTime = TestPrimaryRays( _CPU4A, Nsmall, 3 );
+	ValidateTraceResult( refDist, Nsmall, __LINE__ );
+	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+	traceTime = TestShadowRays( _CPU4A, Nsmall, 3 );
 	printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 
 #endif

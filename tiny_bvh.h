@@ -159,7 +159,7 @@ THE SOFTWARE.
 #ifndef TINYBVH_NO_SIMD
 #if defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__)
 #define BVH_USEAVX		// required for BuildAVX, BVH_SoA and others
-#define BVH_USEAVX2		// required for BVH8_CPU
+#define BVH_USEAVX2		// required for BVH4_AVX2 and BVH8_CPU
 #include "immintrin.h"	// for __m128 and __m256
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #define BVH_USENEON
@@ -639,6 +639,7 @@ public:
 		LAYOUT_BVH_GPU,
 		LAYOUT_MBVH,
 		LAYOUT_BVH4_CPU,
+		LAYOUT_BVH4_AVX2,
 		LAYOUT_BVH4_GPU,
 		LAYOUT_MBVH8,
 		LAYOUT_CWBVH,
@@ -694,6 +695,7 @@ class BVH : public BVHBase
 public:
 	friend class BVH_GPU;
 	friend class BVH_SoA;
+	friend class BVH4_AVX2;
 	friend class BVH8_CPU;
 	friend class BVH8_CWBVH;
 	template <int M> friend class MBVH;
@@ -1122,6 +1124,53 @@ public:
 	bool ownBVH8 = true;			// false when ConvertFrom receives an external bvh8.
 };
 
+// Storage for up to four triangles, in SoA layout, for BVH4_AVX2 and BVH8_CPU.
+struct BVHTri4Leaf
+{
+	SIMDVEC4 v0x4, v0y4, v0z4;
+	SIMDVEC4 e1x4, e1y4, e1z4;
+	SIMDVEC4 e2x4, e2y4, e2z4;
+	uint32_t primIdx[4];		// total: 160 bytes.
+	SIMDVEC4 dummy0, dummy1;	// pad to 3 full cachelines.
+};
+
+class BVH4_AVX2 : public BVHBase
+{
+public:
+	enum { INNER_BIT = 1 << 30, LEAF_BIT = 1 << 31 };
+	struct BVHNode
+	{
+		// 4-way BVH node, optimized for CPU rendering.
+		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units", Fuetterling et al., 2017
+		SIMDVEC4 xmin4, xmax4;
+		SIMDVEC4 ymin4, ymax4;
+		SIMDVEC4 zmin4, zmax4;
+		SIMDIVEC4 child4; // bits: 31..29 = flags, 28..0: node index.
+		SIMDIVEC4 perm4;
+	};
+	BVH4_AVX2( BVHContext ctx = {} ) { layout = LAYOUT_BVH4_AVX2; context = ctx; }
+	~BVH4_AVX2();
+	void Build( const bvhvec4* vertices, const uint32_t primCount );
+	void Build( const bvhvec4slice& vertices );
+	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims );
+	void Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t primCount );
+	void BuildHQ( const bvhvec4slice& vertices );
+	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims );
+	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims );
+	void Optimize( const uint32_t iterations, bool extreme );
+	float SAHCost( const uint32_t nodeIdx ) const;
+	void ConvertFrom( const MBVH<4>& original, bool compact = true );
+	int32_t Intersect( Ray& ray ) const;
+	bool IsOccluded( const Ray& ray ) const;
+	// BVH4 data
+	BVHNode* bvh4Node = 0;			// 128-byte 4-wide BVH node for efficient CPU rendering.
+	BVHTri4Leaf* bvh4Leaf = 0;		// 192-byte leaf node for storing 4 tris in SoA layout.
+	MBVH<4> bvh4;					// BVH4_AVX2 is created from BVH4 and uses its data.
+	bool ownBVH4 = true;			// false when ConvertFrom receives an external bvh8.
+	uint32_t allocatedLeafs = 0;	// separate buffer for SoA triangle data.
+};
+
 class BVH8_CPU : public BVHBase
 {
 public:
@@ -1129,7 +1178,7 @@ public:
 	struct BVHNode
 	{
 		// 8-way BVH node, optimized for CPU rendering.
-		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units", Fuetterling1 et al., 2017,
+		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units", Fuetterling et al., 2017,
 		// and the implementation by Mathijs Molenaar, https://github.com/mathijs727/pandora
 		SIMDVEC8 xmin8, xmax8;
 		SIMDVEC8 ymin8, ymax8;
@@ -1149,15 +1198,6 @@ public:
 		__m256i child8, perm8;		// 64, includes cbmaxx8<<24 in perm8.
 	};
 #endif
-	struct BVHLeaf
-	{
-		// Storage for up to four triangles, in SoA layout.
-		SIMDVEC4 v0x4, v0y4, v0z4;
-		SIMDVEC4 e1x4, e1y4, e1z4;
-		SIMDVEC4 e2x4, e2y4, e2z4;
-		uint32_t primIdx[4];		// total: 160 bytes.
-		SIMDVEC4 dummy0, dummy1;	// pad to 3 full cachelines.
-	};
 	BVH8_CPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH8_AVX2; context = ctx; }
 	~BVH8_CPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
@@ -1178,7 +1218,7 @@ public:
 #ifdef BVH8_CPU_COMPACT
 	BVHNodeCompact* bvh8Small = 0;	// 128-byte 8-wide BVH node, quantized.
 #endif
-	BVHLeaf* bvh8Leaf = 0;			// 192-byte leaf node for storing 4 tris in SoA layout.
+	BVHTri4Leaf* bvh8Leaf = 0;			// 192-byte leaf node for storing 4 tris in SoA layout.
 	MBVH<8> bvh8;					// BVH8_CPU is created from BVH8 and uses its data.
 	bool ownBVH8 = true;			// false when ConvertFrom receives an external bvh8.
 	uint32_t allocatedLeafs = 0;	// separate buffer for SoA triangle data.
@@ -2466,7 +2506,7 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				// BLASses are of the same layout this reduces to nearly zero cost for
 				// a small set of predictable branches.
 				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU ||
-					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 );
+					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 || blas->layout == LAYOUT_BVH4_AVX2 );
 				if (blas->layout == LAYOUT_BVH)
 				{
 					// regular (triangle) BVH traversal
@@ -2477,6 +2517,7 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 					if (blas->layout == LAYOUT_BVH4_CPU) cost += ((BVH4_CPU*)blas)->Intersect( tmp );
 					else if (blas->layout == LAYOUT_BVH_SOA) cost += ((BVH_SoA*)blas)->Intersect( tmp );
 				#ifdef BVH_USEAVX2
+					else if (blas->layout == LAYOUT_BVH4_AVX2) cost += ((BVH4_AVX2*)blas)->Intersect( tmp );
 					else if (blas->layout == LAYOUT_BVH8_AVX2) cost += ((BVH8_CPU*)blas)->Intersect( tmp );
 				#endif
 				}
@@ -2568,7 +2609,7 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 				tmp.rD = tinybvh_safercp( tmp.D );
 				// 2. Traverse BLAS with the transformed ray
 				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU ||
-					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 );
+					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 || blas->layout == LAYOUT_BVH4_AVX2 );
 				if (blas->layout == LAYOUT_BVH)
 				{
 					// regular (triangle) BVH traversal
@@ -2579,6 +2620,7 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 					if (blas->layout == LAYOUT_BVH4_CPU) { if (((BVH4_CPU*)blas)->IsOccluded( tmp )) return true; }
 					else if (blas->layout == LAYOUT_BVH_SOA) { if (((BVH_SoA*)blas)->IsOccluded( tmp )) return true; }
 				#ifdef BVH_USEAVX2
+					else if (blas->layout == LAYOUT_BVH4_AVX2) { if (((BVH4_AVX2*)blas)->IsOccluded( tmp )) return true; }
 					else if (blas->layout == LAYOUT_BVH8_AVX2) { if (((BVH8_CPU*)blas)->IsOccluded( tmp )) return true; }
 				#endif
 				}
@@ -4221,6 +4263,184 @@ int32_t BVH4_GPU::Intersect( Ray& ray ) const
 	return (int32_t)cost; // cast to not break interface.
 }
 
+// BVH4_AVX2 implementation
+// ----------------------------------------------------------------------------
+
+BVH4_AVX2::~BVH4_AVX2()
+{
+	if (!ownBVH4) bvh4 = MBVH<4>(); // clear out pointers we don't own.
+	AlignedFree( bvh4Node );
+	AlignedFree( bvh4Leaf );
+}
+
+void BVH4_AVX2::Build( const bvhvec4* vertices, const uint32_t primCount )
+{
+	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+
+void BVH4_AVX2::Build( const bvhvec4slice& vertices )
+{
+	bvh4.bvh.context = bvh4.context = context;
+	bvh4.bvh.BuildDefault( vertices );
+	bvh4.bvh.CombineLeafs( 4 );
+	bvh4.bvh.SplitLeafs( 4 );
+	bvh4.ConvertFrom( bvh4.bvh, false );
+	ConvertFrom( bvh4, true );
+}
+
+void BVH4_AVX2::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH4_AVX2::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	// build the BVH from vertices stored in a slice, indexed by 'indices'.
+	bvh4.bvh.context = bvh4.context = context;
+	bvh4.bvh.BuildDefault( vertices, indices, prims );
+	bvh4.bvh.CombineLeafs( 4 );
+	bvh4.bvh.SplitLeafs( 4 );
+	bvh4.ConvertFrom( bvh4.bvh, true );
+	ConvertFrom( bvh4, true );
+}
+
+void BVH4_AVX2::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+{
+	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
+}
+
+void BVH4_AVX2::BuildHQ( const bvhvec4slice& vertices )
+{
+	bvh4.bvh.context = bvh4.context = context;
+	bvh4.bvh.BuildHQ( vertices );
+	bvh4.bvh.CombineLeafs( 4 );
+	bvh4.bvh.SplitLeafs( 4 );
+	bvh4.ConvertFrom( bvh4.bvh, true );
+	ConvertFrom( bvh4, true );
+}
+
+void BVH4_AVX2::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+{
+	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
+}
+
+void BVH4_AVX2::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+{
+	bvh4.bvh.context = bvh4.context = context;
+	bvh4.bvh.BuildHQ( vertices, indices, prims );
+	bvh4.bvh.CombineLeafs( 4 );
+	bvh4.bvh.SplitLeafs( 4 );
+	bvh4.ConvertFrom( bvh4.bvh, true );
+	ConvertFrom( bvh4, true );
+}
+
+void BVH4_AVX2::Optimize( const uint32_t iterations, bool extreme )
+{
+	bvh4.Optimize( iterations, extreme );
+	ConvertFrom( bvh4, false );
+}
+
+float BVH4_AVX2::SAHCost( const uint32_t nodeIdx ) const
+{
+	return bvh4.SAHCost( nodeIdx );
+}
+
+#define SORT(a,b) { if (dist[a] < dist[b]) { float h = dist[a]; dist[a] = dist[b], dist[b] = h; } }
+void BVH4_AVX2::ConvertFrom( const MBVH<4>& original, bool compact )
+{
+	// get a copy of the original bvh4
+	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor.
+	bvh4 = original;
+	uint32_t spaceNeeded = compact ? bvh4.usedNodes : bvh4.allocatedNodes;
+	uint32_t leafsNeeded = bvh4.LeafCount();
+	if (allocatedNodes < spaceNeeded || allocatedLeafs < leafsNeeded)
+	{
+		AlignedFree( bvh4Node );
+		bvh4Node = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
+		bvh4Leaf = (BVHTri4Leaf*)AlignedAlloc( leafsNeeded * sizeof( BVHTri4Leaf ) );
+		allocatedNodes = spaceNeeded, allocatedLeafs = leafsNeeded;
+	}
+	CopyBasePropertiesFrom( bvh4 );
+	// start conversion
+	uint32_t newAlt4Ptr = 0, newLeafPtr = 0, nodeIdx = 0, stack[128], stackPtr = 0;
+	while (1)
+	{
+		const MBVH<4>::MBVHNode& orig = bvh4.mbvhNode[nodeIdx];
+		BVHNode& newNode = bvh4Node[newAlt4Ptr++];
+		memset( &newNode, 0, sizeof( BVHNode ) );
+		// calculate the permutation offsets for the node
+		for (uint32_t q = 0; q < 8; q++)
+		{
+			const bvhvec3 D( q & 1 ? 1.0f : -1.0f, q & 2 ? 1.0f : -1.0f, q & 4 ? 1.0f : -1.0f );
+			union { float dist[4]; uint32_t idist[4]; };
+			for (int i = 0; i < 4; i++) if (orig.child[i] == 0) dist[i] = 1e30f; else
+			{
+				const MBVH<4>::MBVHNode& c = bvh4.mbvhNode[orig.child[i]];
+				const bvhvec3 p( q & 1 ? c.aabbMin.x : c.aabbMax.x, q & 2 ? c.aabbMin.y : c.aabbMax.y, q & 4 ? c.aabbMin.z : c.aabbMax.z );
+				dist[i] = tinybvh_dot( D, p ), idist[i] = (idist[i] & 0xfffffffc) + i;
+			}
+			// apply sorting network - https://bertdobbelaere.github.io/sorting_networks.html#N4L5D3
+			SORT( 0, 2 ); SORT( 1, 3 ); SORT( 0, 1 ); SORT( 2, 3 ); SORT( 1, 2 );
+			for (int i = 0; i < 4; i++) ((uint32_t*)&newNode.perm4)[i] += (idist[i] & 3) << (q * 2);
+		}
+		// fill remaining fields
+		int32_t cidx = 0;
+		for (int32_t i = 0; i < 4; i++) if (orig.child[i])
+		{
+			const MBVH<4>::MBVHNode& child = bvh4.mbvhNode[orig.child[i]];
+			((float*)&newNode.xmin4)[cidx] = child.aabbMin.x;
+			((float*)&newNode.ymin4)[cidx] = child.aabbMin.y;
+			((float*)&newNode.zmin4)[cidx] = child.aabbMin.z;
+			((float*)&newNode.xmax4)[cidx] = child.aabbMax.x;
+			((float*)&newNode.ymax4)[cidx] = child.aabbMax.y;
+			((float*)&newNode.zmax4)[cidx] = child.aabbMax.z;
+			if (child.isLeaf())
+			{
+				// emit leaf node: group of up to 4 triangles in AoS format.
+				((uint32_t*)&newNode.child4)[cidx] = newLeafPtr + ((child.triCount - 1) << 29) + LEAF_BIT;
+				BVHTri4Leaf& leaf = bvh4Leaf[newLeafPtr++];
+				for (uint32_t l = 0; l < 4; l++)
+				{
+					uint32_t primIdx = bvh4.bvh.primIdx[child.firstTri + tinybvh_min( l, child.triCount - 1u )];
+					uint32_t i0, i1, i2;
+					if (indexedEnabled && bvh4.bvh.vertIdx != 0)
+						i0 = bvh4.bvh.vertIdx[primIdx * 3], i1 = bvh4.bvh.vertIdx[primIdx * 3 + 1], i2 = bvh4.bvh.vertIdx[primIdx * 3 + 2];
+					else
+						i0 = primIdx * 3, i1 = primIdx * 3 + 1, i2 = primIdx * 3 + 2;
+					const bvhvec4 v0 = bvh4.bvh.verts[i0];
+					const bvhvec4 e1 = bvh4.bvh.verts[i1] - v0;
+					const bvhvec4 e2 = bvh4.bvh.verts[i2] - v0;
+					((float*)&leaf.v0x4)[l] = v0.x, ((float*)&leaf.v0y4)[l] = v0.y, ((float*)&leaf.v0z4)[l] = v0.z;
+					((float*)&leaf.e1x4)[l] = e1.x, ((float*)&leaf.e1y4)[l] = e1.y, ((float*)&leaf.e1z4)[l] = e1.z;
+					((float*)&leaf.e2x4)[l] = e2.x, ((float*)&leaf.e2y4)[l] = e2.y, ((float*)&leaf.e2z4)[l] = e2.z;
+					leaf.primIdx[l] = primIdx;
+				}
+			}
+			else
+			{
+				uint32_t* slot = (uint32_t*)&newNode.child4 + cidx;
+				*slot = 1; // so we know there is a child
+				stack[stackPtr++] = (uint32_t)(slot - (uint32_t*)bvh4Node);
+				stack[stackPtr++] = orig.child[i];
+			}
+			cidx++;
+		}
+		for (; cidx < 4; cidx++)
+		{
+			((float*)&newNode.xmin4)[cidx] = 1e30f, ((float*)&newNode.xmax4)[cidx] = 1.00001e30f;
+			((float*)&newNode.ymin4)[cidx] = 1e30f, ((float*)&newNode.ymax4)[cidx] = 1.00001e30f;
+			((float*)&newNode.zmin4)[cidx] = 1e30f, ((float*)&newNode.zmax4)[cidx] = 1.00001e30f;
+		}
+		// pop next task
+		if (!stackPtr) break;
+		nodeIdx = stack[--stackPtr];
+		const uint32_t offset = stack[--stackPtr];
+		((uint32_t*)bvh4Node)[offset] = newAlt4Ptr + INNER_BIT;
+	}
+	usedNodes = newAlt4Ptr;
+}
+
 // BVH8_CPU implementation
 // ----------------------------------------------------------------------------
 
@@ -4319,7 +4539,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 	#ifdef BVH8_CPU_COMPACT
 		bvh8Small = (BVHNodeCompact*)AlignedAlloc( spaceNeeded * sizeof( BVHNodeCompact ) );
 	#endif
-		bvh8Leaf = (BVHLeaf*)AlignedAlloc( leafsNeeded * sizeof( BVHLeaf ) );
+		bvh8Leaf = (BVHTri4Leaf*)AlignedAlloc( leafsNeeded * sizeof( BVHTri4Leaf ) );
 		allocatedNodes = spaceNeeded, allocatedLeafs = leafsNeeded;
 	}
 	CopyBasePropertiesFrom( bvh8 );
@@ -4363,7 +4583,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 			{
 				// emit leaf node: group of up to 4 triangles in AoS format.
 				((uint32_t*)&newNode.child8)[cidx] = newLeafPtr + ((child.triCount - 1) << 29) + LEAF_BIT;
-				BVHLeaf& leaf = bvh8Leaf[newLeafPtr++];
+				BVHTri4Leaf& leaf = bvh8Leaf[newLeafPtr++];
 				for (uint32_t l = 0; l < 4; l++)
 				{
 					uint32_t primIdx = bvh8.bvh.primIdx[child.firstTri + tinybvh_min( l, child.triCount - 1u )];
@@ -5823,6 +6043,183 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 
 #ifdef BVH_USEAVX2
 
+ALIGNED( 64 ) static const uint32_t idxLUT4[16] = { 0, 0, 1, 256, 2, 512, 513, 131328, 3, 768, 769, 196864, 770, 197120, 197121, 50462976 };
+
+int32_t BVH4_AVX2::Intersect( Ray& ray ) const
+{
+	ALIGNED( 64 ) uint32_t nodeStack[64];
+	ALIGNED( 64 ) float distStack[64];
+	__m128 ox4 = _mm_set1_ps( ray.O.x ), rdx4 = _mm_set1_ps( ray.rD.x );
+	__m128 oy4 = _mm_set1_ps( ray.O.y ), rdy4 = _mm_set1_ps( ray.rD.y );
+	__m128 oz4 = _mm_set1_ps( ray.O.z ), rdz4 = _mm_set1_ps( ray.rD.z );
+	__m128 t4 = _mm_set1_ps( ray.hit.t );
+	const __m128i signShift4 = _mm_set1_epi32( (ray.D.x > 0 ? 2 : 0) + (ray.D.y > 0 ? 4 : 0) + (ray.D.z > 0 ? 6 : 0) );
+	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
+	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), one4 = _mm_set1_ps( 1.0f );
+	const __m128 zero4 = _mm_setzero_ps();
+	uint32_t stackPtr = 0, nodeIdx = 0, steps = 0;
+	while (1)
+	{
+		steps++;
+		if (!(nodeIdx >> 31)) // top bit: leaf flag
+		{
+			const BVHNode& n = bvh4Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
+			const __m128i index = _mm_srlv_epi32( n.perm4, signShift4 );
+			__m128i c4 = n.child4;
+			const __m128 tx1 = _mm_mul_ps( _mm_sub_ps( n.xmin4, ox4 ), rdx4 );
+			const __m128 tx2 = _mm_mul_ps( _mm_sub_ps( n.xmax4, ox4 ), rdx4 );
+			const __m128 ty1 = _mm_mul_ps( _mm_sub_ps( n.ymin4, oy4 ), rdy4 );
+			const __m128 ty2 = _mm_mul_ps( _mm_sub_ps( n.ymax4, oy4 ), rdy4 );
+			const __m128 tz1 = _mm_mul_ps( _mm_sub_ps( n.zmin4, oz4 ), rdz4 );
+			const __m128 tz2 = _mm_mul_ps( _mm_sub_ps( n.zmax4, oz4 ), rdz4 );
+			const __m128 txMin = _mm_min_ps( tx1, tx2 ), txMax = _mm_max_ps( tx1, tx2 );
+			const __m128 tyMin = _mm_min_ps( ty1, ty2 ), tyMax = _mm_max_ps( ty1, ty2 );
+			const __m128 tzMin = _mm_min_ps( tz1, tz2 ), tzMax = _mm_max_ps( tz1, tz2 );
+			__m128 tmin = _mm_max_ps( _mm_max_ps( _mm_max_ps( zero4, txMin ), tyMin ), tzMin );
+			__m128 tmax = _mm_min_ps( _mm_min_ps( _mm_min_ps( txMax, t4 ), tyMax ), tzMax );
+			tmin = _mm_permutevar_ps( tmin, index );
+			tmax = _mm_permutevar_ps( tmax, index );
+			const uint32_t mask = _mm_movemask_ps( _mm_cmple_ps( tmin, tmax ) );
+			const uint32_t lutidx = idxLUT4[mask];
+			const uint32_t validNodes = __popc( mask );
+			if (mask > 0)
+			{
+				c4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( c4 ), index ) );
+				const __m128i cpi = _mm_cvtepu8_epi32( _mm_cvtsi64_si128( lutidx ) );
+				const __m128i child4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( c4 ), cpi ) );
+				const __m128 dist4 = _mm_permutevar_ps( tmin, cpi );
+				_mm_storeu_si128( (__m128i*)(nodeStack + stackPtr), child4 );
+				_mm_storeu_ps( (float*)(distStack + stackPtr), dist4 );
+				stackPtr += validNodes;
+			}
+		}
+		else
+		{
+			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
+			const BVHTri4Leaf& leaf = bvh4Leaf[nodeIdx & 0x1fffffff];
+			const __m128 hx4 = _mm_sub_ps( _mm_mul_ps( dy4, leaf.e2z4 ), _mm_mul_ps( dz4, leaf.e2y4 ) );
+			const __m128 hy4 = _mm_sub_ps( _mm_mul_ps( dz4, leaf.e2x4 ), _mm_mul_ps( dx4, leaf.e2z4 ) );
+			const __m128 hz4 = _mm_sub_ps( _mm_mul_ps( dx4, leaf.e2y4 ), _mm_mul_ps( dy4, leaf.e2x4 ) );
+			const __m128 sx4 = _mm_sub_ps( ox4, leaf.v0x4 );
+			const __m128 sy4 = _mm_sub_ps( oy4, leaf.v0y4 );
+			const __m128 sz4 = _mm_sub_ps( oz4, leaf.v0z4 );
+			const __m128 det4 = _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e1x4, hx4 ), _mm_mul_ps( leaf.e1y4, hy4 ) ), _mm_mul_ps( leaf.e1z4, hz4 ) );
+			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
+			const __m128 inv_det4 = _mm_div_ps( one4, det4 );
+			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
+			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf.e1y4 ), _mm_mul_ps( sy4, leaf.e1x4 ) );
+			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf.e1z4 ), _mm_mul_ps( sz4, leaf.e1y4 ) );
+			const __m128 qy4 = _mm_sub_ps( _mm_mul_ps( sz4, leaf.e1x4 ), _mm_mul_ps( sx4, leaf.e1z4 ) );
+			const __m128 v4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( dx4, qx4 ), _mm_mul_ps( dy4, qy4 ) ), _mm_mul_ps( dz4, qz4 ) ), inv_det4 );
+			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, _mm_set1_ps( 1.0f ) ) );
+			const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), _mm_set1_ps( 1.0f ) ) );
+			const __m128 ta4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e2x4, qx4 ), _mm_mul_ps( leaf.e2y4, qy4 ) ), _mm_mul_ps( leaf.e2z4, qz4 ) ), inv_det4 );
+			const __m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
+			if (_mm_movemask_ps( combined ))
+			{
+				const __m128 dist4 = _mm_blendv_ps( _mm_set1_ps( 1e30f ), ta4, combined );
+				// compute broadcasted horizontal minimum of dist4
+				const __m128 a = _mm_min_ps( dist4, _mm_shuffle_ps( dist4, dist4, _MM_SHUFFLE( 2, 1, 0, 3 ) ) );
+				const __m128 c = _mm_min_ps( a, _mm_shuffle_ps( a, a, _MM_SHUFFLE( 1, 0, 3, 2 ) ) );
+				const uint32_t lane = __bfind( _mm_movemask_ps( _mm_cmpeq_ps( c, dist4 ) ) );
+				// update hit record
+				const __m128 _d4 = dist4;
+				const float t = ((float*)&_d4)[lane];
+				if (t < ray.hit.t)
+				{
+					const __m128 _u4 = u4, _v4 = v4;
+					ray.hit.t = t, ray.hit.u = ((float*)&_u4)[lane], ray.hit.v = ((float*)&_v4)[lane];
+				#if INST_IDX_BITS == 32
+					ray.hit.prim = leaf.primIdx[lane];
+					ray.hit.inst = ray.instIdx;
+				#else
+					ray.hit.prim = leaf.primIdx[lane] + ray.instIdx;
+				#endif
+					t4 = _mm_set1_ps( t );
+					// compress stack
+					uint32_t outStackPtr = 0;
+					for (uint32_t i = 0; i < stackPtr; i += 8)
+					{
+						__m128i node4 = _mm_load_si128( (__m128i*)(nodeStack + i) );
+						__m128 dist4 = _mm_load_ps( (float*)(distStack + i) );
+						const uint32_t mask = _mm_movemask_ps( _mm_cmplt_ps( dist4, t4 ) );
+						const __m128i cpi = _mm_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT4[mask] ) );
+						dist4 = _mm_permutevar_ps( dist4, cpi ), node4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( node4 ), cpi ) );
+						_mm_storeu_ps( (float*)(distStack + outStackPtr), dist4 );
+						_mm_storeu_si128( (__m128i*)(nodeStack + outStackPtr), node4 );
+						const uint32_t numItems = tinybvh_min( 8u, stackPtr - i ), validMask = (1 << numItems) - 1;
+						outStackPtr += __popc( mask & validMask );
+					}
+					stackPtr = outStackPtr;
+				}
+			}
+		}
+		if (!stackPtr) break;
+		nodeIdx = nodeStack[--stackPtr];
+	}
+	return steps;
+}
+
+bool BVH4_AVX2::IsOccluded( const Ray& ray ) const
+{
+	ALIGNED( 64 ) uint32_t nodeStack[128];
+	const __m128 ox4 = _mm_set1_ps( ray.O.x ), oy4 = _mm_set1_ps( ray.O.y ), oz4 = _mm_set1_ps( ray.O.z );
+	const __m128 rdx4 = _mm_set1_ps( ray.rD.x ), rdy4 = _mm_set1_ps( ray.rD.y ), rdz4 = _mm_set1_ps( ray.rD.z );
+	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
+	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), t4 = _mm_set1_ps( ray.hit.t );
+	const __m128 one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
+	uint32_t stackPtr = 0, nodeIdx = 0;
+	while (1)
+	{
+		if (!(nodeIdx >> 31)) // top bit: leaf flag
+		{
+			const BVHNode& n = bvh4Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
+			const __m128i c4 = n.child4;
+			const __m128 tx1 = _mm_mul_ps( _mm_sub_ps( n.xmin4, ox4 ), rdx4 ), tx2 = _mm_mul_ps( _mm_sub_ps( n.xmax4, ox4 ), rdx4 );
+			const __m128 ty1 = _mm_mul_ps( _mm_sub_ps( n.ymin4, oy4 ), rdy4 ), ty2 = _mm_mul_ps( _mm_sub_ps( n.ymax4, oy4 ), rdy4 );
+			const __m128 tz1 = _mm_mul_ps( _mm_sub_ps( n.zmin4, oz4 ), rdz4 ), tz2 = _mm_mul_ps( _mm_sub_ps( n.zmax4, oz4 ), rdz4 );
+			const __m128 txMin = _mm_min_ps( tx1, tx2 ), txMax = _mm_max_ps( tx1, tx2 ), tyMin = _mm_min_ps( ty1, ty2 );
+			const __m128 tyMax = _mm_max_ps( ty1, ty2 ), tzMin = _mm_min_ps( tz1, tz2 ), tzMax = _mm_max_ps( tz1, tz2 );
+			const __m128 tmin = _mm_max_ps( _mm_max_ps( _mm_max_ps( _mm_setzero_ps(), txMin ), tyMin ), tzMin );
+			const __m128 tmax = _mm_min_ps( _mm_min_ps( _mm_min_ps( txMax, t4 ), tyMax ), tzMax );
+			const uint32_t mask = _mm_movemask_ps( _mm_cmp_ps( tmin, tmax, _CMP_LE_OQ ) );
+			if (mask)
+			{
+				const uint32_t lutidx = idxLUT4[mask];
+				const uint32_t validNodes = __popc( mask );
+				const __m128i cpi = _mm_cvtepu8_epi32( _mm_cvtsi32_si128( lutidx ) );
+				const __m128i child4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( c4 ), cpi ) );
+				_mm_storeu_si128( (__m128i*)(nodeStack + stackPtr), child4 );
+				stackPtr += validNodes;
+			}
+		}
+		else
+		{
+			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
+			const BVHTri4Leaf& leaf = bvh4Leaf[nodeIdx & 0x1fffffff];
+			const __m128 hx4 = _mm_sub_ps( _mm_mul_ps( dy4, leaf.e2z4 ), _mm_mul_ps( dz4, leaf.e2y4 ) );
+			const __m128 hy4 = _mm_sub_ps( _mm_mul_ps( dz4, leaf.e2x4 ), _mm_mul_ps( dx4, leaf.e2z4 ) );
+			const __m128 hz4 = _mm_sub_ps( _mm_mul_ps( dx4, leaf.e2y4 ), _mm_mul_ps( dy4, leaf.e2x4 ) );
+			const __m128 sx4 = _mm_sub_ps( ox4, leaf.v0x4 ), sy4 = _mm_sub_ps( oy4, leaf.v0y4 ), sz4 = _mm_sub_ps( oz4, leaf.v0z4 );
+			const __m128 det4 = _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e1x4, hx4 ), _mm_mul_ps( leaf.e1y4, hy4 ) ), _mm_mul_ps( leaf.e1z4, hz4 ) );
+			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) ), inv_det4 = _mm_div_ps( one4, det4 );
+			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
+			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf.e1z4 ), _mm_mul_ps( sz4, leaf.e1y4 ) );
+			const __m128 qy4 = _mm_sub_ps( _mm_mul_ps( sz4, leaf.e1x4 ), _mm_mul_ps( sx4, leaf.e1z4 ) );
+			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf.e1y4 ), _mm_mul_ps( sy4, leaf.e1x4 ) );
+			const __m128 v4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( dx4, qx4 ), _mm_mul_ps( dy4, qy4 ) ), _mm_mul_ps( dz4, qz4 ) ), inv_det4 );
+			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, one4 ) );
+			const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 ) );
+			const __m128 ta4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e2x4, qx4 ), _mm_mul_ps( leaf.e2y4, qy4 ) ), _mm_mul_ps( leaf.e2z4, qz4 ) ), inv_det4 );
+			const __m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) ), _mm_cmplt_ps( ta4, t4 ) );
+			if (_mm_movemask_ps( combined )) return true;
+		}
+		if (!stackPtr) break;
+		nodeIdx = nodeStack[--stackPtr];
+	}
+	return false;
+}
+
 ALIGNED( 64 ) static const uint64_t idxLUT[256] = {
 	0,0,1,256,2,512,513,131328,3,768,769,196864,770,197120,197121,50462976,4,1024,1025,262400,1026,262656,262657,67240192,
 	1027,262912,262913,67305728,262914,67305984,67305985,17230332160,5,1280,1281,327936,1282,328192,328193,84017408,1283,
@@ -5860,7 +6257,6 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 	const __m256i mantissa8 = _mm256_set1_epi32( 255 << 15 );
 	const __m256i exponent8 = _mm256_set1_epi32( 0x3f800000 );
 #endif
-	const __m256i permMask8 = _mm256_set1_epi32( 7 );
 	const __m256i signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
 	__m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), one4 = _mm_set1_ps( 1.0f );
@@ -5872,7 +6268,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 		{
 		#ifdef BVH8_CPU_COMPACT
 			const BVHNodeCompact& n = bvh8Small[nodeIdx & 0x1fffffff /* bits 0..28 */];
-			const __m256i index = _mm256_and_si256( _mm256_srlv_epi32( n.perm8, signShift8 ), permMask8 );
+			const __m256i index = _mm256_srlv_epi32( n.perm8, signShift8 );
 			__m256i c8 = n.child8;
 			const __m256i cbminmax8 = n.cbminmaxyz8;
 			const __m256i bminx8i = _mm256_or_si256( exponent8, _mm256_slli_epi32( _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( n.cbminx8 ) ), 15 ) );
@@ -5917,7 +6313,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 			}
 		#else
 			const BVHNode& n = bvh8Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
-			const __m256i index = _mm256_and_si256( _mm256_srlv_epi32( n.perm8, signShift8 ), permMask8 );
+			const __m256i index = _mm256_srlv_epi32( n.perm8, signShift8 );
 			__m256i c8 = n.child8;
 			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, ox8 ), rdx8 );
 			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( n.xmax8, ox8 ), rdx8 );
@@ -5951,7 +6347,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 		else
 		{
 			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
-			const BVHLeaf& leaf = bvh8Leaf[nodeIdx & 0x1fffffff];
+			const BVHTri4Leaf& leaf = bvh8Leaf[nodeIdx & 0x1fffffff];
 			const __m128 hx4 = _mm_sub_ps( _mm_mul_ps( dy4, leaf.e2z4 ), _mm_mul_ps( dz4, leaf.e2y4 ) );
 			const __m128 hy4 = _mm_sub_ps( _mm_mul_ps( dz4, leaf.e2x4 ), _mm_mul_ps( dx4, leaf.e2z4 ) );
 			const __m128 hz4 = _mm_sub_ps( _mm_mul_ps( dx4, leaf.e2y4 ), _mm_mul_ps( dy4, leaf.e2x4 ) );
@@ -5960,7 +6356,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 			const __m128 sz4 = _mm_sub_ps( _mm256_extractf128_ps( oz8, 0 ), leaf.v0z4 );
 			const __m128 det4 = _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e1x4, hx4 ), _mm_mul_ps( leaf.e1y4, hy4 ) ), _mm_mul_ps( leaf.e1z4, hz4 ) );
 			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
-			const __m128 inv_det4 = _mm_div_ps( one4, det4 ); // _mm_rcp_ps( det4 );
+			const __m128 inv_det4 = _mm_div_ps( one4, det4 );
 			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
 			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf.e1y4 ), _mm_mul_ps( sy4, leaf.e1x4 ) );
 			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf.e1z4 ), _mm_mul_ps( sz4, leaf.e1y4 ) );
@@ -6105,7 +6501,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 		else
 		{
 			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
-			const BVHLeaf& leaf = bvh8Leaf[nodeIdx & 0x1fffffff];
+			const BVHTri4Leaf& leaf = bvh8Leaf[nodeIdx & 0x1fffffff];
 			const __m128 hx4 = _mm_sub_ps( _mm_mul_ps( dy4, leaf.e2z4 ), _mm_mul_ps( dz4, leaf.e2y4 ) );
 			const __m128 hy4 = _mm_sub_ps( _mm_mul_ps( dz4, leaf.e2x4 ), _mm_mul_ps( dx4, leaf.e2z4 ) );
 			const __m128 hz4 = _mm_sub_ps( _mm_mul_ps( dx4, leaf.e2y4 ), _mm_mul_ps( dy4, leaf.e2x4 ) );
@@ -6114,7 +6510,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 			const __m128 sz4 = _mm_sub_ps( _mm256_extractf128_ps( oz8, 0 ), leaf.v0z4 );
 			const __m128 det4 = _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf.e1x4, hx4 ), _mm_mul_ps( leaf.e1y4, hy4 ) ), _mm_mul_ps( leaf.e1z4, hz4 ) );
 			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
-			const __m128 inv_det4 = _mm_div_ps( one4, det4 ); // _mm_rcp_ps( det4 );
+			const __m128 inv_det4 = _mm_div_ps( one4, det4 );
 			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
 			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf.e1z4 ), _mm_mul_ps( sz4, leaf.e1y4 ) );
 			const __m128 qy4 = _mm_sub_ps( _mm_mul_ps( sz4, leaf.e1x4 ), _mm_mul_ps( sx4, leaf.e1z4 ) );
@@ -7523,7 +7919,7 @@ void BVHBase::IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t 
 		ray.hit.prim = idx + ray.instIdx;
 	#endif
 	}
-}
+	}
 
 // IntersectTriIndexed
 void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const
@@ -7554,7 +7950,7 @@ void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const ui
 		ray.hit.prim = idx + ray.instIdx;
 	#endif
 	}
-}
+	}
 
 // TriOccludes
 bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const
