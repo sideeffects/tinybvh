@@ -65,7 +65,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx2 -mfma -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.4.1
+# Version 1.4.2
 
 Version 1.4.0 introduces a new BVH layout for fast single-ray traversal on CPU: BVH8_CPU. This supersedes the previous fastest scheme, BVH4_CPU. 
 
@@ -125,6 +125,7 @@ This version of the library includes the following functionality:
 * Fast AVX2 ray tracing: Implements the 2017 paper by [Fuetterling et al.](https://web.cs.ucdavis.edu/~hamann/FuetterlingLojewskiPfreundtHamannEbertHPG2017PaperFinal06222017.pdf)
 * Fast triangle intersection: Implements the 2016 paper by [Baldwin & Weber](https://jcgt.org/published/0005/03/03/paper.pdf)
 * OpenCL traversal example code: Aila & Laine, 4-way quantized, CWBVH
+* OpenCL support for MacOS, by [wuyakuma](https://github.com/wuyakuma)
 * Support for WASM / EMSCRIPTEN, g++, clang, Visual Studio
 * Optional user-defined memory allocation, by [Thierry Cantenot](https://github.com/tcantenot)
 * Vertex array can now have a custom stride, by [David Peicho](https://github.com/DavidPeicho)
@@ -142,6 +143,9 @@ Plans, ordered by priority:
 * Speed improvements:
   * Faster optimizer for AVX-capable CPUs
   * Improve speed of SBVH builder
+* Features & outstanding issues:
+  * 'Watertight' triangle intersection option
+  * Load/save/Optimize/Refit for BVH8_CPU
 * Demo of tinybvh on GPU using other apis:
   * Ray tracing in pure OpenGL
   * Ray tracing in pure DirectX
