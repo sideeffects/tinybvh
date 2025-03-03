@@ -964,7 +964,7 @@ bool Kernel::InitCL()
 			free( extensions );
 			string mustHave[] = {
 #if defined(__APPLE__) && defined(__MACH__)
-                "cl_APPLE_gl_sharing",
+				"cl_APPLE_gl_sharing",
 #else
 				"cl_khr_gl_sharing",
 #endif
@@ -1073,9 +1073,9 @@ bool Kernel::InitCL()
 		isIntel = true;
 	}
 	else if (strstr( d, "apple" ))
-    {
-        isApple = true;
-    }
+	{
+		isApple = true;
+	}
 	else
 	{
 		isOther = true;
@@ -1102,22 +1102,22 @@ bool Kernel::InitCL()
 		printf( "Intel.\n" );
 	}
 	else if (isApple)
-    {
-        printf( "Apple.\n" );
-    }
+	{
+		printf( "Apple.\n" );
+	}
 	else
 	{
 		printf( "identification failed.\n" );
 	}
 	// create a command-queue
 #if defined(__APPLE__) && defined(__MACH__)
-    // Cannot find symbol for _clCreateCommandQueueWithProperties on APPLE
-    cl_command_queue_properties props = CL_QUEUE_PROFILING_ENABLE;
-    queue = clCreateCommandQueue( context, devices[deviceUsed], props, &error );
-    if (!CHECKCL( error )) return false;
-    // create a second command queue for asynchronous copies
-    queue2 = clCreateCommandQueue( context, devices[deviceUsed], props, &error );
-    if (!CHECKCL( error )) return false;
+	// Cannot find symbol for _clCreateCommandQueueWithProperties on APPLE
+	cl_command_queue_properties props = CL_QUEUE_PROFILING_ENABLE;
+	queue = clCreateCommandQueue( context, devices[deviceUsed], props, &error );
+	if (!CHECKCL( error )) return false;
+	// create a second command queue for asynchronous copies
+	queue2 = clCreateCommandQueue( context, devices[deviceUsed], props, &error );
+	if (!CHECKCL( error )) return false;
 #else
 	cl_queue_properties props[] = { CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0 };
 	queue = clCreateCommandQueueWithProperties( context, devices[deviceUsed], props, &error );
