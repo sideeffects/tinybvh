@@ -1137,9 +1137,9 @@ public:
 	struct BVHNodeCompact
 	{
 		// Novel 8-way BVH node, with quantized child node bounds, similar to CWBVH.
+		uint64_t cbminx8;			// 8, stores aabbMin.x for 8 children, quantized.
 		float bminx, bminy, bminz;	// 12, actually: bmin - ext.
 		float bextx, bexty, bextz;	// 12, extend of the node, scaled conversatively.
-		uint64_t cbminx8;			// 8, stores aabbMin.x for 8 children, quantized.
 		__m256i cbminmaxyz8;		// 32, stores cbminy8, cbminz8, cbmaxy8, cbmaxz8
 		__m256i child8, perm8;		// 64, includes cbmaxx8<<24 in perm8.
 	};
@@ -4324,10 +4324,6 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 	{
 		const MBVH<8>::MBVHNode& orig = bvh8.mbvhNode[nodeIdx];
 		BVHNode& newNode = bvh8Node[newAlt8Ptr++];
-		if (newAlt8Ptr == 4940)
-		{
-			int w= 0;
-		}
 		memset( &newNode, 0, sizeof( BVHNode ) );
 		// calculate the permutation offsets for the node
 		for (uint32_t q = 0; q < 8; q++)
@@ -5853,11 +5849,14 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 	__m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
 	__m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
 	__m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
-	__m256 t8 = _mm256_set1_ps( ray.hit.t ), zero8 = _mm256_setzero_ps();
-	const __m256i permMask8 = _mm256_set1_epi32( 7 );
-	const __m256i signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
+	__m256 t8 = _mm256_set1_ps( ray.hit.t );
+#ifdef BVH8_CPU_COMPACT
+	const __m256 zero8 = _mm256_setzero_ps();
 	const __m256i mantissa8 = _mm256_set1_epi32( 255 << 15 );
 	const __m256i exponent8 = _mm256_set1_epi32( 0x3f800000 );
+#endif
+	const __m256i permMask8 = _mm256_set1_epi32( 7 );
+	const __m256i signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
 	__m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), one4 = _mm_set1_ps( 1.0f );
 	uint32_t stackPtr = 0, nodeIdx = 0, steps = 0;
@@ -6017,9 +6016,12 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 	__m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
 	__m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
 	__m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
-	const __m256 t8 = _mm256_set1_ps( ray.hit.t ), zero8 = _mm256_setzero_ps();
+	const __m256 t8 = _mm256_set1_ps( ray.hit.t );
+#ifdef BVH8_CPU_COMPACT
+	const __m256 zero8 = _mm256_setzero_ps();
 	const __m256i mantissa8 = _mm256_set1_epi32( 255 << 15 );
 	const __m256i exponent8 = _mm256_set1_epi32( 0x3f800000 );
+#endif
 	__m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), t4 = _mm_set1_ps( ray.hit.t );
 	const __m128 one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
@@ -6031,9 +6033,10 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 		#ifdef BVH8_CPU_COMPACT
 			const BVHNodeCompact& n = bvh8Small[nodeIdx & 0x1fffffff /* bits 0..28 */];
 			const __m256i c8 = n.child8;
+			const __m256i perm8 = n.perm8;
 			const __m256i cbminmax8 = n.cbminmaxyz8;
 			const __m256i bminx8i = _mm256_or_si256( exponent8, _mm256_slli_epi32( _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( n.cbminx8 ) ), 15 ) );
-			const __m256i bmaxx8i = _mm256_or_si256( exponent8, _mm256_and_si256( _mm256_srli_epi32( n.perm8, 9 ), mantissa8 ) );
+			const __m256i bmaxx8i = _mm256_or_si256( exponent8, _mm256_and_si256( _mm256_srli_epi32( perm8, 9 ), mantissa8 ) );
 			const __m256i bminy8i = _mm256_or_si256( exponent8, _mm256_and_si256( _mm256_srli_epi32( cbminmax8, 9 ), mantissa8 ) );
 			const __m256i bmaxy8i = _mm256_or_si256( exponent8, _mm256_and_si256( _mm256_srli_epi32( cbminmax8, 1 ), mantissa8 ) );
 			const __m256i bminz8i = _mm256_or_si256( exponent8, _mm256_and_si256( _mm256_slli_epi32( cbminmax8, 7 ), mantissa8 ) );
