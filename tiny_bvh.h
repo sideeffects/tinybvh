@@ -1,7 +1,7 @@
 ﻿/*
 The MIT License (MIT)
 
-Copyright (c) 2024, Jacco Bikker / Breda University of Applied Sciences.
+Copyright (c) 2024-2025, Jacco Bikker / Breda University of Applied Sciences.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -170,7 +170,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	4
-#define TINY_BVH_VERSION_SUB	1
+#define TINY_BVH_VERSION_SUB	2
 
 // ============================================================================
 //
