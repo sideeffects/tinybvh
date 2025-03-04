@@ -4002,7 +4002,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 	//           Interior: 32 bits for position of child node.
 	// Triangle data ('by value') immediately follows each leaf node.
 	uint32_t blocksNeeded = compact ? (bvh4.usedNodes * 4) : (bvh4.allocatedNodes * 4); // here, 'block' is 16 bytes.
-	blocksNeeded += 6 * triCount; // this layout stores tris in the same buffer.
+	blocksNeeded += 6 * bvh4.triCount; // this layout stores tris in the same buffer.
 	if (allocatedBlocks < blocksNeeded)
 	{
 		AlignedFree( bvh4Data );
