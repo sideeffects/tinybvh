@@ -225,7 +225,11 @@ inline void free64( void* ptr, void* = nullptr ) { _mm_free( ptr ); }
 namespace tinybvh {
 inline void* malloc64( size_t size, void* = nullptr )
 {
+#ifdef __GNUC__
+	return size == 0 ? 0 : _aligned_malloc( 64, make_multiple_64( size ) );
+#else
 	return size == 0 ? 0 : aligned_alloc( 64, make_multiple_64( size ) );
+#endif
 }
 inline void free64( void* ptr, void* = nullptr ) { free( ptr ); }
 }
@@ -517,6 +521,9 @@ inline uint32x4_t SIMD_SETRVECU( uint32_t x, uint32_t y, uint32_t z, uint32_t w 
 }
 #else
 typedef bvhvec4 SIMDVEC4;
+typedef struct { int x, y, z, w; } SIMDIVEC4;
+typedef struct { float v0, v1, v2, v3, v4, v5, v6, v7; } SIMDVEC8;
+typedef struct { int v0, v1, v2, v3, v4, v5, v6, v7; } SIMDIVEC8;
 #define SIMD_SETVEC(a,b,c,d) bvhvec4( d, c, b, a )
 #define SIMD_SETRVEC(a,b,c,d) bvhvec4( a, b, c, d )
 #endif
@@ -1134,6 +1141,8 @@ struct BVHTri4Leaf
 	SIMDVEC4 dummy0, dummy1;	// pad to 3 full cachelines.
 };
 
+// #define WIVE4WIDE
+
 class BVH4_AVX2 : public BVHBase
 {
 public:
@@ -1142,9 +1151,16 @@ public:
 	{
 		// 4-way BVH node, optimized for CPU rendering.
 		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units", Fuetterling et al., 2017
+	#ifdef WIVE4WIDE
+		// under construction
+		SIMDVEC8 xminmax8;
+		SIMDVEC8 yminmax8;
+		SIMDVEC8 zminmax8;
+	#else
 		SIMDVEC4 xmin4, xmax4;
 		SIMDVEC4 ymin4, ymax4;
 		SIMDVEC4 zmin4, zmax4;
+	#endif
 		SIMDIVEC4 child4; // bits: 31..29 = flags, 28..0: node index.
 		SIMDIVEC4 perm4;
 	};
@@ -4037,7 +4053,7 @@ void BVH4_GPU::ConvertFrom( const MBVH<4>& original, bool compact )
 	//           Interior: 32 bits for position of child node.
 	// Triangle data ('by value') immediately follows each leaf node.
 	uint32_t blocksNeeded = compact ? (bvh4.usedNodes * 4) : (bvh4.allocatedNodes * 4); // here, 'block' is 16 bytes.
-	blocksNeeded += 6 * triCount; // this layout stores tris in the same buffer.
+	blocksNeeded += 6 * bvh4.triCount; // this layout stores tris in the same buffer.
 	if (allocatedBlocks < blocksNeeded)
 	{
 		AlignedFree( bvh4Data );
@@ -6168,6 +6184,16 @@ bool BVH4_AVX2::IsOccluded( const Ray& ray ) const
 	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), t4 = _mm_set1_ps( ray.hit.t );
 	const __m128 one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
+#ifdef WIVE4WIDE
+	// under construction
+	const __m256i boundsXPerm8 = ray.D.x > 0 ? _mm256_setr_epi32( 0, 1, 2, 3, 4, 5, 6, 7 ) : _mm256_setr_epi32( 1, 0, 3, 2, 5, 4, 7, 6 );
+	const __m256i boundsYPerm8 = ray.D.y > 0 ? _mm256_setr_epi32( 0, 1, 2, 3, 4, 5, 6, 7 ) : _mm256_setr_epi32( 1, 0, 3, 2, 5, 4, 7, 6 );
+	const __m256i boundsZPerm8 = ray.D.z > 0 ? _mm256_setr_epi32( 0, 1, 2, 3, 4, 5, 6, 7 ) : _mm256_setr_epi32( 1, 0, 3, 2, 5, 4, 7, 6 );
+	const __m256 ox8 = _mm256_set1_ps( ray.O.x ), oy8 = _mm256_set1_ps( ray.O.y ), oz8 = _mm256_set1_ps( ray.O.z );
+	const __m256 rdx8 = _mm256_set_ps( ray.rD.x, -ray.rD.x, ray.rD.x, -ray.rD.x, ray.rD.x, -ray.rD.x, ray.rD.x, -ray.rD.x );
+	const __m256 rdy8 = _mm256_set_ps( ray.rD.y, -ray.rD.y, ray.rD.y, -ray.rD.y, ray.rD.y, -ray.rD.y, ray.rD.y, -ray.rD.y );
+	const __m256 rdz8 = _mm256_set_ps( ray.rD.z, -ray.rD.z, ray.rD.z, -ray.rD.z, ray.rD.z, -ray.rD.z, ray.rD.z, -ray.rD.z );
+#endif
 	uint32_t stackPtr = 0, nodeIdx = 0;
 	while (1)
 	{
@@ -6175,6 +6201,26 @@ bool BVH4_AVX2::IsOccluded( const Ray& ray ) const
 		{
 			const BVHNode& n = bvh4Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
 			const __m128i c4 = n.child4;
+		#ifdef WIVE4WIDE
+			// under construction
+			const __m256 tx8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.xminmax8, boundsXPerm8 ), ox8 ), rdx8 );
+			const __m256 ty8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.yminmax8, boundsYPerm8 ), oy8 ), rdy8 );
+			const __m256 tz8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.zminmax8, boundsZPerm8 ), oz8 ), rdz8 );
+			const __m256 t8 = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx8, ty8 ), tz8 ), _mm256_setzero_ps() ), t8 );
+			const __m256 tmax8 = _mm256_permutevar8x32_ps( t8, _mm256_setr_epi32( 1, 0, 3, 2, 5, 4, 7, 6 ) ); // TODO: 64-bit rotate?
+			const __m256 tmin8 = _mm256_mul_ps( t8, _mm256_setr_ps( 1, -1, 1, -1, 1, -1, 1, -1 ) ); // TODO: use xor
+			const uint32_t mask = _mm256_movemask_ps( _mm256_cmp_ps( tmin8, tmax8, _CMP_LE_OQ ) ); // TODO: use 64-bit int comparison. :)
+			// TODO: lines 16, 17 of the algorithm in Listing 2.
+			if (mask)
+			{
+				const uint32_t lutidx = idxLUT4[mask];
+				const uint32_t validNodes = __popc( mask );
+				const __m128i cpi = _mm_cvtepu8_epi32( _mm_cvtsi32_si128( lutidx ) );
+				const __m128i child4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( c4 ), cpi ) );
+				_mm_storeu_si128( (__m128i*)(nodeStack + stackPtr), child4 );
+				stackPtr += validNodes;
+			}
+		#else
 			const __m128 tx1 = _mm_mul_ps( _mm_sub_ps( n.xmin4, ox4 ), rdx4 ), tx2 = _mm_mul_ps( _mm_sub_ps( n.xmax4, ox4 ), rdx4 );
 			const __m128 ty1 = _mm_mul_ps( _mm_sub_ps( n.ymin4, oy4 ), rdy4 ), ty2 = _mm_mul_ps( _mm_sub_ps( n.ymax4, oy4 ), rdy4 );
 			const __m128 tz1 = _mm_mul_ps( _mm_sub_ps( n.zmin4, oz4 ), rdz4 ), tz2 = _mm_mul_ps( _mm_sub_ps( n.zmax4, oz4 ), rdz4 );
@@ -6192,6 +6238,7 @@ bool BVH4_AVX2::IsOccluded( const Ray& ray ) const
 				_mm_storeu_si128( (__m128i*)(nodeStack + stackPtr), child4 );
 				stackPtr += validNodes;
 			}
+		#endif
 		}
 		else
 		{
