@@ -225,7 +225,7 @@ inline void free64( void* ptr, void* = nullptr ) { _mm_free( ptr ); }
 namespace tinybvh {
 inline void* malloc64( size_t size, void* = nullptr )
 {
-#ifdef __GNUC__
+#if defined __GNUC__ && !defined __APPLE__
 	return size == 0 ? 0 : _aligned_malloc( 64, make_multiple_64( size ) );
 #else
 	return size == 0 ? 0 : aligned_alloc( 64, make_multiple_64( size ) );
