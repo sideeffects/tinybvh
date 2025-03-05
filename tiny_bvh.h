@@ -2349,6 +2349,8 @@ void BVH::Refit( const uint32_t /* unused */ )
 	aabbMin = bvhNode[0].aabbMin, aabbMax = bvhNode[0].aabbMax;
 }
 
+#define FIX_COMBINE_LEAFS 1
+
 // CombineLeafs: Collapse subtrees if the summed leaf prim count does not
 // exceed the specified number. For BVH8_CPU construction.
 void BVH::CombineLeafs( const uint32_t primCount )
@@ -2373,8 +2375,13 @@ void BVH::CombineLeafs( const uint32_t primCount )
 			}
 			else
 			{
+#if FIX_COMBINE_LEAFS 
+				if (!left.isLeaf() && left.SurfaceArea() > 0) stack[stackPtr++] = node.leftFirst;
+				if (!right.isLeaf() && right.SurfaceArea() > 0) stack[stackPtr++] = node.leftFirst + 1;
+#else
 				if (!left.isLeaf()) stack[stackPtr++] = node.leftFirst;
 				if (!right.isLeaf()) stack[stackPtr++] = node.leftFirst + 1;
+#endif
 			}
 		}
 	}
