@@ -1141,28 +1141,20 @@ struct BVHTri4Leaf
 	SIMDVEC4 dummy0, dummy1;	// pad to 3 full cachelines.
 };
 
-// #define WIVE4WIDE
+#define WIVE4WIDE
 
 class BVH4_AVX2 : public BVHBase
 {
 public:
-	enum { INNER_BIT = 1 << 30, LEAF_BIT = 1 << 31 };
+	enum { LEAF_BIT = 1 << 31 };
 	struct BVHNode
 	{
 		// 4-way BVH node, optimized for CPU rendering.
 		// Based on: "Accelerated Single Ray Tracing for Wide Vector Units", Fuetterling et al., 2017
-	#ifdef WIVE4WIDE
-		// under construction
-		SIMDVEC8 xminmax8;
-		SIMDVEC8 yminmax8;
-		SIMDVEC8 zminmax8;
-	#else
-		SIMDVEC4 xmin4, xmax4;
-		SIMDVEC4 ymin4, ymax4;
-		SIMDVEC4 zmin4, zmax4;
-	#endif
-		SIMDIVEC4 child4; // bits: 31..29 = flags, 28..0: node index.
-		SIMDIVEC4 perm4;
+		SIMDVEC8 xmaxmin8;
+		SIMDVEC8 ymaxmin8;
+		SIMDVEC8 zmaxmin8;
+		SIMDIVEC8 sn8;
 	};
 	BVH4_AVX2( BVHContext ctx = {} ) { layout = LAYOUT_BVH4_AVX2; context = ctx; }
 	~BVH4_AVX2();
@@ -1190,7 +1182,7 @@ public:
 class BVH8_CPU : public BVHBase
 {
 public:
-	enum { INNER_BIT = 1 << 30, LEAF_BIT = 1 << 31 };
+	enum { LEAF_BIT = 1 << 31 };
 	struct BVHNode
 	{
 		// 8-way BVH node, optimized for CPU rendering.
@@ -2375,13 +2367,13 @@ void BVH::CombineLeafs( const uint32_t primCount )
 			}
 			else
 			{
-#if FIX_COMBINE_LEAFS 
+			#if FIX_COMBINE_LEAFS 
 				if (!left.isLeaf() && left.SurfaceArea() > 0) stack[stackPtr++] = node.leftFirst;
 				if (!right.isLeaf() && right.SurfaceArea() > 0) stack[stackPtr++] = node.leftFirst + 1;
-#else
+			#else
 				if (!left.isLeaf()) stack[stackPtr++] = node.leftFirst;
 				if (!right.isLeaf()) stack[stackPtr++] = node.leftFirst + 1;
-#endif
+			#endif
 			}
 		}
 	}
@@ -4405,23 +4397,23 @@ void BVH4_AVX2::ConvertFrom( const MBVH<4>& original, bool compact )
 			}
 			// apply sorting network - https://bertdobbelaere.github.io/sorting_networks.html#N4L5D3
 			SORT( 0, 2 ); SORT( 1, 3 ); SORT( 0, 1 ); SORT( 2, 3 ); SORT( 1, 2 );
-			for (int i = 0; i < 4; i++) ((uint32_t*)&newNode.perm4)[i] += (idist[i] & 3) << (q * 2);
+			for (int i = 0; i < 4; i++) ((uint32_t*)&newNode.sn8)[i * 2] += (idist[i] & 3) << (q * 2);
 		}
 		// fill remaining fields
 		int32_t cidx = 0;
 		for (int32_t i = 0; i < 4; i++) if (orig.child[i])
 		{
 			const MBVH<4>::MBVHNode& child = bvh4.mbvhNode[orig.child[i]];
-			((float*)&newNode.xmin4)[cidx] = child.aabbMin.x;
-			((float*)&newNode.ymin4)[cidx] = child.aabbMin.y;
-			((float*)&newNode.zmin4)[cidx] = child.aabbMin.z;
-			((float*)&newNode.xmax4)[cidx] = child.aabbMax.x;
-			((float*)&newNode.ymax4)[cidx] = child.aabbMax.y;
-			((float*)&newNode.zmax4)[cidx] = child.aabbMax.z;
+			( (float*)&newNode.xmaxmin8 )[cidx * 2 + 1] = child.aabbMin.x;
+			((float*)&newNode.ymaxmin8)[cidx * 2 + 1] = child.aabbMin.y;
+			((float*)&newNode.zmaxmin8)[cidx * 2 + 1] = child.aabbMin.z;
+			((float*)&newNode.xmaxmin8)[cidx * 2] = child.aabbMax.x;
+			((float*)&newNode.ymaxmin8)[cidx * 2] = child.aabbMax.y;
+			((float*)&newNode.zmaxmin8)[cidx * 2] = child.aabbMax.z;
 			if (child.isLeaf())
 			{
 				// emit leaf node: group of up to 4 triangles in AoS format.
-				((uint32_t*)&newNode.child4)[cidx] = newLeafPtr + ((child.triCount - 1) << 29) + LEAF_BIT;
+				((uint32_t*)&newNode.sn8)[cidx * 2 + 1] = newLeafPtr + ((child.triCount - 1) << 29) + LEAF_BIT;
 				BVHTri4Leaf& leaf = bvh4Leaf[newLeafPtr++];
 				for (uint32_t l = 0; l < 4; l++)
 				{
@@ -4442,7 +4434,7 @@ void BVH4_AVX2::ConvertFrom( const MBVH<4>& original, bool compact )
 			}
 			else
 			{
-				uint32_t* slot = (uint32_t*)&newNode.child4 + cidx;
+				uint32_t* slot = (uint32_t*)&newNode.sn8 + cidx * 2 + 1;
 				*slot = 1; // so we know there is a child
 				stack[stackPtr++] = (uint32_t)(slot - (uint32_t*)bvh4Node);
 				stack[stackPtr++] = orig.child[i];
@@ -4451,15 +4443,15 @@ void BVH4_AVX2::ConvertFrom( const MBVH<4>& original, bool compact )
 		}
 		for (; cidx < 4; cidx++)
 		{
-			((float*)&newNode.xmin4)[cidx] = 1e30f, ((float*)&newNode.xmax4)[cidx] = 1.00001e30f;
-			((float*)&newNode.ymin4)[cidx] = 1e30f, ((float*)&newNode.ymax4)[cidx] = 1.00001e30f;
-			((float*)&newNode.zmin4)[cidx] = 1e30f, ((float*)&newNode.zmax4)[cidx] = 1.00001e30f;
+			((float*)&newNode.xmaxmin8 )[cidx * 2 + 1] = 1e30f, ((float*)&newNode.xmaxmin8)[cidx * 2] = 1.00001e30f;
+			((float*)&newNode.ymaxmin8)[cidx * 2 + 1] = 1e30f, ((float*)&newNode.ymaxmin8)[cidx * 2] = 1.00001e30f;
+			((float*)&newNode.zmaxmin8)[cidx * 2 + 1] = 1e30f, ((float*)&newNode.zmaxmin8)[cidx * 2] = 1.00001e30f;
 		}
 		// pop next task
 		if (!stackPtr) break;
 		nodeIdx = stack[--stackPtr];
 		const uint32_t offset = stack[--stackPtr];
-		((uint32_t*)bvh4Node)[offset] = newAlt4Ptr + INNER_BIT;
+		((uint32_t*)bvh4Node)[offset] = newAlt4Ptr;
 	}
 	usedNodes = newAlt4Ptr;
 }
@@ -4668,12 +4660,12 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 		if (!stackPtr) break;
 		nodeIdx = stack[--stackPtr];
 		const uint32_t offset = stack[--stackPtr];
-		((uint32_t*)bvh8Node)[offset] = newAlt8Ptr + INNER_BIT;
+		((uint32_t*)bvh8Node)[offset] = newAlt8Ptr;
 	#ifdef BVH8_CPU_COMPACT
 		// figure out for which node we just set the child
 		uint32_t changedNode = offset >> 6;
 		uint32_t slot = offset & 7;
-		((uint32_t*)&bvh8Small[changedNode].child8)[slot] = newAlt8Ptr + INNER_BIT;
+		((uint32_t*)&bvh8Small[changedNode].child8)[slot] = newAlt8Ptr;
 	#endif
 	}
 	usedNodes = newAlt8Ptr;
@@ -6066,7 +6058,28 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 
 #ifdef BVH_USEAVX2
 
-ALIGNED( 64 ) static const uint32_t idxLUT4[16] = { 0, 0, 1, 256, 2, 512, 513, 131328, 3, 768, 769, 196864, 770, 197120, 197121, 50462976 };
+ALIGNED( 64 ) static const uint32_t idxLUT4[16] = { 0, 0, 1, 256, 2, 512, 513, 131328, 3, 768, 769, 196864, 770, 
+	197120, 197121, 50462976 };
+ALIGNED( 64 ) static const uint64_t idxLUT8[16] = { 0, 256, 770, 50462976, 1284, 84148480, 84148994, 5514788471040,
+	1798, 117833984, 117834498, 7722401661184, 117835012, 7722435346688, 7722435347202, 506097522914230528 };
+ALIGNED( 64 ) static __m256i idxLUT256[16] = {
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 0 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 256 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 770 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 50462976 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 1284 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 84148480 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 84148994 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 5514788471040 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 1798 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 117833984 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 117834498 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 7722401661184 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 117835012 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 7722435346688 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 7722435347202 ) ),
+	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 506097522914230528 ) )
+};
 
 int32_t BVH4_AVX2::Intersect( Ray& ray ) const
 {
@@ -6086,7 +6099,8 @@ int32_t BVH4_AVX2::Intersect( Ray& ray ) const
 		steps++;
 		if (!(nodeIdx >> 31)) // top bit: leaf flag
 		{
-			const BVHNode& n = bvh4Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
+			const BVHNode& n = bvh4Node[nodeIdx];
+		#if 0 // TODO
 			const __m128i index = _mm_srlv_epi32( n.perm4, signShift4 );
 			__m128i c4 = n.child4;
 			const __m128 tx1 = _mm_mul_ps( _mm_sub_ps( n.xmin4, ox4 ), rdx4 );
@@ -6115,6 +6129,7 @@ int32_t BVH4_AVX2::Intersect( Ray& ray ) const
 				_mm_storeu_ps( (float*)(distStack + stackPtr), dist4 );
 				stackPtr += validNodes;
 			}
+		#endif
 		}
 		else
 		{
@@ -6185,67 +6200,42 @@ int32_t BVH4_AVX2::Intersect( Ray& ray ) const
 
 bool BVH4_AVX2::IsOccluded( const Ray& ray ) const
 {
-	ALIGNED( 64 ) uint32_t nodeStack[128];
+	ALIGNED( 64 ) uint64_t stack[256];
 	const __m128 ox4 = _mm_set1_ps( ray.O.x ), oy4 = _mm_set1_ps( ray.O.y ), oz4 = _mm_set1_ps( ray.O.z );
 	const __m128 rdx4 = _mm_set1_ps( ray.rD.x ), rdy4 = _mm_set1_ps( ray.rD.y ), rdz4 = _mm_set1_ps( ray.rD.z );
 	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), t4 = _mm_set1_ps( ray.hit.t );
 	const __m128 one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
-#ifdef WIVE4WIDE
-	// under construction
 	const __m256i boundsXPerm8 = ray.D.x > 0 ? _mm256_setr_epi32( 0, 1, 2, 3, 4, 5, 6, 7 ) : _mm256_setr_epi32( 1, 0, 3, 2, 5, 4, 7, 6 );
 	const __m256i boundsYPerm8 = ray.D.y > 0 ? _mm256_setr_epi32( 0, 1, 2, 3, 4, 5, 6, 7 ) : _mm256_setr_epi32( 1, 0, 3, 2, 5, 4, 7, 6 );
 	const __m256i boundsZPerm8 = ray.D.z > 0 ? _mm256_setr_epi32( 0, 1, 2, 3, 4, 5, 6, 7 ) : _mm256_setr_epi32( 1, 0, 3, 2, 5, 4, 7, 6 );
 	const __m256 ox8 = _mm256_set1_ps( ray.O.x ), oy8 = _mm256_set1_ps( ray.O.y ), oz8 = _mm256_set1_ps( ray.O.z );
-	const __m256 rdx8 = _mm256_set_ps( ray.rD.x, -ray.rD.x, ray.rD.x, -ray.rD.x, ray.rD.x, -ray.rD.x, ray.rD.x, -ray.rD.x );
-	const __m256 rdy8 = _mm256_set_ps( ray.rD.y, -ray.rD.y, ray.rD.y, -ray.rD.y, ray.rD.y, -ray.rD.y, ray.rD.y, -ray.rD.y );
-	const __m256 rdz8 = _mm256_set_ps( ray.rD.z, -ray.rD.z, ray.rD.z, -ray.rD.z, ray.rD.z, -ray.rD.z, ray.rD.z, -ray.rD.z );
-#endif
-	uint32_t stackPtr = 0, nodeIdx = 0;
+	const __m256 signFlip8 = _mm256_setr_ps( 0.0f, -0.0f, 0.0f, -0.0f, 0.0f, -0.0f, 0.0f, -0.0f );
+	const __m256 rdx8 = _mm256_xor_ps( _mm256_set1_ps( ray.rD.x ), signFlip8 );
+	const __m256 rdy8 = _mm256_xor_ps( _mm256_set1_ps( ray.rD.y ), signFlip8 );
+	const __m256 rdz8 = _mm256_xor_ps( _mm256_set1_ps( ray.rD.z ), signFlip8 );
+	const __m256 rt8 = _mm256_set_ps( 0, ray.hit.t, 0, ray.hit.t, 0, ray.hit.t, 0, ray.hit.t );
+	uint64_t stackPtr = 0, nodeIdx = 0;
 	while (1)
 	{
 		if (!(nodeIdx >> 31)) // top bit: leaf flag
 		{
-			const BVHNode& n = bvh4Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
-			const __m128i c4 = n.child4;
-		#ifdef WIVE4WIDE
-			// under construction
-			const __m256 tx8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.xminmax8, boundsXPerm8 ), ox8 ), rdx8 );
-			const __m256 ty8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.yminmax8, boundsYPerm8 ), oy8 ), rdy8 );
-			const __m256 tz8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.zminmax8, boundsZPerm8 ), oz8 ), rdz8 );
-			const __m256 t8 = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx8, ty8 ), tz8 ), _mm256_setzero_ps() ), t8 );
-			const __m256 tmax8 = _mm256_permutevar8x32_ps( t8, _mm256_setr_epi32( 1, 0, 3, 2, 5, 4, 7, 6 ) ); // TODO: 64-bit rotate?
-			const __m256 tmin8 = _mm256_mul_ps( t8, _mm256_setr_ps( 1, -1, 1, -1, 1, -1, 1, -1 ) ); // TODO: use xor
-			const uint32_t mask = _mm256_movemask_ps( _mm256_cmp_ps( tmin8, tmax8, _CMP_LE_OQ ) ); // TODO: use 64-bit int comparison. :)
-			// TODO: lines 16, 17 of the algorithm in Listing 2.
+			const BVHNode& n = bvh4Node[nodeIdx];
+			const __m256i sn8 = n.sn8;
+			const __m256 tx8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.xmaxmin8, boundsXPerm8 ), ox8 ), rdx8 );
+			const __m256 ty8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.ymaxmin8, boundsYPerm8 ), oy8 ), rdy8 );
+			const __m256 tz8 = _mm256_mul_ps( _mm256_sub_ps( _mm256_permutevar8x32_ps( n.zmaxmin8, boundsZPerm8 ), oz8 ), rdz8 );
+			const __m256 t8 = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx8, ty8 ), tz8 ), rt8 );
+			/* flipSignsOdd */ const __m256 tmin8 = _mm256_xor_ps( t8, signFlip8 );
+			/* swapEvenOdd  */ const __m256 tmax8 = _mm256_shuffle_ps( t8, t8, _MM_SHUFFLE( 2, 3, 0, 1 ) );
+			/*   compare    */ int mask = _mm256_movemask_pd( _mm256_castps_pd( _mm256_cmp_ps( tmax8, tmin8, _CMP_GE_OQ ) ) );
 			if (mask)
 			{
-				const uint32_t lutidx = idxLUT4[mask];
-				const uint32_t validNodes = __popc( mask );
-				const __m128i cpi = _mm_cvtepu8_epi32( _mm_cvtsi32_si128( lutidx ) );
-				const __m128i child4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( c4 ), cpi ) );
-				_mm_storeu_si128( (__m128i*)(nodeStack + stackPtr), child4 );
-				stackPtr += validNodes;
+				const __m256i cpi = idxLUT256[mask]; // or: _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT8[mask] ) );
+				const __m256i child8 = _mm256_permutevar8x32_epi32( sn8, cpi );
+				_mm256_storeu_si256( (__m256i*)(stack + stackPtr), child8 );
+				stackPtr += __popc( mask );
 			}
-		#else
-			const __m128 tx1 = _mm_mul_ps( _mm_sub_ps( n.xmin4, ox4 ), rdx4 ), tx2 = _mm_mul_ps( _mm_sub_ps( n.xmax4, ox4 ), rdx4 );
-			const __m128 ty1 = _mm_mul_ps( _mm_sub_ps( n.ymin4, oy4 ), rdy4 ), ty2 = _mm_mul_ps( _mm_sub_ps( n.ymax4, oy4 ), rdy4 );
-			const __m128 tz1 = _mm_mul_ps( _mm_sub_ps( n.zmin4, oz4 ), rdz4 ), tz2 = _mm_mul_ps( _mm_sub_ps( n.zmax4, oz4 ), rdz4 );
-			const __m128 txMin = _mm_min_ps( tx1, tx2 ), txMax = _mm_max_ps( tx1, tx2 ), tyMin = _mm_min_ps( ty1, ty2 );
-			const __m128 tyMax = _mm_max_ps( ty1, ty2 ), tzMin = _mm_min_ps( tz1, tz2 ), tzMax = _mm_max_ps( tz1, tz2 );
-			const __m128 tmin = _mm_max_ps( _mm_max_ps( _mm_max_ps( _mm_setzero_ps(), txMin ), tyMin ), tzMin );
-			const __m128 tmax = _mm_min_ps( _mm_min_ps( _mm_min_ps( txMax, t4 ), tyMax ), tzMax );
-			const uint32_t mask = _mm_movemask_ps( _mm_cmp_ps( tmin, tmax, _CMP_LE_OQ ) );
-			if (mask)
-			{
-				const uint32_t lutidx = idxLUT4[mask];
-				const uint32_t validNodes = __popc( mask );
-				const __m128i cpi = _mm_cvtepu8_epi32( _mm_cvtsi32_si128( lutidx ) );
-				const __m128i child4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( c4 ), cpi ) );
-				_mm_storeu_si128( (__m128i*)(nodeStack + stackPtr), child4 );
-				stackPtr += validNodes;
-			}
-		#endif
 		}
 		else
 		{
@@ -6269,7 +6259,7 @@ bool BVH4_AVX2::IsOccluded( const Ray& ray ) const
 			if (_mm_movemask_ps( combined )) return true;
 		}
 		if (!stackPtr) break;
-		nodeIdx = nodeStack[--stackPtr];
+		nodeIdx = stack[--stackPtr] >> 32u;
 	}
 	return false;
 }
@@ -6321,7 +6311,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 		if (!(nodeIdx >> 31)) // top bit: leaf flag
 		{
 		#ifdef BVH8_CPU_COMPACT
-			const BVHNodeCompact& n = bvh8Small[nodeIdx & 0x1fffffff /* bits 0..28 */];
+			const BVHNodeCompact& n = bvh8Small[nodeIdx];
 			const __m256i index = _mm256_srlv_epi32( n.perm8, signShift8 );
 			__m256i c8 = n.child8;
 			const __m256i cbminmax8 = n.cbminmaxyz8;
@@ -6366,7 +6356,7 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 				stackPtr += validNodes;
 			}
 		#else
-			const BVHNode& n = bvh8Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
+			const BVHNode& n = bvh8Node[nodeIdx];
 			const __m256i index = _mm256_srlv_epi32( n.perm8, signShift8 );
 			__m256i c8 = n.child8;
 			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, ox8 ), rdx8 );
@@ -6382,8 +6372,8 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 			__m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( txMax, t8 ), tyMax ), tzMax );
 			tmin = _mm256_permutevar8x32_ps( tmin, index );
 			tmax = _mm256_permutevar8x32_ps( tmax, index );
-			const __m256 mask8 = _mm256_cmp_ps( tmin, tmax, _CMP_LE_OQ );
-			const uint32_t mask = _mm256_movemask_ps( mask8 );
+			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
+			const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
 			const uint64_t lutidx = idxLUT[mask];
 			const uint32_t validNodes = __popc( mask );
 			if (mask > 0)
@@ -6486,7 +6476,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 		if (!(nodeIdx >> 31)) // top bit: leaf flag
 		{
 		#ifdef BVH8_CPU_COMPACT
-			const BVHNodeCompact& n = bvh8Small[nodeIdx & 0x1fffffff /* bits 0..28 */];
+			const BVHNodeCompact& n = bvh8Small[nodeIdx];
 			const __m256i c8 = n.child8;
 			const __m256i perm8 = n.perm8;
 			const __m256i cbminmax8 = n.cbminmaxyz8;
@@ -6526,7 +6516,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 				stackPtr += validNodes;
 			}
 		#else
-			const BVHNode& n = bvh8Node[nodeIdx & 0x1fffffff /* bits 0..28 */];
+			const BVHNode& n = bvh8Node[nodeIdx];
 			const __m256i c8 = n.child8;
 			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, ox8 ), rdx8 );
 			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( n.xmax8, ox8 ), rdx8 );
@@ -6539,8 +6529,8 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 			const __m256 tzMin = _mm256_min_ps( tz1, tz2 ), tzMax = _mm256_max_ps( tz1, tz2 );
 			const __m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), txMin ), tyMin ), tzMin );
 			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( txMax, t8 ), tyMax ), tzMax );
-			const __m256 mask8 = _mm256_cmp_ps( tmin, tmax, _CMP_LE_OQ );
-			const uint32_t mask = _mm256_movemask_ps( mask8 );
+			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
+			const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
 			if (mask)
 			{
 				const uint64_t lutidx = idxLUT[mask];
@@ -7973,7 +7963,7 @@ void BVHBase::IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t 
 		ray.hit.prim = idx + ray.instIdx;
 	#endif
 	}
-	}
+}
 
 // IntersectTriIndexed
 void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const
@@ -8004,7 +7994,7 @@ void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const ui
 		ray.hit.prim = idx + ray.instIdx;
 	#endif
 	}
-	}
+}
 
 // TriOccludes
 bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const

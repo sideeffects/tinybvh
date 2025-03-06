@@ -23,7 +23,7 @@
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
 #define TRAVERSE_4WAY
-#define TRAVERSE_WIVE4
+// #define TRAVERSE_WIVE4
 #define TRAVERSE_WIVE
 #define TRAVERSE_2WAY_DBL
 // #define TRAVERSE_CWBVH
@@ -735,6 +735,8 @@ int main()
 	{
 		bvh8_cpu = new BVH8_CPU();
 		bvh8_cpu->BuildHQ( triangles, verts / 3 );
+		// bvh4_avx2 = new BVH4_AVX2();
+		// bvh4_avx2->BuildHQ( triangles, verts / 3 );
 	}
 	printf( "- BVH8_CPU    - primary: " );
 	traceTime = TestPrimaryRays( _CPU8, Nsmall, 3 );
