@@ -65,7 +65,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx2 -mfma -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.4.2
+# Version 1.4.3
 
 Version 1.4.0 introduces a new BVH layout for fast single-ray traversal on CPU: BVH8_CPU. This supersedes the previous fastest scheme, BVH4_CPU. 
 
