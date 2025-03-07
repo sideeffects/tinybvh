@@ -1,3 +1,6 @@
+# dev
+This is the **development branch** for tinybvh. PRs go here!
+
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
