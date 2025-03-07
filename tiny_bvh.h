@@ -116,7 +116,7 @@ THE SOFTWARE.
 // SAH BVH building: Heuristic parameters
 // CPU traversal: C_INT = 1, C_TRAV = 1 seems optimal.
 // These are defaults, which initialize the public members c_int and c_trav in
-// BVHBase (and thus each BVH instance). 
+// BVHBase (and thus each BVH instance).
 #ifndef C_INT
 #define C_INT	1
 #endif
@@ -159,7 +159,7 @@ THE SOFTWARE.
 #ifndef TINYBVH_NO_SIMD
 #if defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__)
 #define BVH_USEAVX		// required for BuildAVX, BVH_SoA and others
-#define BVH_USEAVX2		// required for BVH4_AVX2 and BVH8_CPU
+#define BVH_USEAVX2		// required for BVH4_AVX2_WIP and BVH8_CPU
 #include "immintrin.h"	// for __m128 and __m256
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #define BVH_USENEON
@@ -170,7 +170,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	4
-#define TINY_BVH_VERSION_SUB	2
+#define TINY_BVH_VERSION_SUB	3
 
 // ============================================================================
 //
@@ -702,7 +702,7 @@ class BVH : public BVHBase
 public:
 	friend class BVH_GPU;
 	friend class BVH_SoA;
-	friend class BVH4_AVX2;
+	friend class BVH4_AVX2_WIP;
 	friend class BVH8_CPU;
 	friend class BVH8_CWBVH;
 	template <int M> friend class MBVH;
@@ -1131,7 +1131,7 @@ public:
 	bool ownBVH8 = true;			// false when ConvertFrom receives an external bvh8.
 };
 
-// Storage for up to four triangles, in SoA layout, for BVH4_AVX2 and BVH8_CPU.
+// Storage for up to four triangles, in SoA layout, for BVH4_AVX2_WIP and BVH8_CPU.
 struct BVHTri4Leaf
 {
 	SIMDVEC4 v0x4, v0y4, v0z4;
@@ -1143,7 +1143,7 @@ struct BVHTri4Leaf
 
 #define WIVE4WIDE
 
-class BVH4_AVX2 : public BVHBase
+class BVH4_AVX2_WIP : public BVHBase
 {
 public:
 	enum { LEAF_BIT = 1 << 31 };
@@ -1156,8 +1156,8 @@ public:
 		SIMDVEC8 zmaxmin8;
 		SIMDIVEC8 sn8;
 	};
-	BVH4_AVX2( BVHContext ctx = {} ) { layout = LAYOUT_BVH4_AVX2; context = ctx; }
-	~BVH4_AVX2();
+	BVH4_AVX2_WIP( BVHContext ctx = {} ) { layout = LAYOUT_BVH4_AVX2; context = ctx; }
+	~BVH4_AVX2_WIP();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims );
@@ -1174,7 +1174,7 @@ public:
 	// BVH4 data
 	BVHNode* bvh4Node = 0;			// 128-byte 4-wide BVH node for efficient CPU rendering.
 	BVHTri4Leaf* bvh4Leaf = 0;		// 192-byte leaf node for storing 4 tris in SoA layout.
-	MBVH<4> bvh4;					// BVH4_AVX2 is created from BVH4 and uses its data.
+	MBVH<4> bvh4;					// BVH4_AVX2_WIP is created from BVH4 and uses its data.
 	bool ownBVH4 = true;			// false when ConvertFrom receives an external bvh8.
 	uint32_t allocatedLeafs = 0;	// separate buffer for SoA triangle data.
 };
@@ -1224,7 +1224,7 @@ public:
 private:
 	// Intersect / IsOccluded specialize for ray octant using templated functions.
 	template <bool posX, bool posY, bool posZ> int32_t Intersect( Ray& ray ) const;
-	template <bool posX, bool posY, bool posZ> bool IsOccluded( const Ray& ray ) const; 
+	template <bool posX, bool posY, bool posZ> bool IsOccluded( const Ray& ray ) const;
 	// BVH8 data
 	BVHNode* bvh8Node = 0;			// 256-byte 8-wide BVH node for efficient CPU rendering.
 #ifdef BVH8_CPU_COMPACT
@@ -2371,7 +2371,7 @@ void BVH::CombineLeafs( const uint32_t primCount )
 			}
 			else
 			{
-			#if FIX_COMBINE_LEAFS 
+			#if FIX_COMBINE_LEAFS
 				if (!left.isLeaf() && left.SurfaceArea() > 0) stack[stackPtr++] = node.leftFirst;
 				if (!right.isLeaf() && right.SurfaceArea() > 0) stack[stackPtr++] = node.leftFirst + 1;
 			#else
@@ -2536,7 +2536,6 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 					if (blas->layout == LAYOUT_BVH4_CPU) cost += ((BVH4_CPU*)blas)->Intersect( tmp );
 					else if (blas->layout == LAYOUT_BVH_SOA) cost += ((BVH_SoA*)blas)->Intersect( tmp );
 				#ifdef BVH_USEAVX2
-					else if (blas->layout == LAYOUT_BVH4_AVX2) cost += ((BVH4_AVX2*)blas)->Intersect( tmp );
 					else if (blas->layout == LAYOUT_BVH8_AVX2) cost += ((BVH8_CPU*)blas)->Intersect( tmp );
 				#endif
 				}
@@ -2639,7 +2638,6 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 					if (blas->layout == LAYOUT_BVH4_CPU) { if (((BVH4_CPU*)blas)->IsOccluded( tmp )) return true; }
 					else if (blas->layout == LAYOUT_BVH_SOA) { if (((BVH_SoA*)blas)->IsOccluded( tmp )) return true; }
 				#ifdef BVH_USEAVX2
-					else if (blas->layout == LAYOUT_BVH4_AVX2) { if (((BVH4_AVX2*)blas)->IsOccluded( tmp )) return true; }
 					else if (blas->layout == LAYOUT_BVH8_AVX2) { if (((BVH8_CPU*)blas)->IsOccluded( tmp )) return true; }
 				#endif
 				}
@@ -4282,22 +4280,22 @@ int32_t BVH4_GPU::Intersect( Ray& ray ) const
 	return (int32_t)cost; // cast to not break interface.
 }
 
-// BVH4_AVX2 implementation
+// BVH4_AVX2_WIP implementation
 // ----------------------------------------------------------------------------
 
-BVH4_AVX2::~BVH4_AVX2()
+BVH4_AVX2_WIP::~BVH4_AVX2_WIP()
 {
 	if (!ownBVH4) bvh4 = MBVH<4>(); // clear out pointers we don't own.
 	AlignedFree( bvh4Node );
 	AlignedFree( bvh4Leaf );
 }
 
-void BVH4_AVX2::Build( const bvhvec4* vertices, const uint32_t primCount )
+void BVH4_AVX2_WIP::Build( const bvhvec4* vertices, const uint32_t primCount )
 {
 	Build( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
 
-void BVH4_AVX2::Build( const bvhvec4slice& vertices )
+void BVH4_AVX2_WIP::Build( const bvhvec4slice& vertices )
 {
 	bvh4.bvh.context = bvh4.context = context;
 	bvh4.bvh.BuildDefault( vertices );
@@ -4307,13 +4305,13 @@ void BVH4_AVX2::Build( const bvhvec4slice& vertices )
 	ConvertFrom( bvh4, true );
 }
 
-void BVH4_AVX2::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+void BVH4_AVX2_WIP::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
 {
 	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
 	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
 }
 
-void BVH4_AVX2::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+void BVH4_AVX2_WIP::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
 	bvh4.bvh.context = bvh4.context = context;
@@ -4324,12 +4322,12 @@ void BVH4_AVX2::Build( const bvhvec4slice& vertices, const uint32_t* indices, ui
 	ConvertFrom( bvh4, true );
 }
 
-void BVH4_AVX2::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
+void BVH4_AVX2_WIP::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
 {
 	BuildHQ( bvhvec4slice( vertices, primCount * 3, sizeof( bvhvec4 ) ) );
 }
 
-void BVH4_AVX2::BuildHQ( const bvhvec4slice& vertices )
+void BVH4_AVX2_WIP::BuildHQ( const bvhvec4slice& vertices )
 {
 	bvh4.bvh.context = bvh4.context = context;
 	bvh4.bvh.BuildHQ( vertices );
@@ -4339,12 +4337,12 @@ void BVH4_AVX2::BuildHQ( const bvhvec4slice& vertices )
 	ConvertFrom( bvh4, true );
 }
 
-void BVH4_AVX2::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
+void BVH4_AVX2_WIP::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
 {
 	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
 }
 
-void BVH4_AVX2::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
+void BVH4_AVX2_WIP::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
 	bvh4.bvh.context = bvh4.context = context;
 	bvh4.bvh.BuildHQ( vertices, indices, prims );
@@ -4354,19 +4352,19 @@ void BVH4_AVX2::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, 
 	ConvertFrom( bvh4, true );
 }
 
-void BVH4_AVX2::Optimize( const uint32_t iterations, bool extreme )
+void BVH4_AVX2_WIP::Optimize( const uint32_t iterations, bool extreme )
 {
 	bvh4.Optimize( iterations, extreme );
 	ConvertFrom( bvh4, false );
 }
 
-float BVH4_AVX2::SAHCost( const uint32_t nodeIdx ) const
+float BVH4_AVX2_WIP::SAHCost( const uint32_t nodeIdx ) const
 {
 	return bvh4.SAHCost( nodeIdx );
 }
 
 #define SORT(a,b) { if (dist[a] < dist[b]) { float h = dist[a]; dist[a] = dist[b], dist[b] = h; } }
-void BVH4_AVX2::ConvertFrom( const MBVH<4>& original, bool compact )
+void BVH4_AVX2_WIP::ConvertFrom( const MBVH<4>& original, bool compact )
 {
 	// get a copy of the original bvh4
 	if (&original != &bvh4) ownBVH4 = false; // bvh isn't ours; don't delete in destructor.
@@ -4408,7 +4406,7 @@ void BVH4_AVX2::ConvertFrom( const MBVH<4>& original, bool compact )
 		for (int32_t i = 0; i < 4; i++) if (orig.child[i])
 		{
 			const MBVH<4>::MBVHNode& child = bvh4.mbvhNode[orig.child[i]];
-			( (float*)&newNode.xmaxmin8 )[cidx * 2 + 1] = child.aabbMin.x;
+			((float*)&newNode.xmaxmin8)[cidx * 2 + 1] = child.aabbMin.x;
 			((float*)&newNode.ymaxmin8)[cidx * 2 + 1] = child.aabbMin.y;
 			((float*)&newNode.zmaxmin8)[cidx * 2 + 1] = child.aabbMin.z;
 			((float*)&newNode.xmaxmin8)[cidx * 2] = child.aabbMax.x;
@@ -4447,7 +4445,7 @@ void BVH4_AVX2::ConvertFrom( const MBVH<4>& original, bool compact )
 		}
 		for (; cidx < 4; cidx++)
 		{
-			((float*)&newNode.xmaxmin8 )[cidx * 2 + 1] = 1e30f, ((float*)&newNode.xmaxmin8)[cidx * 2] = 1.00001e30f;
+			((float*)&newNode.xmaxmin8)[cidx * 2 + 1] = 1e30f, ((float*)&newNode.xmaxmin8)[cidx * 2] = 1.00001e30f;
 			((float*)&newNode.ymaxmin8)[cidx * 2 + 1] = 1e30f, ((float*)&newNode.ymaxmin8)[cidx * 2] = 1.00001e30f;
 			((float*)&newNode.zmaxmin8)[cidx * 2 + 1] = 1e30f, ((float*)&newNode.zmaxmin8)[cidx * 2] = 1.00001e30f;
 		}
@@ -4655,7 +4653,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 			((uint32_t*)&compact.perm8)[i] |= qxmax << 24;
 			((uint32_t*)&compact.cbminmaxyz8)[i] = qzmax + (qzmin << 8) + (qymax << 16) + (qymin << 24);
 		}
-		else // mark node as invalid. 
+		else // mark node as invalid.
 			((unsigned char*)&compact.cbminx8)[i] = 255,
 			((unsigned char*)&compact.perm8)[i] &= 0xffffff;
 		compact.child8 = newNode.child8;
@@ -6062,7 +6060,7 @@ bool BVH4_CPU::IsOccluded( const Ray& ray ) const
 
 #ifdef BVH_USEAVX2
 
-ALIGNED( 64 ) static const uint32_t idxLUT4[16] = { 0, 0, 1, 256, 2, 512, 513, 131328, 3, 768, 769, 196864, 770, 
+ALIGNED( 64 ) static const uint32_t idxLUT4[16] = { 0, 0, 1, 256, 2, 512, 513, 131328, 3, 768, 769, 196864, 770,
 	197120, 197121, 50462976 };
 ALIGNED( 64 ) static const uint64_t idxLUT8[16] = { 0, 256, 770, 50462976, 1284, 84148480, 84148994, 5514788471040,
 	1798, 117833984, 117834498, 7722401661184, 117835012, 7722435346688, 7722435347202, 506097522914230528 };
@@ -6085,7 +6083,7 @@ ALIGNED( 64 ) static __m256i idxLUT256[16] = {
 	_mm256_cvtepu8_epi32( _mm_cvtsi64_si128( 506097522914230528 ) )
 };
 
-int32_t BVH4_AVX2::Intersect( Ray& ray ) const
+int32_t BVH4_AVX2_WIP::Intersect( Ray& ray ) const
 {
 	ALIGNED( 64 ) uint32_t nodeStack[64];
 	ALIGNED( 64 ) float distStack[64];
@@ -6202,7 +6200,7 @@ int32_t BVH4_AVX2::Intersect( Ray& ray ) const
 	return steps;
 }
 
-bool BVH4_AVX2::IsOccluded( const Ray& ray ) const
+bool BVH4_AVX2_WIP::IsOccluded( const Ray& ray ) const
 {
 	ALIGNED( 64 ) uint64_t stack[256];
 	const __m128 ox4 = _mm_set1_ps( ray.O.x ), oy4 = _mm_set1_ps( ray.O.y ), oz4 = _mm_set1_ps( ray.O.z );
@@ -6296,11 +6294,11 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 {
 	const bool posX = ray.D.x > 0, posY = ray.D.y > 0, posZ = ray.D.z > 0;
 	if (!posX) goto negx;
-	if (posY) { if (posZ) return Intersect<true,true,true>( ray ); else return Intersect<true,true,false>( ray ); }
-	if (posZ) return Intersect<true,false,true>( ray ); else return Intersect<true,false,false>( ray );
+	if (posY) { if (posZ) return Intersect<true, true, true>( ray ); else return Intersect<true, true, false>( ray ); }
+	if (posZ) return Intersect<true, false, true>( ray ); else return Intersect<true, false, false>( ray );
 negx:
-	if (posY) { if (posZ) return Intersect<false,true,true>( ray ); else return Intersect<false,true,false>( ray ); }
-	if (posZ) return Intersect<false,false,true>( ray ); else return Intersect<false,false,false>( ray );
+	if (posY) { if (posZ) return Intersect<false, true, true>( ray ); else return Intersect<false, true, false>( ray ); }
+	if (posZ) return Intersect<false, false, true>( ray ); else return Intersect<false, false, false>( ray );
 }
 
 template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray ) const
@@ -6481,11 +6479,11 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 {
 	const bool posX = ray.D.x > 0, posY = ray.D.y > 0, posZ = ray.D.z > 0;
 	if (!posX) goto negx;
-	if (posY) { if (posZ) return IsOccluded<true,true,true>( ray ); else return IsOccluded<true,true,false>( ray ); }
-	if (posZ) return IsOccluded<true,false,true>( ray ); else return IsOccluded<true,false,false>( ray );
+	if (posY) { if (posZ) return IsOccluded<true, true, true>( ray ); else return IsOccluded<true, true, false>( ray ); }
+	if (posZ) return IsOccluded<true, false, true>( ray ); else return IsOccluded<true, false, false>( ray );
 negx:
-	if (posY) { if (posZ) return IsOccluded<false,true,true>( ray ); else return IsOccluded<false,true,false>( ray ); }
-	if (posZ) return IsOccluded<false,false,true>( ray ); else return IsOccluded<false,false,false>( ray );
+	if (posY) { if (posZ) return IsOccluded<false, true, true>( ray ); else return IsOccluded<false, true, false>( ray ); }
+	if (posZ) return IsOccluded<false, false, true>( ray ); else return IsOccluded<false, false, false>( ray );
 }
 
 template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray& ray ) const
@@ -6557,7 +6555,7 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( posX ? n.xmax8 : n.xmin8, ox8 ), rdx8 );
 			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( posY ? n.ymax8 : n.ymin8, oy8 ), rdy8 );
 			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n.zmax8 : n.zmin8, oz8 ), rdz8 );
-			const __m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), tx1), ty1 ), tz1 );
+			const __m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), tx1 ), ty1 ), tz1 );
 			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx2, t8 ), ty2 ), tz2 );
 			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
 			const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
@@ -6600,7 +6598,7 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];
 	}
-	return false;	
+	return false;
 }
 
 #endif // BVH_USEAVX2
