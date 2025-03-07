@@ -1221,6 +1221,10 @@ public:
 	void ConvertFrom( const MBVH<8>& original, bool compact = true );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
+private:
+	// Intersect / IsOccluded specialize for ray octant using templated functions.
+	template <bool posX, bool posY, bool posZ> int32_t Intersect( Ray& ray ) const;
+	template <bool posX, bool posY, bool posZ> bool IsOccluded( const Ray& ray ) const; 
 	// BVH8 data
 	BVHNode* bvh8Node = 0;			// 256-byte 8-wide BVH node for efficient CPU rendering.
 #ifdef BVH8_CPU_COMPACT
@@ -6290,18 +6294,29 @@ ALIGNED( 64 ) static const uint64_t idxLUT[256] = {
 
 int32_t BVH8_CPU::Intersect( Ray& ray ) const
 {
+	const bool posX = ray.D.x > 0, posY = ray.D.y > 0, posZ = ray.D.z > 0;
+	if (!posX) goto negx;
+	if (posY) { if (posZ) return Intersect<true,true,true>( ray ); else return Intersect<true,true,false>( ray ); }
+	if (posZ) return Intersect<true,false,true>( ray ); else return Intersect<true,false,false>( ray );
+negx:
+	if (posY) { if (posZ) return Intersect<false,true,true>( ray ); else return Intersect<false,true,false>( ray ); }
+	if (posZ) return Intersect<false,false,true>( ray ); else return Intersect<false,false,false>( ray );
+}
+
+template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray ) const
+{
 	ALIGNED( 64 ) uint32_t nodeStack[64];
 	ALIGNED( 64 ) float distStack[64];
 	__m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
 	__m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
 	__m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
-	__m256 t8 = _mm256_set1_ps( ray.hit.t );
+	__m256 t8 = _mm256_set1_ps( ray.hit.t ), zero8 = _mm256_setzero_ps();
 #ifdef BVH8_CPU_COMPACT
 	const __m256 zero8 = _mm256_setzero_ps();
 	const __m256i mantissa8 = _mm256_set1_epi32( 255 << 15 );
 	const __m256i exponent8 = _mm256_set1_epi32( 0x3f800000 );
 #endif
-	const __m256i signShift8 = _mm256_set1_epi32( (ray.D.x > 0 ? 3 : 0) + (ray.D.y > 0 ? 6 : 0) + (ray.D.z > 0 ? 12 : 0) );
+	const __m256i signShift8 = _mm256_set1_epi32( (posX ? 3 : 0) + (posY ? 6 : 0) + (posZ ? 12 : 0) );
 	__m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), one4 = _mm_set1_ps( 1.0f );
 	uint32_t stackPtr = 0, nodeIdx = 0, steps = 0;
@@ -6359,17 +6374,14 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 			const BVHNode& n = bvh8Node[nodeIdx];
 			const __m256i index = _mm256_srlv_epi32( n.perm8, signShift8 );
 			__m256i c8 = n.child8;
-			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, ox8 ), rdx8 );
-			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( n.xmax8, ox8 ), rdx8 );
-			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( n.ymin8, oy8 ), rdy8 );
-			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( n.ymax8, oy8 ), rdy8 );
-			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( n.zmin8, oz8 ), rdz8 );
-			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( n.zmax8, oz8 ), rdz8 );
-			const __m256 txMin = _mm256_min_ps( tx1, tx2 ), txMax = _mm256_max_ps( tx1, tx2 );
-			const __m256 tyMin = _mm256_min_ps( ty1, ty2 ), tyMax = _mm256_max_ps( ty1, ty2 );
-			const __m256 tzMin = _mm256_min_ps( tz1, tz2 ), tzMax = _mm256_max_ps( tz1, tz2 );
-			__m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), txMin ), tyMin ), tzMin );
-			__m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( txMax, t8 ), tyMax ), tzMax );
+			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( posX ? n.xmin8 : n.xmax8, ox8 ), rdx8 );
+			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( posY ? n.ymin8 : n.ymax8, oy8 ), rdy8 );
+			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n.zmin8 : n.zmax8, oz8 ), rdz8 );
+			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( posX ? n.xmax8 : n.xmin8, ox8 ), rdx8 );
+			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( posY ? n.ymax8 : n.ymin8, oy8 ), rdy8 );
+			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n.zmax8 : n.zmin8, oz8 ), rdz8 );
+			__m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( zero8, tx1 ), ty1 ), tz1 );
+			__m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx2, t8 ), ty2 ), tz2 );
 			tmin = _mm256_permutevar8x32_ps( tmin, index );
 			tmax = _mm256_permutevar8x32_ps( tmax, index );
 			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
@@ -6457,6 +6469,17 @@ int32_t BVH8_CPU::Intersect( Ray& ray ) const
 
 bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 {
+	const bool posX = ray.D.x > 0, posY = ray.D.y > 0, posZ = ray.D.z > 0;
+	if (!posX) goto negx;
+	if (posY) { if (posZ) return IsOccluded<true,true,true>( ray ); else return IsOccluded<true,true,false>( ray ); }
+	if (posZ) return IsOccluded<true,false,true>( ray ); else return IsOccluded<true,false,false>( ray );
+negx:
+	if (posY) { if (posZ) return IsOccluded<false,true,true>( ray ); else return IsOccluded<false,true,false>( ray ); }
+	if (posZ) return IsOccluded<false,false,true>( ray ); else return IsOccluded<false,false,false>( ray );
+}
+
+template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray& ray ) const
+{
 	ALIGNED( 64 ) uint32_t nodeStack[128];
 	__m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
 	__m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
@@ -6518,17 +6541,14 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 		#else
 			const BVHNode& n = bvh8Node[nodeIdx];
 			const __m256i c8 = n.child8;
-			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( n.xmin8, ox8 ), rdx8 );
-			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( n.xmax8, ox8 ), rdx8 );
-			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( n.ymin8, oy8 ), rdy8 );
-			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( n.ymax8, oy8 ), rdy8 );
-			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( n.zmin8, oz8 ), rdz8 );
-			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( n.zmax8, oz8 ), rdz8 );
-			const __m256 txMin = _mm256_min_ps( tx1, tx2 ), txMax = _mm256_max_ps( tx1, tx2 );
-			const __m256 tyMin = _mm256_min_ps( ty1, ty2 ), tyMax = _mm256_max_ps( ty1, ty2 );
-			const __m256 tzMin = _mm256_min_ps( tz1, tz2 ), tzMax = _mm256_max_ps( tz1, tz2 );
-			const __m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), txMin ), tyMin ), tzMin );
-			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( txMax, t8 ), tyMax ), tzMax );
+			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( posX ? n.xmin8 : n.xmax8, ox8 ), rdx8 );
+			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( posY ? n.ymin8 : n.ymax8, oy8 ), rdy8 );
+			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n.zmin8 : n.zmax8, oz8 ), rdz8 );
+			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( posX ? n.xmax8 : n.xmin8, ox8 ), rdx8 );
+			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( posY ? n.ymax8 : n.ymin8, oy8 ), rdy8 );
+			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n.zmax8 : n.zmin8, oz8 ), rdz8 );
+			const __m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), tx1), ty1 ), tz1 );
+			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx2, t8 ), ty2 ), tz2 );
 			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
 			const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
 			if (mask)
@@ -6570,7 +6590,7 @@ bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];
 	}
-	return false;
+	return false;	
 }
 
 #endif // BVH_USEAVX2
