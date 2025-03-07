@@ -6322,7 +6322,7 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 	uint32_t stackPtr = 0, nodeIdx = 0;
 #ifdef _DEBUG
 	// sorry, not even this can be tolerated in this function. Only in debug.
-	// uint32_t steps = 0;
+	uint32_t steps = 0;
 #endif
 	while (1)
 	{
