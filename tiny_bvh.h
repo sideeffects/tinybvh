@@ -6523,6 +6523,8 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 	const __m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
 	const __m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
 	const __m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
+	ALIGNED( 64 ) uint32_t stackPtr = 0, nodeIdx = 0, dummy[6];
+	union { __m256i c8s; uint32_t cs[8]; };
 	const __m256 t8 = _mm256_set1_ps( ray.hit.t );
 #ifdef BVH8_CPU_COMPACT
 	const __m256 zero8 = _mm256_setzero_ps();
@@ -6532,7 +6534,6 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), t4 = _mm_set1_ps( ray.hit.t );
 	const __m128 one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
-	uint32_t stackPtr = 0, nodeIdx = 0;
 	while (1)
 	{
 		if (!(nodeIdx >> 31)) // top bit: leaf flag
@@ -6590,14 +6591,20 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx2, t8 ), ty2 ), tz2 );
 			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
 			const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-			if (mask)
+			const uint32_t validNodes = __popc( mask );
+			if (validNodes > 1)
 			{
 				const uint64_t lutidx = idxLUT[mask];
-				const uint32_t validNodes = __popc( mask );
 				const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( lutidx ) );
 				const __m256i child8 = _mm256_permutevar8x32_epi32( c8, cpi );
 				_mm256_storeu_si256( (__m256i*)(nodeStack + stackPtr), child8 );
 				stackPtr += validNodes;
+			}
+			else if (validNodes == 1)
+			{
+				const int lane = __bfind( mask );
+				c8s = c8, nodeIdx = cs[lane];
+				continue;
 			}
 		#endif
 		}
