@@ -6479,9 +6479,9 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 			const __m128 Akx = _mm_sub_ps( leaf.v04[kx], ox4 ), Aky = _mm_sub_ps( leaf.v04[ky], oy4 ), Akz = _mm_sub_ps( leaf.v04[kz], oz4 );
 			const __m128 Bkx = _mm_sub_ps( leaf.v14[kx], ox4 ), Bky = _mm_sub_ps( leaf.v14[ky], oy4 ), Bkz = _mm_sub_ps( leaf.v14[kz], oz4 );
 			const __m128 Ckx = _mm_sub_ps( leaf.v24[kx], ox4 ), Cky = _mm_sub_ps( leaf.v24[ky], oy4 ), Ckz = _mm_sub_ps( leaf.v24[kz], oz4 );
-			const __m128 Ax = _mm_sub_ps( Akx, _mm_mul_ps( sx4, Akz ) ), Ay = _mm_sub_ps( Aky, _mm_mul_ps( sy4, Akz ) );
-			const __m128 Bx = _mm_sub_ps( Bkx, _mm_mul_ps( sx4, Bkz ) ), By = _mm_sub_ps( Bky, _mm_mul_ps( sy4, Bkz ) );
-			const __m128 Cx = _mm_sub_ps( Ckx, _mm_mul_ps( sx4, Ckz ) ), Cy = _mm_sub_ps( Cky, _mm_mul_ps( sy4, Ckz ) );
+			const __m128 Ax = _mm_fnmadd_ps( sx4, Akz, Akx ), Ay = _mm_fnmadd_ps( sy4, Akz, Aky );
+			const __m128 Bx = _mm_fnmadd_ps( sx4, Bkz, Bkx ), By = _mm_fnmadd_ps( sy4, Bkz, Bky );
+			const __m128 Cx = _mm_fnmadd_ps( sx4, Ckz, Ckx ), Cy = _mm_fnmadd_ps( sy4, Ckz, Cky );
 			const __m128 U0 = _mm_mul_ps( Cx, By ), U1 = _mm_mul_ps( Cy, Bx ), V0 = _mm_mul_ps( Ax, Cy );
 			const __m128 V1 = _mm_mul_ps( Ay, Cx ), W0 = _mm_mul_ps( Bx, Ay ), W1 = _mm_mul_ps( By, Ax );
 			const __m128 m1 = _mm_and_ps( _mm_and_ps( _mm_cmpge_ps( U0, U1 ), _mm_cmpge_ps( V0, V1 ) ), _mm_cmpge_ps( W0, W1 ) );
@@ -6731,9 +6731,9 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 			const __m128 Akx = _mm_sub_ps( leaf.v04[kx], ox4 ), Aky = _mm_sub_ps( leaf.v04[ky], oy4 ), Akz = _mm_sub_ps( leaf.v04[kz], oz4 );
 			const __m128 Bkx = _mm_sub_ps( leaf.v14[kx], ox4 ), Bky = _mm_sub_ps( leaf.v14[ky], oy4 ), Bkz = _mm_sub_ps( leaf.v14[kz], oz4 );
 			const __m128 Ckx = _mm_sub_ps( leaf.v24[kx], ox4 ), Cky = _mm_sub_ps( leaf.v24[ky], oy4 ), Ckz = _mm_sub_ps( leaf.v24[kz], oz4 );
-			const __m128 Ax = _mm_sub_ps( Akx, _mm_mul_ps( sx4, Akz ) ), Ay = _mm_sub_ps( Aky, _mm_mul_ps( sy4, Akz ) );
-			const __m128 Bx = _mm_sub_ps( Bkx, _mm_mul_ps( sx4, Bkz ) ), By = _mm_sub_ps( Bky, _mm_mul_ps( sy4, Bkz ) );
-			const __m128 Cx = _mm_sub_ps( Ckx, _mm_mul_ps( sx4, Ckz ) ), Cy = _mm_sub_ps( Cky, _mm_mul_ps( sy4, Ckz ) );
+			const __m128 Ax = _mm_fnmadd_ps( sx4, Akz, Akx ), Ay = _mm_fnmadd_ps( sy4, Akz, Aky );
+			const __m128 Bx = _mm_fnmadd_ps( sx4, Bkz, Bkx ), By = _mm_fnmadd_ps( sy4, Bkz, Bky );
+			const __m128 Cx = _mm_fnmadd_ps( sx4, Ckz, Ckx ), Cy = _mm_fnmadd_ps( sy4, Ckz, Cky );
 			const __m128 U0 = _mm_mul_ps( Cx, By ), U1 = _mm_mul_ps( Cy, Bx ), V0 = _mm_mul_ps( Ax, Cy );
 			const __m128 V1 = _mm_mul_ps( Ay, Cx ), W0 = _mm_mul_ps( Bx, Ay ), W1 = _mm_mul_ps( By, Ax );
 			const __m128 m1 = _mm_and_ps( _mm_and_ps( _mm_cmpge_ps( U0, U1 ), _mm_cmpge_ps( V0, V1 ) ), _mm_cmpge_ps( W0, W1 ) );
