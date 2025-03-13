@@ -87,6 +87,7 @@ BVH8_CWBVH* cwbvh = 0;
 BVH8_CPU* bvh8_cpu = 0;
 enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _CPU4A, _CPU8, _GPU4, _BVH8, _CWBVH };
 
+#ifndef __APPLE__
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 #include "embree4/rtcore.h"
 static RTCScene embreeScene;
@@ -94,6 +95,7 @@ void embreeError( void* userPtr, enum RTCError error, const char* str )
 {
 	printf( "error %d: %s\n", error, str );
 }
+#endif
 #endif
 
 #ifdef ENABLE_OPENCL
@@ -600,6 +602,7 @@ int main()
 
 #endif
 
+#ifndef __APPLE__
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 
 	// convert data to correct format for Embree and build a BVH
@@ -616,7 +619,7 @@ int main()
 		vertices[i * 3 + 2] = triangles[i].z, indices[i] = i; // Note: not using shared vertices.
 	}
 	// rtcSetGeometryBuildQuality( embreeGeom, RTC_BUILD_QUALITY_HIGH ); // max quality
-	rtcSetGeometryBuildQuality( embreeGeom, RTC_BUILD_QUALITY_MEDIUM ); // max quality
+	rtcSetGeometryBuildQuality( embreeGeom, RTC_BUILD_QUALITY_MEDIUM ); // default quality
 	rtcCommitGeometry( embreeGeom );
 	rtcAttachGeometry( embreeScene, embreeGeom );
 	rtcReleaseGeometry( embreeGeom );
@@ -627,6 +630,7 @@ int main()
 	buildTime = t.elapsed();
 	printf( "%7.2fms for %7i triangles\n", buildTime * 1000.0f, verts / 3 );
 
+#endif
 #endif
 
 	// report CPU single ray, single-core performance
@@ -1068,6 +1072,7 @@ int main()
 
 #endif
 
+#ifndef __APPLE__
 #if defined EMBREE_TRAVERSE && defined EMBREE_BUILD
 
 	// report threaded CPU performance
@@ -1103,6 +1108,7 @@ int main()
 	printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	tinybvh::free64( rayhits );
 
+#endif
 #endif
 
 	// verify memory management
