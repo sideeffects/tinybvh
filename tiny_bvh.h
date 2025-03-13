@@ -151,7 +151,11 @@ THE SOFTWARE.
 
 // BVH8_CPU compact format: Half the size, 80% of the performance.
 // #define BVH8_CPU_COMPACT
-#define BVH8_WOOP_TRIS
+// BVH8_CPU Embree 'modified-Woop' intersector, inexpicably slower?
+// #define BVH8_WOOP_TRIS
+// BVH8_CPU align to big boundaries - experimental.
+#define BVH8_ALIGN_4K
+// #define BVH8_ALIGN_32K
 
 // We'll use this whenever a layout has no specialized shadow ray query.
 #define FALLBACK_SHADOW_QUERY( s ) { Ray r = s; float d = s.hit.t; Intersect( r ); return r.hit.t < d; }
@@ -171,7 +175,7 @@ THE SOFTWARE.
 // library version
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	4
-#define TINY_BVH_VERSION_SUB	3
+#define TINY_BVH_VERSION_SUB	4
 
 // ============================================================================
 //
@@ -195,12 +199,14 @@ THE SOFTWARE.
 #include <cstdint>
 
 // aligned memory allocation
-// note: formally size needs to be a multiple of 'alignment'. See:
+// note: formally, size needs to be a multiple of 'alignment'. See:
 // https://en.cppreference.com/w/c/memory/aligned_alloc
 // EMSCRIPTEN enforces this.
-// Copy of the same construct in tinyocl, different namespace.
+// Copy of the same construct in tinyocl, in a different namespace.
 namespace tinybvh {
-inline size_t make_multiple_64( size_t x ) { return (x + 63) & ~0x3f; }
+inline size_t make_multiple_64( size_t x ) { return (x + 63) & ~63; }
+inline size_t make_multiple_4k( size_t x ) { return (x + 4095) & ~4095; }
+inline size_t make_multiple_32k( size_t x ) { return (x + 32767) & ~32767; }
 }
 #ifdef _MSC_VER // Visual Studio / C11
 #define ALIGNED( x ) __declspec( align( x ) )
@@ -209,7 +215,17 @@ inline void* malloc64( size_t size, void* = nullptr )
 {
 	return size == 0 ? 0 : _aligned_malloc( make_multiple_64( size ), 64 );
 }
+inline void* malloc4k( size_t size, void* = nullptr )
+{
+	return size == 0 ? 0 : _aligned_malloc( make_multiple_4k( size ), 4096 );
+}
+inline void* malloc32k( size_t size, void* = nullptr )
+{
+	return size == 0 ? 0 : _aligned_malloc( make_multiple_32k( size ), 32768 );
+}
 inline void free64( void* ptr, void* = nullptr ) { _aligned_free( ptr ); }
+inline void free4k( void* ptr, void* = nullptr ) { _aligned_free( ptr ); }
+inline void free32k( void* ptr, void* = nullptr ) { _aligned_free( ptr ); }
 }
 #else // EMSCRIPTEN / gcc / clang
 #define ALIGNED( x ) __attribute__( ( aligned( x ) ) )
@@ -220,7 +236,17 @@ inline void* malloc64( size_t size, void* = nullptr )
 {
 	return size == 0 ? 0 : _mm_malloc( make_multiple_64( size ), 64 );
 }
+inline void* malloc4k( size_t size, void* = nullptr )
+{
+	return size == 0 ? 0 : _mm_malloc( make_multiple_4k( size ), 4096 );
+}
+inline void* malloc32k( size_t size, void* = nullptr )
+{
+	return size == 0 ? 0 : _mm_malloc( make_multiple_32k( size ), 32768 );
+}
 inline void free64( void* ptr, void* = nullptr ) { _mm_free( ptr ); }
+inline void free4k( void* ptr, void* = nullptr ) { _mm_free( ptr ); }
+inline void free32k( void* ptr, void* = nullptr ) { _mm_free( ptr ); }
 }
 #else
 namespace tinybvh {
@@ -232,7 +258,25 @@ inline void* malloc64( size_t size, void* = nullptr )
 	return size == 0 ? 0 : aligned_alloc( 64, make_multiple_64( size ) );
 #endif
 }
+inline void* malloc4k( size_t size, void* = nullptr )
+{
+#if defined __GNUC__ && !defined __APPLE__
+	return size == 0 ? 0 : _aligned_malloc( 4096, make_multiple_4k( size ) );
+#else
+	return size == 0 ? 0 : aligned_alloc( 4096, make_multiple_4k( size ) );
+#endif
+}
+inline void* malloc32k( size_t size, void* = nullptr )
+{
+#if defined __GNUC__ && !defined __APPLE__
+	return size == 0 ? 0 : _aligned_malloc( 32768, make_multiple_32k( size ) );
+#else
+	return size == 0 ? 0 : aligned_alloc( 32768, make_multiple_32k( size ) );
+#endif
+}
 inline void free64( void* ptr, void* = nullptr ) { free( ptr ); }
+inline void free4k( void* ptr, void* = nullptr ) { free( ptr ); }
+inline void free32k( void* ptr, void* = nullptr ) { free( ptr ); }
 }
 #endif
 #endif
@@ -4569,14 +4613,21 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 	if (allocatedNodes < spaceNeeded || allocatedLeafs < leafsNeeded)
 	{
 		AlignedFree( bvh8Node );
-		bvh8Node = (BVHNode*)AlignedAlloc( spaceNeeded * sizeof( BVHNode ) );
+	#if defined BVH8_ALIGN_32K
+		void* (*allocator)(size_t, void*) = malloc32k;
+	#elif defined BVH8_ALIGN_4K
+		void* (*allocator)(size_t, void*) = malloc4k;
+	#else
+		void* (*alignedalloc)(size_t, void*) = malloc64;
+	#endif
+		bvh8Node = (BVHNode*)allocator( spaceNeeded * sizeof( BVHNode ), 0 );
 	#ifdef BVH8_CPU_COMPACT
-		bvh8Small = (BVHNodeCompact*)AlignedAlloc( spaceNeeded * sizeof( BVHNodeCompact ) );
+		bvh8Small = (BVHNodeCompact*)allocator( spaceNeeded * sizeof( BVHNodeCompact ), 0 );
 	#endif
 	#ifdef BVH8_WOOP_TRIS
-		bvh8Leaf = (BVHWoop4Leaf*)AlignedAlloc( leafsNeeded * sizeof( BVHWoop4Leaf ) );
+		bvh8Leaf = (BVHWoop4Leaf*)allocator( leafsNeeded * sizeof( BVHWoop4Leaf ), 0 );
 	#else
-		bvh8Leaf = (BVHTri4Leaf*)AlignedAlloc( leafsNeeded * sizeof( BVHTri4Leaf ) );
+		bvh8Leaf = (BVHTri4Leaf*)allocator( leafsNeeded * sizeof( BVHTri4Leaf ), 0 );
 	#endif
 		allocatedNodes = spaceNeeded, allocatedLeafs = leafsNeeded;
 	}
@@ -6139,8 +6190,8 @@ int32_t BVH4_AVX2_WIP::Intersect( Ray& ray ) const
 		steps++;
 		if (!(nodeIdx >> 31)) // top bit: leaf flag
 		{
-			const BVHNode& n = bvh4Node[nodeIdx];
 		#if 0 // TODO
+			const BVHNode& n = bvh4Node[nodeIdx];
 			const __m128i index = _mm_srlv_epi32( n.perm4, signShift4 );
 			__m128i c4 = n.child4;
 			const __m128 tx1 = _mm_mul_ps( _mm_sub_ps( n.xmin4, ox4 ), rdx4 );
@@ -6218,13 +6269,13 @@ int32_t BVH4_AVX2_WIP::Intersect( Ray& ray ) const
 					uint32_t outStackPtr = 0;
 					for (uint32_t i = 0; i < stackPtr; i += 8)
 					{
-						__m128i node4 = _mm_load_si128( (__m128i*)(nodeStack + i) );
-						__m128 dist4 = _mm_load_ps( (float*)(distStack + i) );
-						const uint32_t mask = _mm_movemask_ps( _mm_cmplt_ps( dist4, t4 ) );
+						__m128i n4 = _mm_load_si128( (__m128i*)(nodeStack + i) );
+						__m128 d4 = _mm_load_ps( (float*)(distStack + i) );
+						const uint32_t mask = _mm_movemask_ps( _mm_cmplt_ps( d4, t4 ) );
 						const __m128i cpi = _mm_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT4[mask] ) );
-						dist4 = _mm_permutevar_ps( dist4, cpi ), node4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( node4 ), cpi ) );
-						_mm_storeu_ps( (float*)(distStack + outStackPtr), dist4 );
-						_mm_storeu_si128( (__m128i*)(nodeStack + outStackPtr), node4 );
+						d4 = _mm_permutevar_ps( d4, cpi ), n4 = _mm_castps_si128( _mm_permutevar_ps( _mm_castsi128_ps( n4 ), cpi ) );
+						_mm_storeu_ps( (float*)(distStack + outStackPtr), d4 );
+						_mm_storeu_si128( (__m128i*)(nodeStack + outStackPtr), n4 );
 						const uint32_t numItems = tinybvh_min( 8u, stackPtr - i ), validMask = (1 << numItems) - 1;
 						outStackPtr += __popc( mask & validMask );
 					}
@@ -6366,7 +6417,8 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 	constexpr int signShift = (posX ? 3 : 0) + (posY ? 6 : 0) + (posZ ? 12 : 0);
 #ifdef BVH8_WOOP_TRIS
 	// precalculated data for 'modified-Woop' intersection
-	uint32_t kz = tinybvh_maxdim( ray.D ), kx = (kz + 1) % 3, ky = (kx + 1) % 3;
+	const uint32_t kz = tinybvh_maxdim( ray.D );
+	uint32_t kx = (1 << kz) & 3, ky = (1 << kx) & 3; // https://www.codercorner.com/Modulo3.htm
 	const float inv_dir_kz = ray.rD[kz];
 	if (ray.D[kz] < 0) std::swap( kx, ky );
 	const __m128 sx4 = _mm_set1_ps( ray.D[kx] * inv_dir_kz ), sy4 = _mm_set1_ps( ray.D[ky] * inv_dir_kz ), sz4 = _mm_set1_ps( inv_dir_kz );
@@ -6586,7 +6638,7 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 					#else
 						const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( dist8 ), _mm256_castps_si256( t8 ) );
 						const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-					#endif			
+					#endif
 						const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT[mask] ) );
 						dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
 						_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
@@ -6636,7 +6688,8 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 #endif
 #ifdef BVH8_WOOP_TRIS
 	// precalculated data for 'modified-Woop' intersection
-	uint32_t kz = tinybvh_maxdim( ray.D ), kx = (kz + 1) % 3, ky = (kx + 1) % 3;
+	const uint32_t kz = tinybvh_maxdim( ray.D );
+	uint32_t kx = (1 << kz) & 3, ky = (1 << kx) & 3; // https://www.codercorner.com/Modulo3.htm
 	const float inv_dir_kz = ray.rD[kz];
 	if (ray.D[kz] < 0) std::swap( kx, ky );
 	const __m128 sx4 = _mm_set1_ps( ray.D[kx] * inv_dir_kz ), sy4 = _mm_set1_ps( ray.D[ky] * inv_dir_kz ), sz4 = _mm_set1_ps( inv_dir_kz );
