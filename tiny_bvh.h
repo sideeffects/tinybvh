@@ -6312,7 +6312,33 @@ template <bool posX, bool posY, bool posZ> bool BVH4_AVX2_WIP::IsOccluded( const
 }
 
 ALIGNED( 64 ) static const uint64_t idxLUT[256] = {
-	0,0,1,256,2,512,513,131328,3,768,769,196864,770,197120,197121,50462976,4,1024,1025,262400,1026,262656,262657,67240192,
+	506097522914230528, 1976943448883713, 1976943448883712, 7722435347202, 1976943448883456, 7722435347201,	 
+	7722435347200, 30165763075, 1976943448817920, 7722435346945, 7722435346944, 30165763074, 7722435346688,	 
+	30165763073, 30165763072, 117835012, 1976943432040704, 7722435281409, 7722435281408, 30165762818,	 
+	7722435281152, 30165762817, 30165762816, 117835011, 7722435215616, 30165762561, 30165762560, 117835010,	 
+	30165762304, 117835009, 117835008, 460293, 1976939137073408, 7722418504193, 7722418504192, 30165697282,	 
+	7722418503936, 30165697281, 30165697280, 117834755, 7722418438400, 30165697025, 30165697024, 117834754,	 
+	30165696768, 117834753, 117834752, 460292, 7722401661184, 30165631489, 30165631488, 117834498, 30165631232,	 
+	117834497, 117834496, 460291, 30165565696, 117834241, 117834240, 460290, 117833984, 460289, 460288, 1798,	 
+	1975839625445632, 7718123536897, 7718123536896, 30148920066, 7718123536640, 30148920065, 30148920064, 
+	117769219, 7718123471104, 30148919809, 30148919808, 117769218, 30148919552, 117769217, 117769216, 460036,	 
+	7718106693888, 30148854273, 30148854272, 117768962, 30148854016, 117768961, 117768960, 460035, 30148788480,	 
+	117768705, 117768704, 460034, 117768448, 460033, 460032, 1797, 7713811726592, 30132077057, 30132077056, 
+	117703426, 30132076800, 117703425, 117703424, 459779, 30132011264, 117703169, 117703168, 459778, 117702912,	 
+	459777, 459776, 1796, 30115234048, 117637633, 117637632, 459522, 117637376, 459521, 459520, 1795, 117571840,	 
+	459265, 459264, 1794, 459008, 1793, 1792, 7, 1694364648734976, 6618611909121, 6618611909120, 25853952770,	 
+	6618611908864, 25853952769, 25853952768, 100992003, 6618611843328, 25853952513, 25853952512, 100992002,	 
+	25853952256, 100992001, 100992000, 394500, 6618595066112, 25853886977, 25853886976, 100991746, 25853886720,	 
+	100991745, 100991744, 394499, 25853821184, 100991489, 100991488, 394498, 100991232, 394497, 394496, 1541,	 
+	6614300098816, 25837109761, 25837109760, 100926210, 25837109504, 100926209, 100926208, 394243, 25837043968,	 
+	100925953, 100925952, 394242, 100925696, 394241, 394240, 1540, 25820266752, 100860417, 100860416, 393986,	 
+	100860160, 393985, 393984, 1539, 100794624, 393729, 393728, 1538, 393472, 1537, 1536, 6, 5514788471040,	 
+	21542142465, 21542142464, 84148994, 21542142208, 84148993, 84148992, 328707, 21542076672, 84148737,	 
+	84148736, 328706, 84148480, 328705, 328704, 1284, 21525299456, 84083201, 84083200, 328450, 84082944, 328449,	 
+	328448, 1283, 84017408, 328193, 328192, 1282, 327936, 1281, 1280, 5, 17230332160, 67305985, 67305984, 262914,	 
+	67305728, 262913, 262912, 1027, 67240192, 262657, 262656, 1026, 262400, 1025, 1024, 4, 50462976, 197121,	 
+	197120, 770, 196864, 769, 768, 3, 131328, 513, 512, 2, 256, 1, 0, 0
+	/* 0,0,1,256,2,512,513,131328,3,768,769,196864,770,197120,197121,50462976,4,1024,1025,262400,1026,262656,262657,67240192,
 	1027,262912,262913,67305728,262914,67305984,67305985,17230332160,5,1280,1281,327936,1282,328192,328193,84017408,1283,
 	328448,328449,84082944,328450,84083200,84083201,21525299456,1284,328704,328705,84148480,328706,84148736,84148737,
 	21542076672,328707,84148992,84148993,21542142208,84148994,21542142464,21542142465,5514788471040,6,1536,1537,393472,1538,
@@ -6332,7 +6358,7 @@ ALIGNED( 64 ) static const uint64_t idxLUT[256] = {
 	7722418504193,1976939137073408,460293,117835008,117835009,30165762304,117835010,30165762560,30165762561,7722435215616,
 	117835011,30165762816,30165762817,7722435281152,30165762818,7722435281408,7722435281409,1976943432040704,117835012,
 	30165763072,30165763073,7722435346688,30165763074,7722435346944,7722435346945,1976943448817920,30165763075,7722435347200,
-	7722435347201,1976943448883456,7722435347202,1976943448883712,1976943448883713,506097522914230528
+	7722435347201,1976943448883456,7722435347202,1976943448883712,1976943448883713,506097522914230528 */
 };
 
 int32_t BVH8_CPU::Intersect( Ray& ray ) const
@@ -6447,9 +6473,9 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 			tmin = _mm256_permutevar8x32_ps( tmin, index );
 			tmax = _mm256_permutevar8x32_ps( tmax, index );
 			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
-			const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-			const uint32_t validNodes = __popc( mask );
-			if (validNodes > 1)
+			const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
+			const uint32_t invalidNodes = __popc( mask );
+			if (invalidNodes < 7)
 			{
 				const uint64_t lutidx = idxLUT[mask];
 				c8 = _mm256_permutevar8x32_epi32( c8, index );
@@ -6458,13 +6484,13 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 				const __m256 dist8 = _mm256_permutevar8x32_ps( tmin, cpi );
 				_mm256_storeu_si256( (__m256i*)(nodeStack + stackPtr), child8 );
 				_mm256_storeu_ps( (float*)(distStack + stackPtr), dist8 );
-				stackPtr += validNodes - 1;
+				stackPtr += 7 - invalidNodes;
 				nodeIdx = nodeStack[stackPtr];
 				continue;
 			}
-			else if (validNodes == 1)
+			else if (invalidNodes == 7)
 			{
-				const int lane = __bfind( mask );
+				const int lane = __bfind( 255 - mask );
 				c8s = _mm256_permutevar8x32_epi32( c8, index );
 				nodeIdx = cs[lane];
 				continue;
@@ -6522,13 +6548,13 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 						__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
 						__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
 						const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( dist8 ), _mm256_castps_si256( t8 ) );
-						const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
+						const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
 						const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT[mask] ) );
 						dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
 						_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
 						_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
 						const uint32_t numItems = tinybvh_min( 8u, stackPtr - i ), validMask = (1 << numItems) - 1;
-						outStackPtr += __popc( mask & validMask );
+						outStackPtr += __popc( (255 - mask) & validMask );
 					}
 					stackPtr = outStackPtr;
 				}
@@ -6536,23 +6562,23 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 		#else
 			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
 			const BVHTri4Leaf* leaf = (BVHTri4Leaf*)(bvh8Data + (nodeIdx & 0x1fffffff));
-			const __m128 hx4 = _mm_sub_ps( _mm_mul_ps( dy4, leaf->e2z4 ), _mm_mul_ps( dz4, leaf->e2y4 ) );
-			const __m128 hy4 = _mm_sub_ps( _mm_mul_ps( dz4, leaf->e2x4 ), _mm_mul_ps( dx4, leaf->e2z4 ) );
-			const __m128 hz4 = _mm_sub_ps( _mm_mul_ps( dx4, leaf->e2y4 ), _mm_mul_ps( dy4, leaf->e2x4 ) );
+			const __m128 hx4 = _mm_fmsub_ps( dy4, leaf->e2z4, _mm_mul_ps( dz4, leaf->e2y4 ) );
+			const __m128 hy4 = _mm_fmsub_ps( dz4, leaf->e2x4, _mm_mul_ps( dx4, leaf->e2z4 ) );
+			const __m128 hz4 = _mm_fmsub_ps( dx4, leaf->e2y4, _mm_mul_ps( dy4, leaf->e2x4 ) );
 			const __m128 sx4 = _mm_sub_ps( _mm256_extractf128_ps( ox8, 0 ), leaf->v0x4 );
 			const __m128 sy4 = _mm_sub_ps( _mm256_extractf128_ps( oy8, 0 ), leaf->v0y4 );
 			const __m128 sz4 = _mm_sub_ps( _mm256_extractf128_ps( oz8, 0 ), leaf->v0z4 );
-			const __m128 det4 = _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf->e1x4, hx4 ), _mm_mul_ps( leaf->e1y4, hy4 ) ), _mm_mul_ps( leaf->e1z4, hz4 ) );
+			const __m128 det4 = _mm_fmadd_ps( leaf->e1z4, hz4, _mm_fmadd_ps( leaf->e1x4, hx4, _mm_mul_ps( leaf->e1y4, hy4 ) ) );
 			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
 			const __m128 inv_det4 = fastrcp4( det4 );
-			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
-			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf->e1y4 ), _mm_mul_ps( sy4, leaf->e1x4 ) );
-			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf->e1z4 ), _mm_mul_ps( sz4, leaf->e1y4 ) );
-			const __m128 qy4 = _mm_sub_ps( _mm_mul_ps( sz4, leaf->e1x4 ), _mm_mul_ps( sx4, leaf->e1z4 ) );
-			const __m128 v4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( dx4, qx4 ), _mm_mul_ps( dy4, qy4 ) ), _mm_mul_ps( dz4, qz4 ) ), inv_det4 );
+			const __m128 u4 = _mm_mul_ps( _mm_fmadd_ps( sz4, hz4, _mm_fmadd_ps( sx4, hx4, _mm_mul_ps( sy4, hy4 ) ) ), inv_det4 );
+			const __m128 qz4 = _mm_fmsub_ps( sx4, leaf->e1y4, _mm_mul_ps( sy4, leaf->e1x4 ) );
+			const __m128 qx4 = _mm_fmsub_ps( sy4, leaf->e1z4, _mm_mul_ps( sz4, leaf->e1y4 ) );
+			const __m128 qy4 = _mm_fmsub_ps( sz4, leaf->e1x4, _mm_mul_ps( sx4, leaf->e1z4 ) );
+			const __m128 v4 = _mm_mul_ps( _mm_fmadd_ps( dz4, qz4, _mm_fmadd_ps( dx4, qx4, _mm_mul_ps( dy4, qy4 ) ) ), inv_det4 );
 			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, one4 ) );
 			const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 ) );
-			const __m128 ta4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf->e2x4, qx4 ), _mm_mul_ps( leaf->e2y4, qy4 ) ), _mm_mul_ps( leaf->e2z4, qz4 ) ), inv_det4 );
+			const __m128 ta4 = _mm_mul_ps( _mm_fmadd_ps( leaf->e2z4, qz4, _mm_fmadd_ps( leaf->e2x4, qx4, _mm_mul_ps( leaf->e2y4, qy4 ) ) ), inv_det4 );
 			const __m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
 			if (_mm_movemask_ps( combined ))
 			{
@@ -6581,18 +6607,14 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 					{
 						__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
 						__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
-					#if 0
-						const uint32_t mask = _mm256_movemask_ps( _mm256_cmp_ps( dist8, t8, _CMP_LT_OQ ) );
-					#else
 						const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( dist8 ), _mm256_castps_si256( t8 ) );
-						const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-					#endif
+						const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
 						const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT[mask] ) );
 						dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
 						_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
 						_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
 						const uint32_t numItems = tinybvh_min( 8u, stackPtr - i ), validMask = (1 << numItems) - 1;
-						outStackPtr += __popc( mask & validMask );
+						outStackPtr += __popc( (255 - mask) & validMask );
 					}
 					stackPtr = outStackPtr;
 				}
@@ -6704,21 +6726,21 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 			const __m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), tx1 ), ty1 ), tz1 );
 			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx2, t8 ), ty2 ), tz2 );
 			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
-			const uint32_t mask = 255 - _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-			const uint32_t validNodes = __popc( mask );
-			if (validNodes > 1)
+			const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
+			const uint32_t invalidNodes = __popc( mask );
+			if (invalidNodes < 7)
 			{
 				const uint64_t lutidx = idxLUT[mask];
 				const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( lutidx ) );
 				const __m256i child8 = _mm256_permutevar8x32_epi32( c8, cpi );
 				_mm256_storeu_si256( (__m256i*)(nodeStack + stackPtr), child8 );
-				stackPtr += validNodes - 1;
+				stackPtr += 7 - invalidNodes;
 				nodeIdx = nodeStack[stackPtr];
 				continue;
 			}
-			else if (validNodes == 1)
+			else if (invalidNodes == 7)
 			{
-				const int lane = __bfind( mask );
+				const int lane = __bfind( 255 - mask );
 				c8s = c8, nodeIdx = cs[lane];
 				continue;
 			}
@@ -6753,26 +6775,25 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 		#else
 			// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
 			const BVHTri4Leaf* leaf = (BVHTri4Leaf*)(bvh8Data + (nodeIdx & 0x1fffffff));
-			const __m128 hx4 = _mm_sub_ps( _mm_mul_ps( dy4, leaf->e2z4 ), _mm_mul_ps( dz4, leaf->e2y4 ) );
-			const __m128 hy4 = _mm_sub_ps( _mm_mul_ps( dz4, leaf->e2x4 ), _mm_mul_ps( dx4, leaf->e2z4 ) );
-			const __m128 hz4 = _mm_sub_ps( _mm_mul_ps( dx4, leaf->e2y4 ), _mm_mul_ps( dy4, leaf->e2x4 ) );
+			const __m128 hx4 = _mm_fmsub_ps( dy4, leaf->e2z4, _mm_mul_ps( dz4, leaf->e2y4 ) );
+			const __m128 hy4 = _mm_fmsub_ps( dz4, leaf->e2x4, _mm_mul_ps( dx4, leaf->e2z4 ) );
+			const __m128 hz4 = _mm_fmsub_ps( dx4, leaf->e2y4, _mm_mul_ps( dy4, leaf->e2x4 ) );
 			const __m128 sx4 = _mm_sub_ps( _mm256_extractf128_ps( ox8, 0 ), leaf->v0x4 );
 			const __m128 sy4 = _mm_sub_ps( _mm256_extractf128_ps( oy8, 0 ), leaf->v0y4 );
 			const __m128 sz4 = _mm_sub_ps( _mm256_extractf128_ps( oz8, 0 ), leaf->v0z4 );
-			const __m128 det4 = _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf->e1x4, hx4 ), _mm_mul_ps( leaf->e1y4, hy4 ) ), _mm_mul_ps( leaf->e1z4, hz4 ) );
+			const __m128 det4 = _mm_fmadd_ps( leaf->e1z4, hz4, _mm_fmadd_ps( leaf->e1x4, hx4, _mm_mul_ps( leaf->e1y4, hy4 ) ) );
 			const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
 			const __m128 inv_det4 = fastrcp4( det4 );
-			const __m128 u4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( sx4, hx4 ), _mm_mul_ps( sy4, hy4 ) ), _mm_mul_ps( sz4, hz4 ) ), inv_det4 );
-			const __m128 qx4 = _mm_sub_ps( _mm_mul_ps( sy4, leaf->e1z4 ), _mm_mul_ps( sz4, leaf->e1y4 ) );
-			const __m128 qy4 = _mm_sub_ps( _mm_mul_ps( sz4, leaf->e1x4 ), _mm_mul_ps( sx4, leaf->e1z4 ) );
-			const __m128 qz4 = _mm_sub_ps( _mm_mul_ps( sx4, leaf->e1y4 ), _mm_mul_ps( sy4, leaf->e1x4 ) );
-			const __m128 v4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( dx4, qx4 ), _mm_mul_ps( dy4, qy4 ) ), _mm_mul_ps( dz4, qz4 ) ), inv_det4 );
+			const __m128 u4 = _mm_mul_ps( _mm_fmadd_ps( sz4, hz4, _mm_fmadd_ps( sx4, hx4, _mm_mul_ps( sy4, hy4 ) ) ), inv_det4 );
+			const __m128 qz4 = _mm_fmsub_ps( sx4, leaf->e1y4, _mm_mul_ps( sy4, leaf->e1x4 ) );
+			const __m128 qx4 = _mm_fmsub_ps( sy4, leaf->e1z4, _mm_mul_ps( sz4, leaf->e1y4 ) );
+			const __m128 qy4 = _mm_fmsub_ps( sz4, leaf->e1x4, _mm_mul_ps( sx4, leaf->e1z4 ) );
+			const __m128 v4 = _mm_mul_ps( _mm_fmadd_ps( dz4, qz4, _mm_fmadd_ps( dx4, qx4, _mm_mul_ps( dy4, qy4 ) ) ), inv_det4 );
 			const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, one4 ) );
 			const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 ) );
-			const __m128 ta4 = _mm_mul_ps( _mm_add_ps( _mm_add_ps( _mm_mul_ps( leaf->e2x4, qx4 ), _mm_mul_ps( leaf->e2y4, qy4 ) ), _mm_mul_ps( leaf->e2z4, qz4 ) ), inv_det4 );
+			const __m128 ta4 = _mm_mul_ps( _mm_fmadd_ps( leaf->e2z4, qz4, _mm_fmadd_ps( leaf->e2x4, qx4, _mm_mul_ps( leaf->e2y4, qy4 ) ) ), inv_det4 );
 			__m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
-			combined = _mm_and_ps( combined, _mm_cmplt_ps( ta4, t4 ) );
-			if (_mm_movemask_ps( combined )) return true;
+			if (_mm_movemask_ps( _mm_and_ps( combined, _mm_cmplt_ps( ta4, t4 ) ) )) return true;
 		#endif
 		}
 		if (!stackPtr) break;
