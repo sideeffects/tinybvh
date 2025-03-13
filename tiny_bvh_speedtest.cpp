@@ -42,6 +42,10 @@
 using namespace tinybvh;
 
 #ifdef _MSC_VER
+#include "Windows.h"
+#endif
+
+#ifdef _MSC_VER
 #include "stdio.h"		// for printf
 #include "stdlib.h"		// for rand
 #else
@@ -105,9 +109,6 @@ void embreeError( void* userPtr, enum RTCError error, const char* str )
 
 float uniform_rand() { return (float)rand() / (float)RAND_MAX; }
 
-#ifdef _MSC_VER
-#include "Windows.h"
-#endif
 void PrepareTest()
 {
 #ifdef _MSC_VER
