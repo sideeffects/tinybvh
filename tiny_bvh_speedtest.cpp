@@ -87,7 +87,7 @@ BVH8_CWBVH* cwbvh = 0;
 BVH8_CPU* bvh8_cpu = 0;
 enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _CPU4A, _CPU8, _GPU4, _BVH8, _CWBVH };
 
-#ifndef __APPLE__
+#if defined _WIN32 || defined _WIN64
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 #include "embree4/rtcore.h"
 static RTCScene embreeScene;
@@ -602,7 +602,7 @@ int main()
 
 #endif
 
-#ifndef __APPLE__
+#if defined _WIN32 || defined _WIN64
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
 
 	// convert data to correct format for Embree and build a BVH
@@ -1072,7 +1072,7 @@ int main()
 
 #endif
 
-#ifndef __APPLE__
+#if defined _WIN32 || defined _WIN64
 #if defined EMBREE_TRAVERSE && defined EMBREE_BUILD
 
 	// report threaded CPU performance
