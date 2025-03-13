@@ -1215,7 +1215,7 @@ public:
 		__m256i child8, perm8;		// 64, includes cbmaxx8<<24 in perm8.
 	};
 #endif
-	struct CacheLine { __m256 a, b; };
+	struct CacheLine { SIMDVEC8 a, b; };
 	BVH8_CPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH8_AVX2; context = ctx; }
 	~BVH8_CPU();
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
