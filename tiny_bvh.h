@@ -1210,8 +1210,8 @@ public:
 		uint64_t cbminx8;			// 8, stores aabbMin.x for 8 children, quantized.
 		float bminx, bminy, bminz;	// 12, actually: bmin - ext.
 		float bextx, bexty, bextz;	// 12, extend of the node, scaled conversatively.
-		__m256i cbminmaxyz8;		// 32, stores cbminy8, cbminz8, cbmaxy8, cbmaxz8
-		__m256i child8, perm8;		// 64, includes cbmaxx8<<24 in perm8.
+		SIMDIVEC8 cbminmaxyz8;		// 32, stores cbminy8, cbminz8, cbmaxy8, cbmaxz8
+		SIMDIVEC8 child8, perm8;	// 64, includes cbmaxx8<<24 in perm8.
 	};
 	struct CacheLine { SIMDVEC8 a, b; };
 	BVH8_CPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH8_AVX2; context = ctx; }
