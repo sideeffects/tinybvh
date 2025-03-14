@@ -154,8 +154,8 @@ THE SOFTWARE.
 // BVH8_CPU Embree 'modified-Woop' intersector, inexplicably slower?
 // #define BVH8_WOOP_TRIS
 // BVH8_CPU align to big boundaries - experimental.
-#define BVH8_ALIGN_4K
-// #define BVH8_ALIGN_32K
+// #define BVH8_ALIGN_4K
+#define BVH8_ALIGN_32K
 
 // We'll use this whenever a layout has no specialized shadow ray query.
 #define FALLBACK_SHADOW_QUERY( s ) { Ray r = s; float d = s.hit.t; Intersect( r ); return r.hit.t < d; }
