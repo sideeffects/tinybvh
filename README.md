@@ -152,17 +152,21 @@ Plans, ordered by priority:
 * Demo of tinybvh on GPU using other apis:
   * Ray tracing in pure OpenGL
   * Ray tracing in pure DirectX
+  * SDL3 sample application
 * Bridge to rt hw / layouts:
   * Produce a BVH for Intel rt hw (mind the quads)
   * Produce a BVH for AMD rt hw
   * Use inline asm on AMD for aabb/tri intersect
 * Comparisons / experiments:
-  * Other ray distributions in speedtest
   * Memory use analysis in speedtest
   * DXR renderer to compare against hw rt
 * CPU single-ray performance
+  * Experiment with 1, 4 and 8 tris in BVH8_CPU
   * Reverse-engineer Embree & PhysX
   * Combination of TLAS and packet traversal
+* Ease-of-use
+  * Robust default origin offset
+  * Engine layer
   
 # tinybvh in the Wild
 A list of projects using tinybvh:
