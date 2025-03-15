@@ -149,6 +149,7 @@ Plans, ordered by priority:
 * Features & outstanding issues:
   * 'Watertight' triangle intersection option
   * Load/save/Optimize/Refit for BVH8_CPU
+  * Detect AVX, AVX2, SSE, NEON flags
 * Demo of tinybvh on GPU using other apis:
   * Ray tracing in pure OpenGL
   * Ray tracing in pure DirectX
