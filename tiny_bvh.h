@@ -1148,8 +1148,6 @@ struct BVHWoop4Leaf
 	SIMDVEC4 dummy0, dummy1;	// pad to 3 full cachelines.
 };
 
-#define WIVE4WIDE
-
 class BVH4_AVX2_WIP : public BVHBase
 {
 public:
@@ -1216,6 +1214,8 @@ public:
 	struct CacheLine { SIMDVEC8 a, b; };
 	BVH8_CPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH8_AVX2; context = ctx; }
 	~BVH8_CPU();
+	void Save( const char* fileName );
+	bool Load( const char* fileName, const uint32_t expectedTris );
 	void Build( const bvhvec4* vertices, const uint32_t primCount );
 	void Build( const bvhvec4slice& vertices );
 	void Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims );
@@ -1225,8 +1225,9 @@ public:
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims );
 	void Optimize( const uint32_t iterations, bool extreme );
+	void Refit();
 	float SAHCost( const uint32_t nodeIdx ) const;
-	void ConvertFrom( const MBVH<8>& original, bool compact = true );
+	void ConvertFrom( const MBVH<8>& original );
 	int32_t Intersect( Ray& ray ) const;
 	bool IsOccluded( const Ray& ray ) const;
 	// Intersect / IsOccluded specialize for ray octant using templated functions.
@@ -1237,6 +1238,7 @@ public:
 	MBVH<8> bvh8;					// BVH8_CPU is created from BVH8 and uses its data.
 	bool ownBVH8 = true;			// false when ConvertFrom receives an external bvh8.
 	uint32_t allocatedBlocks = 0;	// node data and triangles are stored in 16-byte blocks.
+	uint32_t usedBlocks = 0;		// the amount of data actually used.
 };
 
 // BLASInstance: A TLAS is built over BLAS instances, where a single BLAS can be
@@ -4482,7 +4484,7 @@ void BVH8_CPU::Build( const bvhvec4slice& vertices )
 	bvh8.bvh.CombineLeafs( 4 );
 	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, false );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8 );
 }
 
 void BVH8_CPU::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -4499,7 +4501,7 @@ void BVH8_CPU::Build( const bvhvec4slice& vertices, const uint32_t* indices, uin
 	bvh8.bvh.CombineLeafs( 4 );
 	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8 );
 }
 
 void BVH8_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t primCount )
@@ -4514,7 +4516,7 @@ void BVH8_CPU::BuildHQ( const bvhvec4slice& vertices )
 	bvh8.bvh.CombineLeafs( 4 );
 	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8 );
 }
 
 void BVH8_CPU::BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
@@ -4529,13 +4531,54 @@ void BVH8_CPU::BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, u
 	bvh8.bvh.CombineLeafs( 4 );
 	bvh8.bvh.SplitLeafs( 4 );
 	bvh8.ConvertFrom( bvh8.bvh, true );
-	ConvertFrom( bvh8, true );
+	ConvertFrom( bvh8 );
+}
+
+void BVH8_CPU::Save( const char* fileName )
+{
+	std::fstream s{ fileName, s.binary | s.out };
+	uint32_t header = TINY_BVH_VERSION_SUB + (TINY_BVH_VERSION_MINOR << 8) + (TINY_BVH_VERSION_MAJOR << 16) + (layout << 24);
+	s.write( (char*)&header, sizeof( uint32_t ) );
+	s.write( (char*)&triCount, sizeof( uint32_t ) );
+	s.write( (char*)this, sizeof( BVH8_CPU ) );
+	s.write( (char*)bvh8Data, usedBlocks * 64 );
+}
+
+bool BVH8_CPU::Load( const char* fileName, const uint32_t expectedTris )
+{
+	// open file and check contents
+	std::fstream s{ fileName, s.binary | s.in };
+	if (!s) return false;
+	BVHContext tmp = context;
+	uint32_t header, fileTriCount;
+	s.read( (char*)&header, sizeof( uint32_t ) );
+	if (((header >> 8) & 255) != TINY_BVH_VERSION_MINOR ||
+		((header >> 16) & 255) != TINY_BVH_VERSION_MAJOR ||
+		(header & 255) != TINY_BVH_VERSION_SUB || (header >> 24) != layout) return false;
+	s.read( (char*)&fileTriCount, sizeof( uint32_t ) );
+	if (fileTriCount != expectedTris) return false;
+	// all checks passed; safe to overwrite *this
+	s.read( (char*)this, sizeof( BVH8_CPU ) );
+	context = tmp; // can't load context; function pointers will differ.
+	bvh8Data = (CacheLine*)AlignedAlloc( usedBlocks * 64 );
+	allocatedBlocks = usedBlocks;
+	s.read( (char*)bvh8Data, usedBlocks * 64 );
+	bvh8 = MBVH<8>();
+	return true;
 }
 
 void BVH8_CPU::Optimize( const uint32_t iterations, bool extreme )
 {
 	bvh8.Optimize( iterations, extreme );
-	ConvertFrom( bvh8, false );
+	bvh8.bvh.CombineLeafs( 4 );
+	bvh8.bvh.SplitLeafs( 4 );
+	ConvertFrom( bvh8 );
+}
+
+void BVH8_CPU::Refit()
+{
+	bvh8.Refit();
+	ConvertFrom( bvh8 );
 }
 
 float BVH8_CPU::SAHCost( const uint32_t nodeIdx ) const
@@ -4544,12 +4587,12 @@ float BVH8_CPU::SAHCost( const uint32_t nodeIdx ) const
 }
 
 #define SORT(a,b) { if (dist[a] < dist[b]) { float h = dist[a]; dist[a] = dist[b], dist[b] = h; } }
-void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
+void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 {
 	// get a copy of the original bvh4
 	if (&original != &bvh8) ownBVH8 = false; // bvh isn't ours; don't delete in destructor.
 	bvh8 = original;
-	uint32_t nodesNeeded = compact ? bvh8.usedNodes : bvh8.allocatedNodes;
+	uint32_t nodesNeeded = bvh8.usedNodes;
 	uint32_t leafsNeeded = bvh8.LeafCount();
 #ifdef BVH8_CPU_COMPACT
 	uint32_t blocksNeeded = nodesNeeded * (sizeof( BVHNodeCompact ) / 64); // here, block = cacheline.
@@ -4697,7 +4740,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original, bool compact )
 		const uint32_t offset = stack[--stackPtr];
 		((uint32_t*)bvh8Data)[offset] = newBlockPtr;
 	}
-	usedNodes = newBlockPtr;
+	usedBlocks = newBlockPtr;
 }
 
 // BVH8_CWBVH implementation
