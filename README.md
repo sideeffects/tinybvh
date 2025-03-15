@@ -1,6 +1,3 @@
-# dev
-This is the **development branch** for tinybvh. PRs go here!
-
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
@@ -68,7 +65,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -std=c++20 -mavx2 -mfma -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.4.4
+# Version 1.4.5
 
 Version 1.4.0 introduces a new BVH layout for fast single-ray traversal on CPU: BVH8_CPU. This supersedes the previous fastest scheme, BVH4_CPU. 
 
@@ -148,7 +145,6 @@ Plans, ordered by priority:
   * Improve speed of SBVH builder
 * Features & outstanding issues:
   * 'Watertight' triangle intersection option
-  * Load/save/Optimize/Refit for BVH8_CPU
   * Detect AVX, AVX2, SSE, NEON flags
   * Use PARANOID flag to check NaNs and more
   * Reduce duplicate code for a smaller file
