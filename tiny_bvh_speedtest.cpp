@@ -10,6 +10,8 @@
 // GPU ray tracing
 #define ENABLE_OPENCL
 
+#if 1
+
 // tests to perform
 // #define BUILD_MIDPOINT
 #define BUILD_REFERENCE
@@ -31,13 +33,20 @@
 #define TRAVERSE_2WAY_MT_PACKET
 #define TRAVERSE_OPTIMIZED_ST
 #define TRAVERSE_4WAY_OPTIMIZED
+#define TRAVERSE_8WAY_OPTIMIZED
 // #define EMBREE_BUILD // win64-only for now.
 // #define EMBREE_TRAVERSE // win64-only for now.
-
 // GPU rays: only if ENABLE_OPENCL is defined.
 #define GPU_2WAY
 #define GPU_4WAY
 #define GPU_CWBVH
+
+#else
+
+// debug run
+#define TRAVERSE_8WAY_OPTIMIZED
+
+#endif
 
 using namespace tinybvh;
 
@@ -85,6 +94,7 @@ BVH_Double* bvh_double = new BVH_Double();
 BVH_SoA* bvh_soa = 0;
 BVH_GPU* bvh_gpu = 0;
 MBVH<4>* bvh4 = 0;
+MBVH<8>* bvh8 = 0;
 BVH4_CPU* bvh4_cpu = 0;
 BVH4_GPU* bvh4_gpu = 0;
 BVH8_CWBVH* cwbvh = 0;
@@ -500,12 +510,14 @@ int main()
 	printf( "warming caches... " );
 	bvh->Build( triangles, verts / 3 );
 	printf( "creating diffuse rays...\n" );
+	refDist = new float[Nsmall];
 	for (int i = 0; i < 3; i++) for (unsigned j = 0; j < Nsmall; j++)
 	{
 		const bvhvec3 O = smallBatch[i][j].O, D = smallBatch[i][j].D;
 		bvhvec3 I, R = tinybvh_normalize( bvhvec3( uniform_rand() - 0.5f, uniform_rand() - 0.5f, uniform_rand() - 0.5f ) );
 		Ray ray( O, D );
 		bvh->Intersect( ray );
+		if (i == 0) refDist[j] = ray.hit.t;
 		if (ray.hit.t < 100)
 		{
 			I = O + ray.hit.t * D;
@@ -733,8 +745,6 @@ int main()
 	printf( "- BVH (plain) - primary: " );
 	PrepareTest();
 	traceTime = TestPrimaryRays( _DEFAULT, Nsmall, 3 );
-	refDist = new float[Nsmall];
-	for (unsigned i = 0; i < Nsmall; i++) refDist[i] = smallBatch[0][i].hit.t;
 	// printf( "%4.2fM in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	printf( "%7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
 	traceTime = TestShadowRays( _DEFAULT, Nsmall, 3 );
@@ -863,11 +873,11 @@ int main()
 #endif
 #endif
 
-#if defined TRAVERSE_OPTIMIZED_ST || defined TRAVERSE_4WAY_OPTIMIZED
+#if defined TRAVERSE_OPTIMIZED_ST || defined TRAVERSE_4WAY_OPTIMIZED || defined TRAVERSE_8WAY_OPTIMIZED
 
 	printf( "Optimized BVH performance - Optimizing... " );
 	PrepareTest();
-	bvh->BuildHQ( triangles, verts / 3 );
+	bvh->Build( triangles, verts / 3 );
 	float prevSAH = bvh->SAHCost();
 	if (!bvh_verbose)
 	{
@@ -875,8 +885,7 @@ int main()
 		bvh_verbose->ConvertFrom( *bvh );
 	}
 	t.reset();
-	bvh_verbose->Optimize( 50, true );
-	bvh->ConvertFrom( *bvh_verbose );
+	bvh->Optimize( 50, true );
 	TestPrimaryRays( _BVH, Nsmall, 3, &avgCost );
 	printf( "done (%.2fs). New: %i nodes, SAH=%.2f to %.2f, rayCost=%.2f\n", t.elapsed(), bvh->NodeCount(), prevSAH, bvh->SAHCost(), avgCost );
 
@@ -908,7 +917,7 @@ int main()
 
 #ifdef TRAVERSE_4WAY_OPTIMIZED
 
-	// BVH4_AFRA
+	// BVH4_CPU
 	delete bvh4;
 	delete bvh4_cpu;
 	// Building a BVH4_CPU over an optimized BVH: Careful, do not delete the
@@ -927,6 +936,27 @@ int main()
 	// printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	printf( "shadow: %7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
 	traceTime = TestDiffuseRays( _CPU4, 3 );
+	printf( "diffuse: %7.2fMRays/s\n", (float)Nsmall / traceTime * 1e-6f );
+
+#endif
+
+#ifdef TRAVERSE_8WAY_OPTIMIZED
+
+	// BVH8_CPU
+	delete bvh8_cpu;
+	bvh8_cpu = new BVH8_CPU();
+	bvh8_cpu->Build( triangles, verts / 3 );
+	bvh8_cpu->Optimize( 50, true );
+	printf( "- BVH8_CPU    - primary: " );
+	PrepareTest();
+	traceTime = TestPrimaryRays( _CPU8, Nsmall, 3 );
+	ValidateTraceResult( refDist, Nsmall, __LINE__ );
+	// printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+	printf( "%7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
+	traceTime = TestShadowRays( _CPU8, Nsmall, 3 );
+	// printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+	printf( "shadow: %7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
+	traceTime = TestDiffuseRays( _CPU8, 3 );
 	printf( "diffuse: %7.2fMRays/s\n", (float)Nsmall / traceTime * 1e-6f );
 
 #endif
