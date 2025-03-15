@@ -44,43 +44,38 @@ THE SOFTWARE.
 #include <vector>
 
 // aligned memory allocation
-// note: formally size needs to be a multiple of 'alignment'. See:
-// https://en.cppreference.com/w/c/memory/aligned_alloc
-// EMSCRIPTEN enforces this.
-// Copy of the same construct in tinybvh, different namespace.
+// note: formally, size needs to be a multiple of 'alignment', see:
+// https://en.cppreference.com/w/c/memory/aligned_alloc.
+// EMSCRIPTEN enforces this. 
+// Copy of the same construct in tinyocl, in a different namespace.
 namespace tinyocl {
-inline size_t make_multiple_64( size_t x ) { return (x + 63) & ~0x3f; }
-}
+inline size_t make_multiple_of( size_t x, size_t alignment ) { return (x + (alignment - 1)) & ~(alignment - 1); }
 #ifdef _MSC_VER // Visual Studio / C11
 #define ALIGNED( x ) __declspec( align( x ) )
-namespace tinyocl {
-inline void* malloc64( size_t size, void* = nullptr )
-{
-	return size == 0 ? 0 : _aligned_malloc( make_multiple_64( size ), 64 );
-}
-inline void free64( void* ptr, void* = nullptr ) { _aligned_free( ptr ); }
-}
+#define _ALIGNED_ALLOC(alignment,size) _aligned_malloc( make_multiple_of( size, alignment ), alignment );
+#define _ALIGNED_FREE(ptr) _aligned_free( ptr );
 #else // EMSCRIPTEN / gcc / clang
 #define ALIGNED( x ) __attribute__( ( aligned( x ) ) )
-#if defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__)
+#if !defined(TINYBVH_NO_SIMD) && (defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__))
 #include <xmmintrin.h>
-namespace tinyocl {
-inline void* malloc64( size_t size, void* = nullptr )
-{
-	return size == 0 ? 0 : _mm_malloc( make_multiple_64( size ), 64 );
-}
-inline void free64( void* ptr, void* = nullptr ) { _mm_free( ptr ); }
-}
+#define _ALIGNED_ALLOC(alignment,size) _mm_malloc( make_multiple_of( size, alignment ), alignment );
+#define _ALIGNED_FREE(ptr) _mm_free( ptr );
 #else
-namespace tinyocl {
-inline void* malloc64( size_t size, void* = nullptr )
-{
-	return size == 0 ? 0 : aligned_alloc( 64, make_multiple_64( size ) );
-}
-inline void free64( void* ptr, void* = nullptr ) { free( ptr ); }
-}
+#if defined __GNUC__ && !defined __APPLE__
+#define _ALIGNED_ALLOC(alignment,size) _aligned_malloc( alignment, size );
+#else
+#define _ALIGNED_ALLOC(alignment,size) aligned_alloc( alignment, size );
+#endif
+#define _ALIGNED_FREE(ptr) free( ptr );
 #endif
 #endif
+inline void* malloc64( size_t size, void* = nullptr ) { return size == 0 ? 0 : _ALIGNED_ALLOC( 64, size ); }
+inline void* malloc4k( size_t size, void* = nullptr ) { return size == 0 ? 0 : _ALIGNED_ALLOC( 4096, size ); }
+inline void* malloc32k( size_t size, void* = nullptr ) { return size == 0 ? 0 : _ALIGNED_ALLOC( 32768, size ); }
+inline void free64( void* ptr, void* = nullptr ) { _ALIGNED_FREE( ptr ); }
+inline void free4k( void* ptr, void* = nullptr ) { _ALIGNED_FREE( ptr ); }
+inline void free32k( void* ptr, void* = nullptr ) { _ALIGNED_FREE( ptr ); }
+}; // namespace tiybvh
 
 namespace tinyocl {
 
