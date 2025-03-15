@@ -151,6 +151,7 @@ Plans, ordered by priority:
   * Load/save/Optimize/Refit for BVH8_CPU
   * Detect AVX, AVX2, SSE, NEON flags
   * Use PARANOID flag to check NaNs and more
+  * Reduce duplicate code for a smaller file
 * Demo of tinybvh on GPU using other apis:
   * Ray tracing in pure OpenGL
   * Ray tracing in pure DirectX
