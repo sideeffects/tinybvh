@@ -150,7 +150,7 @@ THE SOFTWARE.
 // #define BVH4_GPU_COMPRESSED_TRIS
 
 // BVH8_CPU compact format: Half the size, but 75% of the performance.
-// #define BVH8_CPU_COMPACT
+#define BVH8_CPU_COMPACT
 // BVH8_CPU Embree 'modified-Woop' intersector, inexplicably slower?
 // #define BVH8_WOOP_TRIS
 // BVH8_CPU align to big boundaries - experimental.
@@ -1204,12 +1204,23 @@ public:
 	};
 	struct BVHNodeCompact
 	{
-		// Novel 8-way BVH node, with quantized child node bounds, similar to CWBVH.
+		// Novel 128-byte 8-way BVH node, with quantized child node bounds, similar to CWBVH.
 		uint64_t cbminx8;			// 8, stores aabbMin.x for 8 children, quantized.
 		float bminx, bminy, bminz;	// 12, actually: bmin - ext.
 		float bextx, bexty, bextz;	// 12, extend of the node, scaled conversatively.
 		SIMDIVEC8 cbminmaxyz8;		// 32, stores cbminy8, cbminz8, cbmaxy8, cbmaxz8
 		SIMDIVEC8 child8, perm8;	// 64, includes cbmaxx8<<24 in perm8.
+	};
+	struct BVHNodeCompact2
+	{
+		// Novel 192-byte 8-way BVH node, with replicated data for rapid extraction.
+		float bminx, bminy, bminz, d0, bminx_, bminy_, bminz_, d1;	// 32
+		float bextx, bexty, bextz, d2, bextx_, bexty_, bextz_, d3;	// 32
+		SIMDIVEC8 child8, perm8;									// 64
+		uint64_t cbminx8, cbmaxx8;									// 16
+		uint64_t cbminy8, cbmaxy8;									// 16
+		uint64_t cbminz8, cbmaxz8;									// 16
+		uint64_t dummy4, dummy5;									// 16, total: 192
 	};
 	struct CacheLine { SIMDVEC8 a, b; };
 	BVH8_CPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH8_AVX2; context = ctx; }
@@ -2339,7 +2350,7 @@ void BVH::Refit( const uint32_t /* unused */ )
 					bmax = tinybvh_max( t2, t4 );
 				}
 			}
-			node.aabbMin = aabbMin, node.aabbMax = aabbMax;
+			node.aabbMin = bmin, node.aabbMax = bmax;
 			continue;
 		}
 		// interior node: adjust to child bounds
@@ -4595,7 +4606,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 	uint32_t nodesNeeded = bvh8.usedNodes;
 	uint32_t leafsNeeded = bvh8.LeafCount();
 #ifdef BVH8_CPU_COMPACT
-	uint32_t blocksNeeded = nodesNeeded * (sizeof( BVHNodeCompact ) / 64); // here, block = cacheline.
+	uint32_t blocksNeeded = nodesNeeded * (sizeof( BVHNodeCompact2 ) / 64); // here, block = cacheline.
 #else
 	uint32_t blocksNeeded = nodesNeeded * (sizeof( BVHNode ) / 64); // here, block = cacheline.
 #endif
@@ -4621,9 +4632,9 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 	#ifdef BVH8_CPU_COMPACT
 		BVHNode tmp;
 		BVHNode* newNode = &tmp;
-		BVHNodeCompact* compact = (BVHNodeCompact*)(bvh8Data + newBlockPtr);
-		newBlockPtr += 2;
-		memset( compact, 0, sizeof( BVHNodeCompact ) );
+		BVHNodeCompact2* compact = (BVHNodeCompact2*)(bvh8Data + newBlockPtr);
+		newBlockPtr += sizeof( BVHNodeCompact2 ) / 64;
+		memset( compact, 0, sizeof( BVHNodeCompact2 ) );
 	#else
 		BVHNode* newNode = (BVHNode*)(bvh8Data + newBlockPtr);
 		newBlockPtr += 4;
@@ -4714,20 +4725,17 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 	#ifdef BVH8_CPU_COMPACT
 		// convert node data to compact layout
 		compact->perm8 = newNode->perm8;
-		compact->bextx = (orig.aabbMax.x - orig.aabbMin.x) * 1.004f, compact->bminx = orig.aabbMin.x - compact->bextx;
-		compact->bexty = (orig.aabbMax.y - orig.aabbMin.y) * 1.004f, compact->bminy = orig.aabbMin.y - compact->bexty;
-		compact->bextz = (orig.aabbMax.z - orig.aabbMin.z) * 1.004f, compact->bminz = orig.aabbMin.z - compact->bextz;
+		compact->bextx = compact->bextx_ = (orig.aabbMax.x - orig.aabbMin.x) * 1.004f, compact->bminx = compact->bminx_ = orig.aabbMin.x - compact->bextx;
+		compact->bexty = compact->bexty_ = (orig.aabbMax.y - orig.aabbMin.y) * 1.004f, compact->bminy = compact->bminy_ = orig.aabbMin.y - compact->bexty;
+		compact->bextz = compact->bextz_ = (orig.aabbMax.z - orig.aabbMin.z) * 1.004f, compact->bminz = compact->bminz_ = orig.aabbMin.z - compact->bextz;
 		for (int i = 0; i < 8; i++) if (((uint32_t*)&newNode->child8)[i])
 		{
-			unsigned qxmin = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->xmin8)[i] - orig.aabbMin.x) / compact->bextx), 0, 255 );
-			unsigned qymin = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->ymin8)[i] - orig.aabbMin.y) / compact->bexty), 0, 255 );
-			unsigned qzmin = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->zmin8)[i] - orig.aabbMin.z) / compact->bextz), 0, 255 );
-			unsigned qxmax = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->xmax8)[i] - orig.aabbMin.x) / compact->bextx) + 1, 0, 255 );
-			unsigned qymax = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->ymax8)[i] - orig.aabbMin.y) / compact->bexty) + 1, 0, 255 );
-			unsigned qzmax = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->zmax8)[i] - orig.aabbMin.z) / compact->bextz) + 1, 0, 255 );
-			((unsigned char*)&compact->cbminx8)[i] = qxmin;
-			((uint32_t*)&compact->perm8)[i] |= qxmax << 24;
-			((uint32_t*)&compact->cbminmaxyz8)[i] = qzmax + (qzmin << 8) + (qymax << 16) + (qymin << 24);
+			((uint8_t*)&compact->cbminx8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->xmin8)[i] - orig.aabbMin.x) / compact->bextx), 0, 255 );
+			((uint8_t*)&compact->cbmaxx8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->ymin8)[i] - orig.aabbMin.y) / compact->bexty), 0, 255 );
+			((uint8_t*)&compact->cbminy8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->zmin8)[i] - orig.aabbMin.z) / compact->bextz), 0, 255 );
+			((uint8_t*)&compact->cbmaxy8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->xmax8)[i] - orig.aabbMin.x) / compact->bextx) + 1, 0, 255 );
+			((uint8_t*)&compact->cbminz8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->ymax8)[i] - orig.aabbMin.y) / compact->bexty) + 1, 0, 255 );
+			((uint8_t*)&compact->cbmaxz8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->zmax8)[i] - orig.aabbMin.z) / compact->bextz) + 1, 0, 255 );
 		}
 		else // mark node as invalid.
 			((unsigned char*)&compact->cbminx8)[i] = 255,

@@ -623,18 +623,17 @@ int main()
 
 	// measure single-core bvh refit time
 	printf( "- BVH2 refitting: " );
+	BVH tmpBVH;
+	tmpBVH.Build( triangles, verts / 3 );
+	float sahBefore = tmpBVH.SAHCost();
+	for (int pass = 0; pass < 10; pass++)
 	{
-		BVH tmpBVH;
-		tmpBVH.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++)
-		{
-			if (pass == 1) t.reset();
-			tmpBVH.Refit();
-		}
-		refitTime = t.elapsed() / 9.0f;
+		if (pass == 1) t.reset();
+		tmpBVH.Refit();
 	}
+	refitTime = t.elapsed() / 9.0f;
 	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
-	printf( "- SAH=%.2f\n", bvh->SAHCost() );
+	printf( "- SAH=%.2f\n", tmpBVH.SAHCost() );
 
 #endif
 
@@ -642,18 +641,16 @@ int main()
 
 	// measure single-core mbvh refit time
 	printf( "- BVH4 refitting: " );
+	MBVH<4> tmpBVH4;
+	tmpBVH4.Build( triangles, verts / 3 );
+	for (int pass = 0; pass < 10; pass++)
 	{
-		MBVH<4> tmpBVH4;
-		tmpBVH4.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++)
-		{
-			if (pass == 1) t.reset();
-			tmpBVH4.Refit();
-		}
-		refitTime = t.elapsed() / 9.0f;
+		if (pass == 1) t.reset();
+		tmpBVH4.Refit();
 	}
+	refitTime = t.elapsed() / 9.0f;
 	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
-	printf( "- SAH=%.2f\n", bvh->SAHCost() );
+	printf( "- SAH=%.2f\n", tmpBVH4.SAHCost() );
 
 #endif
 
@@ -661,18 +658,16 @@ int main()
 
 	// measure single-core mbvh refit time
 	printf( "- BVH8 refitting: " );
+	MBVH<8> tmpBVH8;
+	tmpBVH8.Build( triangles, verts / 3 );
+	for (int pass = 0; pass < 10; pass++)
 	{
-		MBVH<8> tmpBVH8;
-		tmpBVH8.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++)
-		{
-			if (pass == 1) t.reset();
-			tmpBVH8.Refit();
-		}
-		refitTime = t.elapsed() / 9.0f;
+		if (pass == 1) t.reset();
+		tmpBVH8.Refit();
 	}
+	refitTime = t.elapsed() / 9.0f;
 	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
-	printf( "- SAH=%.2f\n", bvh->SAHCost() );
+	printf( "- SAH=%.2f\n", tmpBVH8.SAHCost() );
 
 #endif
 
