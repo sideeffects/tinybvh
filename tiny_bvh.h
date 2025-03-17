@@ -150,7 +150,7 @@ THE SOFTWARE.
 // #define BVH4_GPU_COMPRESSED_TRIS
 
 // BVH8_CPU compact format: Half the size, but 75% of the performance.
-#define BVH8_CPU_COMPACT
+// #define BVH8_CPU_COMPACT
 // BVH8_CPU Embree 'modified-Woop' intersector, inexplicably slower?
 // #define BVH8_WOOP_TRIS
 // BVH8_CPU align to big boundaries - experimental.
