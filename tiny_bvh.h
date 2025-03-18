@@ -3687,29 +3687,23 @@ template<int M> void MBVH<M>::Refit( const uint32_t nodeIdx )
 	MBVHNode& node = mbvhNode[nodeIdx];
 	if (node.isLeaf())
 	{
-		bvhvec3 aabbMin( BVH_FAR ), aabbMax( -BVH_FAR );
-		if (bvh.vertIdx)
+		bvhvec3 bmin( BVH_FAR ), bmax( -BVH_FAR );
+		if (bvh.vertIdx) for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
 		{
-			for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
-			{
-				const uint32_t vidx = bvh.primIdx[first + j] * 3;
-				const uint32_t i0 = bvh.vertIdx[vidx], i1 = bvh.vertIdx[vidx + 1], i2 = bvh.vertIdx[vidx + 2];
-				const bvhvec3 v0 = bvh.verts[i0], v1 = bvh.verts[i1], v2 = bvh.verts[i2];
-				aabbMin = tinybvh_min( aabbMin, tinybvh_min( tinybvh_min( v0, v1 ), v2 ) );
-				aabbMax = tinybvh_max( aabbMax, tinybvh_max( tinybvh_max( v0, v1 ), v2 ) );
-			}
+			const uint32_t vidx = bvh.primIdx[first + j] * 3;
+			const uint32_t i0 = bvh.vertIdx[vidx], i1 = bvh.vertIdx[vidx + 1], i2 = bvh.vertIdx[vidx + 2];
+			const bvhvec3 v0 = bvh.verts[i0], v1 = bvh.verts[i1], v2 = bvh.verts[i2];
+			bmin = tinybvh_min( bmin, tinybvh_min( tinybvh_min( v0, v1 ), v2 ) );
+			bmax = tinybvh_max( bmax, tinybvh_max( tinybvh_max( v0, v1 ), v2 ) );
 		}
-		else
+		else for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
 		{
-			for (uint32_t first = node.firstTri, j = 0; j < node.triCount; j++)
-			{
-				const uint32_t vidx = bvh.primIdx[first + j] * 3;
-				const bvhvec3 v0 = bvh.verts[vidx], v1 = bvh.verts[vidx + 1], v2 = bvh.verts[vidx + 2];
-				aabbMin = tinybvh_min( aabbMin, tinybvh_min( tinybvh_min( v0, v1 ), v2 ) );
-				aabbMax = tinybvh_max( aabbMax, tinybvh_max( tinybvh_max( v0, v1 ), v2 ) );
-			}
+			const uint32_t vidx = bvh.primIdx[first + j] * 3;
+			const bvhvec3 v0 = bvh.verts[vidx], v1 = bvh.verts[vidx + 1], v2 = bvh.verts[vidx + 2];
+			bmin = tinybvh_min( bmin, tinybvh_min( tinybvh_min( v0, v1 ), v2 ) );
+			bmax = tinybvh_max( bmax, tinybvh_max( tinybvh_max( v0, v1 ), v2 ) );
 		}
-		node.aabbMin = aabbMin, node.aabbMax = aabbMax;
+		node.aabbMin = bmin, node.aabbMax = bmax;
 	}
 	else
 	{
