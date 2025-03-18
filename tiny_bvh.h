@@ -6286,7 +6286,7 @@ int32_t BVH4_AVX2_WIP::Intersect( Ray& ray ) const
 
 bool BVH4_AVX2_WIP::IsOccluded( const Ray& ray ) const
 {
-	const bool posX = ray.D.x > 0, posY = ray.D.y > 0, posZ = ray.D.z > 0;
+	const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
 	if (!posX) goto negx;
 	if (posY) { if (posZ) return IsOccluded<true, true, true>( ray ); else return IsOccluded<true, true, false>( ray ); }
 	if (posZ) return IsOccluded<true, false, true>( ray ); else return IsOccluded<true, false, false>( ray );
@@ -6409,7 +6409,7 @@ ALIGNED( 64 ) static const uint64_t idxLUT[256] = {
 
 int32_t BVH8_CPU::Intersect( Ray& ray ) const
 {
-	const bool posX = ray.D.x > 0, posY = ray.D.y > 0, posZ = ray.D.z > 0;
+	const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
 	if (!posX) goto negx;
 	if (posY) { if (posZ) return Intersect<true, true, true>( ray ); else return Intersect<true, true, false>( ray ); }
 	if (posZ) return Intersect<true, false, true>( ray ); else return Intersect<true, false, false>( ray );
@@ -6690,7 +6690,7 @@ the_end:
 
 bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 {
-	const bool posX = ray.D.x > 0, posY = ray.D.y > 0, posZ = ray.D.z > 0;
+	const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
 	if (!posX) goto negx;
 	if (posY) { if (posZ) return IsOccluded<true, true, true>( ray ); else return IsOccluded<true, true, false>( ray ); }
 	if (posZ) return IsOccluded<true, false, true>( ray ); else return IsOccluded<true, false, false>( ray );
