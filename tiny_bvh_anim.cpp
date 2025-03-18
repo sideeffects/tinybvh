@@ -7,6 +7,7 @@
 #define GRIDSIZE 2
 #define INSTCOUNT (GRIDSIZE * GRIDSIZE * GRIDSIZE)
 
+#define NO_DOUBLE_PRECISION_SUPPORT
 #define TINYBVH_IMPLEMENTATION
 #define INST_IDX_BITS 8 // override default; space for 256 instances.
 #include "tiny_bvh.h"
@@ -17,7 +18,7 @@ using namespace tinybvh;
 
 struct Sphere { bvhvec3 pos; float r; };
 
-BVH4_CPU sponza;
+BVH8_CPU sponza;
 BVH obj; // custom geometry BVH must be regular BVH layout.
 BVH tlas; // TLAS must for now be in regular BVH layout.
 BVHBase* bvhList[] = { &obj, &sponza };
@@ -72,7 +73,7 @@ void Init()
 	printf( "Loading triangle data (%i tris).\n", verts );
 	verts *= 3, triangles = (bvhvec4*)malloc64( verts * 16 );
 	s.read( (char*)triangles, verts * 16 );
-	sponza.Build( triangles, verts / 3 );
+	sponza.BuildHQ( triangles, verts / 3 );
 
 	// load bunny
 	std::fstream b{ "./testdata/bunny.bin", s.binary | s.in };
@@ -172,8 +173,7 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 					bvhvec3 v1 = triangles[primIdx * 3 + 1];
 					bvhvec3 v2 = triangles[primIdx * 3 + 2];
 					N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) );
-					// the next line is disabled because we know Sponza is used with an identity transform.
-					// N = tinybvh_transform_vector( N, instance.transform );
+					if (tinybvh_dot( N, ray.D) > 0) N = -N;
 				}
 				else
 				{
@@ -185,9 +185,9 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 				bvhvec3 L = bvhvec3( 20, 27, 3 ) - I;
 				const float d = tinybvh_length( L );
 				L *= 1.0f / d;
-				bool occluded = tlas.IsOccluded( Ray( I + L * 0.001f, L, d ) );
+				bool occluded = tlas.IsOccluded( Ray( I + L * 0.0001f, L, d ) );
 				// plot
-				int c = (int)((occluded ? 50.0f : 255.9f) * fabs( tinybvh_dot( N, L ) ));
+				int c = (int)((occluded ? 50.0f : 255.9f) * tinybvh_max( 0.0f, tinybvh_dot( N, L ) ));
 				buf[pixelIdx] = c + (c << 8) + (c << 16);
 			}
 		}
@@ -213,6 +213,11 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		threads.emplace_back( &TraceWorkerThread, buf, i );
 #endif
 	for (auto& thread : threads) thread.join();
+
+	// print frame time / rate in window title
+	char title[50];
+	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
+	fenster_update_title( &f, title );
 }
 
 void Shutdown() { /* nothing here. */ }
