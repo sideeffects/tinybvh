@@ -716,10 +716,8 @@ public:
 	void CopyBasePropertiesFrom( const BVHBase& original );	// copy flags from one BVH to another
 protected:
 	~BVHBase() {}
-	__FORCEINLINE void IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t primIdx ) const;
-	__FORCEINLINE void IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const;
-	__FORCEINLINE bool TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const;
-	__FORCEINLINE bool IndexedTriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const;
+	__FORCEINLINE void IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const;
+	__FORCEINLINE bool TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const;
 	static float IntersectAABB( const Ray& ray, const bvhvec3& aabbMin, const bvhvec3& aabbMax );
 	static void PrecomputeTriangle( const bvhvec4slice& vert, const uint32_t ti0, const uint32_t ti1, const uint32_t ti2, float* T );
 	static float SA( const bvhvec3& aabbMin, const bvhvec3& aabbMax );
@@ -2500,7 +2498,11 @@ int32_t BVH::Intersect( Ray& ray ) const
 			// to a regular loop over triangles. Otherwise, the extra flexibility comes at
 			// a small performance cost.
 			if (indexedEnabled && vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
-				IntersectTriIndexed( ray, verts, vertIdx, primIdx[node->leftFirst + i] );
+			{
+				const uint32_t pi = primIdx[node->leftFirst + i];
+				const uint32_t i0 = vertIdx[pi * 3], i1 = vertIdx[pi * 3 + 1], i2 = vertIdx[pi * 3 + 2];
+				IntersectTri( ray, pi, verts, i0, i1, i2 );
+			}
 			else if (customEnabled && customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
 			{
 				if ((*customIntersect)(ray, primIdx[node->leftFirst + i]))
@@ -2513,7 +2515,10 @@ int32_t BVH::Intersect( Ray& ray ) const
 				}
 			}
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
-				IntersectTri( ray, verts, primIdx[node->leftFirst + i] );
+			{
+				const uint32_t pi = primIdx[node->leftFirst + i];
+				IntersectTri( ray, pi, verts, pi * 3, pi * 3 + 1, pi * 3 + 2 );
+			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -2609,20 +2614,21 @@ bool BVH::IsOccluded( const Ray& ray ) const
 	{
 		if (node->isLeaf())
 		{
-			if (indexedEnabled && vertIdx != 0)
+			if (indexedEnabled && vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++)
 			{
-				for (uint32_t i = 0; i < node->triCount; i++)
-					if (IndexedTriOccludes( ray, verts, vertIdx, primIdx[node->leftFirst + i] )) return true;
+				const uint32_t pi = primIdx[node->leftFirst + i] * 3;
+				const uint32_t i0 = vertIdx[pi], i1 = vertIdx[pi + 1], i2 = vertIdx[pi + 2];
+				if (TriOccludes( ray, verts, i0, i1, i2 )) return true;
 			}
 			else if (customEnabled && customIsOccluded != 0)
 			{
 				for (uint32_t i = 0; i < node->triCount; i++)
 					if ((*customIsOccluded)(ray, primIdx[node->leftFirst + i])) return true;
 			}
-			else
+			else for (uint32_t i = 0; i < node->triCount; i++)
 			{
-				for (uint32_t i = 0; i < node->triCount; i++)
-					if (TriOccludes( ray, verts, primIdx[node->leftFirst + i] )) return true;
+				const uint32_t pi = primIdx[node->leftFirst + i] * 3;
+				if (TriOccludes( ray, verts, pi, pi + 1, pi + 2 )) return true;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
@@ -3433,11 +3439,16 @@ int32_t BVH_GPU::Intersect( Ray& ray ) const
 		if (node->isLeaf())
 		{
 			if (indexedEnabled && bvh.vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
-				IntersectTriIndexed( ray, verts, bvh.vertIdx, primIdx[node->firstTri + i] );
-			else if (customEnabled && bvh.customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
-				(*bvh.customIntersect)(ray, primIdx[node->firstTri + i]);
+			{
+				const uint32_t pi = primIdx[node->firstTri + i];
+				const uint32_t i0 = bvh.vertIdx[pi * 3], i1 = bvh.vertIdx[pi * 3 + 1], i2 = bvh.vertIdx[pi * 3 + 2];
+				IntersectTri( ray, pi, verts, i0, i1, i2 );
+			}
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
-				IntersectTri( ray, verts, primIdx[node->firstTri + i] );
+			{
+				const uint32_t pi = primIdx[node->firstTri + i];
+				IntersectTri( ray, pi, verts, pi * 3, pi * 3 + 1, pi * 3 + 2 );
+			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -5511,11 +5522,16 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		if (node->isLeaf())
 		{
 			if (indexedEnabled && bvh.vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
-				IntersectTriIndexed( ray, verts, bvh.vertIdx, primIdx[node->firstTri + i] );
-			else if (customEnabled && bvh.customIntersect != 0) for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
-				(*bvh.customIntersect)(ray, primIdx[node->firstTri + i]);
+			{
+				const uint32_t pi = primIdx[node->firstTri + i];
+				const uint32_t i0 = bvh.vertIdx[pi * 3], i1 = bvh.vertIdx[pi * 3 + 1], i2 = bvh.vertIdx[pi * 3 + 2];
+				IntersectTri( ray, pi, verts, i0, i1, i2 );
+			}
 			else for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
-				IntersectTri( ray, verts, primIdx[node->firstTri + i] );
+			{
+				const uint32_t pi = primIdx[node->firstTri + i];
+				IntersectTri( ray, pi, verts, pi * 3, pi * 3 + 1, pi * 3 + 2 );
+			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
@@ -5525,13 +5541,13 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		// transpose
 		__m128 t0 = _mm_unpacklo_ps( x4, y4 ), t2 = _mm_unpacklo_ps( z4, z4 );
 		__m128 t1 = _mm_unpackhi_ps( x4, y4 ), t3 = _mm_unpackhi_ps( z4, z4 );
-		__m128 xyzw1a = _mm_shuffle_ps( t0, t2, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-		__m128 xyzw2a = _mm_shuffle_ps( t0, t2, _MM_SHUFFLE( 3, 2, 3, 2 ) );
-		__m128 xyzw1b = _mm_shuffle_ps( t1, t3, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-		__m128 xyzw2b = _mm_shuffle_ps( t1, t3, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+		const __m128 xyzw1a = _mm_shuffle_ps( t0, t2, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+		const __m128 xyzw2a = _mm_shuffle_ps( t0, t2, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+		const __m128 xyzw1b = _mm_shuffle_ps( t1, t3, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+		const __m128 xyzw2b = _mm_shuffle_ps( t1, t3, _MM_SHUFFLE( 3, 2, 3, 2 ) );
 		// process
-		__m128 tmina4 = _mm_min_ps( xyzw1a, xyzw2a ), tmaxa4 = _mm_max_ps( xyzw1a, xyzw2a );
-		__m128 tminb4 = _mm_min_ps( xyzw1b, xyzw2b ), tmaxb4 = _mm_max_ps( xyzw1b, xyzw2b );
+		const __m128 tmina4 = _mm_min_ps( xyzw1a, xyzw2a ), tmaxa4 = _mm_max_ps( xyzw1a, xyzw2a );
+		const __m128 tminb4 = _mm_min_ps( xyzw1b, xyzw2b ), tmaxb4 = _mm_max_ps( xyzw1b, xyzw2b );
 		// transpose back
 		t0 = _mm_unpacklo_ps( tmina4, tmaxa4 ), t2 = _mm_unpacklo_ps( tminb4, tmaxb4 );
 		t1 = _mm_unpackhi_ps( tmina4, tmaxa4 ), t3 = _mm_unpackhi_ps( tminb4, tmaxb4 );
@@ -5541,24 +5557,14 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 		uint32_t lidx = node->left, ridx = node->right;
 		const __m128 min4 = _mm_max_ps( _mm_max_ps( _mm_max_ps( x4, y4 ), z4 ), _mm_setzero_ps() );
 		const __m128 max4 = _mm_min_ps( _mm_min_ps( _mm_min_ps( x4, y4 ), z4 ), _mm_set1_ps( ray.hit.t ) );
-	#if 0
-		// TODO: why is this slower on gen14?
-		const float tmina_0 = LANE( min4, 0 ), tmaxa_1 = LANE( max4, 1 );
-		const float tminb_2 = LANE( min4, 2 ), tmaxb_3 = LANE( max4, 3 );
-		t0 = _mm_shuffle_ps( max4, max4, _MM_SHUFFLE( 1, 3, 1, 3 ) );
-		t1 = _mm_shuffle_ps( min4, min4, _MM_SHUFFLE( 0, 2, 0, 2 ) );
-		t0 = _mm_blendv_ps( inf4, t1, _mm_cmpge_ps( t0, t1 ) );
-		float dist1 = LANE( t0, 1 ), dist2 = LANE( t0, 0 );
-	#else
 		const float tmina_0 = LANE( min4, 0 ), tmaxa_1 = LANE( max4, 1 );
 		const float tminb_2 = LANE( min4, 2 ), tmaxb_3 = LANE( max4, 3 );
 		float dist1 = tmaxa_1 >= tmina_0 ? tmina_0 : BVH_FAR;
 		float dist2 = tmaxb_3 >= tminb_2 ? tminb_2 : BVH_FAR;
-	#endif
 		if (dist1 > dist2)
 		{
-			float t = dist1; dist1 = dist2; dist2 = t;
-			uint32_t i = lidx; lidx = ridx; ridx = i;
+			const float t = dist1; dist1 = dist2; dist2 = t;
+			const uint32_t i = lidx; lidx = ridx; ridx = i;
 		}
 		if (dist1 == BVH_FAR)
 		{
@@ -5587,20 +5593,16 @@ bool BVH_SoA::IsOccluded( const Ray& ray ) const
 	{
 		if (node->isLeaf())
 		{
-			if (indexedEnabled && bvh.vertIdx != 0)
+			if (indexedEnabled && bvh.vertIdx != 0) for (uint32_t i = 0; i < node->triCount; i++)
 			{
-				for (uint32_t i = 0; i < node->triCount; i++)
-					if (IndexedTriOccludes( ray, verts, bvh.vertIdx, primIdx[node->firstTri + i] )) return true;
+				const uint32_t pi = primIdx[node->firstTri + i] * 3;
+				const uint32_t i0 = bvh.vertIdx[pi], i1 = bvh.vertIdx[pi + 1], i2 = bvh.vertIdx[pi + 2];
+				if (TriOccludes( ray, verts, i0, i1, i2 )) return true;
 			}
-			else if (customEnabled && bvh.customIsOccluded != 0)
+			else for (uint32_t i = 0; i < node->triCount; i++)
 			{
-				for (uint32_t i = 0; i < node->triCount; i++)
-					if ((*bvh.customIsOccluded)(ray, primIdx[node->firstTri + i])) return true;
-			}
-			else
-			{
-				for (uint32_t i = 0; i < node->triCount; i++)
-					if (TriOccludes( ray, verts, primIdx[node->firstTri + i] )) return true;
+				const uint32_t pi = primIdx[node->firstTri + i] * 3;
+				if (TriOccludes( ray, verts, pi, pi + 1, pi + 2 )) return true;
 			}
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
@@ -8243,107 +8245,49 @@ float BVHBase::SA( const bvhvec3& aabbMin, const bvhvec3& aabbMax )
 }
 
 // IntersectTri
-void BVHBase::IntersectTri( Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const
+void BVHBase::IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const
 {
 	// Moeller-Trumbore ray/triangle intersection algorithm
-	const uint32_t vertIdx = idx * 3;
-	const bvhvec4 vert0 = verts[vertIdx];
-	const bvhvec3 edge1 = verts[vertIdx + 1] - vert0;
-	const bvhvec3 edge2 = verts[vertIdx + 2] - vert0;
-	const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
-	const float a = tinybvh_dot( edge1, h );
+	const bvhvec4 v0 = verts[i0];
+	const bvhvec3 e1 = verts[i1] - v0, e2 = verts[i2] - v0;
+	const bvhvec3 h = tinybvh_cross( ray.D, e2 );
+	const float a = tinybvh_dot( e1, h );
 	if (fabs( a ) < 0.0000001f) return; // ray parallel to triangle
 	const float f = 1 / a;
-	const bvhvec3 s = ray.O - bvhvec3( vert0 );
+	const bvhvec3 s = ray.O - bvhvec3( v0 );
 	const float u = f * tinybvh_dot( s, h );
 	if (u < 0 || u > 1) return;
-	const bvhvec3 q = tinybvh_cross( s, edge1 );
+	const bvhvec3 q = tinybvh_cross( s, e1 );
 	const float v = f * tinybvh_dot( ray.D, q );
 	if (v < 0 || u + v > 1) return;
-	const float t = f * tinybvh_dot( edge2, q );
-	if (t > 0 && t < ray.hit.t)
-	{
-		// register a hit: ray is shortened to t
-		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
-	#if INST_IDX_BITS == 32
-		ray.hit.prim = idx, ray.hit.inst = ray.instIdx;
-	#else
-		ray.hit.prim = idx + ray.instIdx;
-	#endif
-	}
-}
-
-// IntersectTriIndexed
-void BVHBase::IntersectTriIndexed( Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const
-{
-	// Moeller-Trumbore ray/triangle intersection algorithm
-	const uint32_t i0 = indices[idx * 3], i1 = indices[idx * 3 + 1], i2 = indices[idx * 3 + 2];
-	const bvhvec4 vert0 = verts[i0];
-	const bvhvec3 edge1 = verts[i1] - vert0;
-	const bvhvec3 edge2 = verts[i2] - vert0;
-	const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
-	const float a = tinybvh_dot( edge1, h );
-	if (fabs( a ) < 0.0000001f) return; // ray parallel to triangle
-	const float f = 1 / a;
-	const bvhvec3 s = ray.O - bvhvec3( vert0 );
-	const float u = f * tinybvh_dot( s, h );
-	if (u < 0 || u > 1) return;
-	const bvhvec3 q = tinybvh_cross( s, edge1 );
-	const float v = f * tinybvh_dot( ray.D, q );
-	if (v < 0 || u + v > 1) return;
-	const float t = f * tinybvh_dot( edge2, q );
-	if (t > 0 && t < ray.hit.t)
-	{
-		// register a hit: ray is shortened to t
-		ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
-	#if INST_IDX_BITS == 32
-		ray.hit.prim = idx, ray.hit.inst = ray.instIdx;
-	#else
-		ray.hit.prim = idx + ray.instIdx;
-	#endif
-	}
+	const float t = f * tinybvh_dot( e2, q );
+	if (t <= 0 || t >= ray.hit.t) return;
+	// register a hit: ray is shortened to t
+	ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
+#if INST_IDX_BITS == 32
+	ray.hit.prim = idx, ray.hit.inst = ray.instIdx;
+#else
+	ray.hit.prim = idx + ray.instIdx;
+#endif
 }
 
 // TriOccludes
-bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t idx ) const
+bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const
 {
 	// Moeller-Trumbore ray/triangle intersection algorithm
-	const uint32_t vertIdx = idx * 3;
-	const bvhvec4 vert0 = verts[vertIdx];
-	const bvhvec3 edge1 = verts[vertIdx + 1] - vert0;
-	const bvhvec3 edge2 = verts[vertIdx + 2] - vert0;
-	const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
-	const float a = tinybvh_dot( edge1, h );
+	const bvhvec4 v0 = verts[i0];
+	const bvhvec3 e1 = verts[i1] - v0, e2 = verts[i2] - v0;
+	const bvhvec3 h = tinybvh_cross( ray.D, e2 );
+	const float a = tinybvh_dot( e1, h );
 	if (fabs( a ) < 0.0000001f) return false; // ray parallel to triangle
 	const float f = 1 / a;
-	const bvhvec3 s = ray.O - bvhvec3( vert0 );
+	const bvhvec3 s = ray.O - bvhvec3( v0 );
 	const float u = f * tinybvh_dot( s, h );
 	if (u < 0 || u > 1) return false;
-	const bvhvec3 q = tinybvh_cross( s, edge1 );
+	const bvhvec3 q = tinybvh_cross( s, e1 );
 	const float v = f * tinybvh_dot( ray.D, q );
 	if (v < 0 || u + v > 1) return false;
-	const float t = f * tinybvh_dot( edge2, q );
-	return t > 0 && t < ray.hit.t;
-}
-
-bool BVHBase::IndexedTriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t* indices, const uint32_t idx ) const
-{
-	// Moeller-Trumbore ray/triangle intersection algorithm
-	const uint32_t i0 = indices[idx * 3], i1 = indices[idx * 3 + 1], i2 = indices[idx * 3 + 2];
-	const bvhvec4 vert0 = verts[i0];
-	const bvhvec3 edge1 = verts[i1] - vert0;
-	const bvhvec3 edge2 = verts[i2] - vert0;
-	const bvhvec3 h = tinybvh_cross( ray.D, edge2 );
-	const float a = tinybvh_dot( edge1, h );
-	if (fabs( a ) < 0.0000001f) return false; // ray parallel to triangle
-	const float f = 1 / a;
-	const bvhvec3 s = ray.O - bvhvec3( vert0 );
-	const float u = f * tinybvh_dot( s, h );
-	if (u < 0 || u > 1) return false;
-	const bvhvec3 q = tinybvh_cross( s, edge1 );
-	const float v = f * tinybvh_dot( ray.D, q );
-	if (v < 0 || u + v > 1) return false;
-	const float t = f * tinybvh_dot( edge2, q );
+	const float t = f * tinybvh_dot( e2, q );
 	return t > 0 && t < ray.hit.t;
 }
 
@@ -8390,7 +8334,7 @@ void BVHBase::PrecomputeTriangle( const bvhvec4slice& vert, const uint32_t ti0, 
 		T[4] = -e1.y * rN, T[5] = e1.x * rN, T[6] = 0, T[7] = -x1 * rN;
 		T[8] = N.x * rN, T[9] = N.y * rN, T[10] = 1, T[11] = -n * rN;
 	}
-	else memset( T, 0, 12 * 4 ); // cerr << "degenerate source " << endl;
+	else memset( T, 0, 12 * 4 );
 }
 
 bool BVH::BVHNode::Intersect( const bvhvec3& bmin, const bvhvec3& bmax ) const
@@ -8675,6 +8619,7 @@ void BVH_Verbose::MergeSubtree( const uint32_t nodeIdx, uint32_t* newIdx, uint32
 		MergeSubtree( node.right, newIdx, newIdxPtr );
 	}
 }
+
 } // namespace tinybvh
 
 #ifdef __GNUC__
