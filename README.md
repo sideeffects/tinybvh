@@ -48,25 +48,25 @@ A more complete overview of tinybvh functionality can be found in the [Basic Use
 # How To Use
 The library ````tiny_bvh.h```` is designed to be easy to use. Please have a look at tiny_bvh_minimal.cpp for an example. A Visual Studio 'solution' (.sln/.vcxproj) is included, as well as a CMake file. That being said: The examples consists of only a single source file, which can be compiled with clang or g++, e.g.:
 
-````g++ -std=c++20 -mavx tiny_bvh_minimal.cpp -o tiny_bvh_minimal````
+````g++ tiny_bvh_minimal.cpp````
 
 The single-source sample **ASCII test renderer** can be compiled with
 
-````g++ -std=c++20 -mavx tiny_bvh_renderer.cpp -o tiny_bvh_renderer````
+````g++ tiny_bvh_renderer.cpp -o tiny_bvh_renderer````
 
 The cross-platform fenster-based single-source **bitmap renderer** can be compiled with
 
-````g++ -std=c++20 -mavx -mwindows -O3 tiny_bvh_fenster.cpp -o tiny_bvh_fenster```` (on windows)
+````g++ -mwindows -O3 tiny_bvh_fenster.cpp -o tiny_bvh_fenster```` (on windows)
 
-```g++ -std=c++20 -mavx -O3 -framework Cocoa tiny_bvh_fenster.cpp -o tiny_bvh_fenster``` (on macOS)
+```g++ -O3 -framework Cocoa tiny_bvh_fenster.cpp -o tiny_bvh_fenster``` (on macOS)
 
 The multi-threaded **path tracing** demo can be compiled with
 
-````g++ -std=c++20 -mavx -mwindows -O3 tiny_bvh_pt.cpp -o tiny_bvh_pt```` (on windows)
+````g++ -mwindows -O3 tiny_bvh_pt.cpp -o tiny_bvh_pt```` (on windows)
 
 The **performance measurement tool** can be compiled with:
 
-````g++ -std=c++20 -mavx2 -mfma -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
+````g++ -mavx2 -mfma -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
 # Version 1.4.6
 
