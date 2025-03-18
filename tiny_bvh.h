@@ -85,6 +85,11 @@ THE SOFTWARE.
 #ifndef TINY_BVH_H_
 #define TINY_BVH_H_
 
+// Library version:
+#define TINY_BVH_VERSION_MAJOR	1
+#define TINY_BVH_VERSION_MINOR	4
+#define TINY_BVH_VERSION_SUB	6
+
 // Run-time checks; disabled by default.
 // #define PARANOID // checks out-of-bound access of slices
 // #define SLICEDUMP // dumps the slice used for building to a file - debug feature.
@@ -99,18 +104,12 @@ THE SOFTWARE.
 #define AVXBINS 8 // must stay at 8.
 
 // TLAS setting
-// Note: Instance index is encoded in the top bits of the prim idx field.
+// Note: Except when INST_IDX_BITS is set to 32, the instance index is encoded in 
+// the top bits of the prim idx field.
 // Max number of instances in TLAS: 2 ^ INST_IDX_BITS
 // Max number of primitives per BLAS: 2 ^ (32 - INST_IDX_BITS)
 #ifndef INST_IDX_BITS
 #define INST_IDX_BITS 32 // Use 4..~12 to use prim field bits for instance id, or set to 32 to store index in separate field.
-#endif
-// Derived; for convenience:
-#define INST_IDX_SHFT (32 - INST_IDX_BITS)
-#if INST_IDX_BITS == 32
-#define PRIM_IDX_MASK 0xffffffff // instance index stored separately.
-#else
-#define PRIM_IDX_MASK ((1 << INST_IDX_SHFT) - 1) // instance index stored in top bits of hit.prim.
 #endif
 
 // SAH BVH building: Heuristic parameters
@@ -144,7 +143,9 @@ THE SOFTWARE.
 #define ENABLE_CUSTOM_GEOMETRY
 #endif
 
-// CWBVH triangle format: doesn't seem to help on GPU?
+// Experimental features
+
+// CWBVH triangle format - doesn't seem to help on GPU?
 // #define CWBVH_COMPRESSED_TRIS
 // BVH4 triangle format
 // #define BVH4_GPU_COMPRESSED_TRIS
@@ -154,28 +155,8 @@ THE SOFTWARE.
 // BVH8_CPU Embree 'modified-Woop' intersector, inexplicably slower?
 // #define BVH8_WOOP_TRIS
 // BVH8_CPU align to big boundaries - experimental.
-// #define BVH8_ALIGN_4K
-#define BVH8_ALIGN_32K
-
-// We'll use this whenever a layout has no specialized shadow ray query.
-#define FALLBACK_SHADOW_QUERY( s ) { Ray r = s; float d = s.hit.t; Intersect( r ); return r.hit.t < d; }
-
-// include fast AVX BVH builder
-#ifndef TINYBVH_NO_SIMD
-#if defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__)
-#define BVH_USEAVX		// required for BuildAVX, BVH_SoA and others
-#define BVH_USEAVX2		// required for BVH4_AVX2_WIP and BVH8_CPU
-#include "immintrin.h"	// for __m128 and __m256
-#elif defined(__aarch64__) || defined(_M_ARM64)
-#define BVH_USENEON
-#include "arm_neon.h"
-#endif
-#endif // TINYBVH_NO_SIMD
-
-// library version
-#define TINY_BVH_VERSION_MAJOR	1
-#define TINY_BVH_VERSION_MINOR	4
-#define TINY_BVH_VERSION_SUB	5
+#define BVH8_ALIGN_4K
+// #define BVH8_ALIGN_32K
 
 // ============================================================================
 //
@@ -197,6 +178,45 @@ THE SOFTWARE.
 #include <cstring>
 #endif
 #include <cstdint>
+
+// Platform-independent compile-time warnings.
+#define EMIT_COMPILER_WARNING_STRINGIFY0(x) #x
+#define EMIT_COMPILER_WARNING_STRINGIFY1(x) EMIT_COMPILER_WARNING_STRINGIFY0(x)
+#ifdef __GNUC__
+#define EMIT_COMPILER_WARNING_COMPOSE(x) GCC warning x
+#else
+#define EMIT_COMPILER_MESSAGE_PREFACE(type) \
+__FILE__ "(" EMIT_COMPILER_WARNING_STRINGIFY1(__LINE__) "): " type ": "
+#define EMIT_COMPILER_WARNING_COMPOSE(x) message(EMIT_COMPILER_MESSAGE_PREFACE("warning C0000") x)
+#endif
+#define WARNING(x) _Pragma(EMIT_COMPILER_WARNING_STRINGIFY1(EMIT_COMPILER_WARNING_COMPOSE(x)))
+
+// SSE/AVX/AVX2/NEON support.
+#ifndef TINYBVH_NO_SIMD
+#if defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__)
+#if !defined __AVX__
+WARNING( "AVX supported by platform but not enabled in compilation." )
+#define TINYBVH_NO_SIMD
+#else
+#define BVH_USEAVX		// required for BuildAVX, BVH_SoA and others
+#endif
+#if !defined __AVX2__
+WARNING( "AVX2 supported by platform but not enabled in compilation." )
+#define TINYBVH_NO_SIMD
+#else
+#define BVH_USEAVX2		// required for BVH4_AVX2_WIP and BVH8_CPU
+#endif
+#include "immintrin.h"	// for __m128 and __m256
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#if !defined __NEON__
+WARNING( "NEON supported by platform but not enabled in compilation." )
+#define TINYBVH_NO_SIMD
+#else
+#define BVH_USENEON
+#include "arm_neon.h"
+#endif
+#endif
+#endif // TINYBVH_NO_SIMD
 
 // aligned memory allocation
 // note: formally, size needs to be a multiple of 'alignment', see:
@@ -232,6 +252,15 @@ inline void free4k( void* ptr, void* = nullptr ) { _ALIGNED_FREE( ptr ); }
 inline void free32k( void* ptr, void* = nullptr ) { _ALIGNED_FREE( ptr ); }
 }; // namespace tiybvh
 
+// Derived TLAS things; for convenience.
+#define INST_IDX_SHFT (32 - INST_IDX_BITS)
+#if INST_IDX_BITS == 32
+#define PRIM_IDX_MASK 0xffffffff // instance index stored separately.
+#else
+#define PRIM_IDX_MASK ((1 << INST_IDX_SHFT) - 1) // instance index stored in top bits of hit.prim.
+#endif
+
+// Forced inlining.
 #ifdef _MSC_VER
 #define __FORCEINLINE __forceinline
 #else
@@ -239,6 +268,9 @@ inline void free32k( void* ptr, void* = nullptr ) { _ALIGNED_FREE( ptr ); }
 #endif
 
 namespace tinybvh {
+
+// We'll use this whenever a layout has no specialized shadow ray query.
+#define FALLBACK_SHADOW_QUERY( s ) { Ray r = s; float d = s.hit.t; Intersect( r ); return r.hit.t < d; }
 
 #ifdef _MSC_VER
 // Suppress a warning caused by the union of x,y,.. and cell[..] in vectors.
@@ -1138,6 +1170,8 @@ struct BVHTri4Leaf
 	SIMDVEC4 dummy0, dummy1;	// pad to 3 full cachelines.
 };
 
+#ifdef BVH8_WOOP_TRIS
+
 // Storage for up to four triangles, in SoA layout, for Embree's Woop intersector.
 struct BVHWoop4Leaf
 {
@@ -1147,6 +1181,8 @@ struct BVHWoop4Leaf
 	uint32_t primIdx[4];		// total: 160 bytes.
 	SIMDVEC4 dummy0, dummy1;	// pad to 3 full cachelines.
 };
+
+#endif
 
 class BVH4_AVX2_WIP : public BVHBase
 {
