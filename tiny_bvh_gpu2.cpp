@@ -6,7 +6,7 @@
 #define SCRHEIGHT 720
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
-#define SCENE 2
+#define SCENE 1
 
 #if SCENE == 1
 
