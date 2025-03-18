@@ -91,17 +91,10 @@ void Init()
 	noise = new Buffer( 128 * 128 * 8 * sizeof( uint32_t ), blueNoise );
 	noise->CopyToDevice();
 	// load raw vertex data
-	// AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
-	// AddMesh( "./testdata/lucy.bin", 1.1f, bvhvec3( -2, 4.1f, -3 ), 0x2ffff88 );
+	AddMesh( "./testdata/cryteksponza.bin", 1, bvhvec3( 0 ), 0xffffff );
 	AddQuad( bvhvec3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
-	AddMesh( "./testdata/bistro_ext_part1.bin", 1, bvhvec3( 0 ) );
-	AddMesh( "./testdata/bistro_ext_part2.bin", 1, bvhvec3( 0 ) );
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
-	if (1) // (!bvh.Load( "cwbvh.bin", triCount ))
-	{
-		bvh.BuildHQ( tris, triCount );
-		bvh.Save( "cwbvh.bin" ); // cache for next run.
-	}
+	bvh.Build( tris, triCount );
 	// create OpenCL buffers for BVH data
 	cwbvhNodes = new Buffer( bvh.usedBlocks * sizeof( bvhvec4 ), bvh.bvh8Data );
 	cwbvhTris = new Buffer( bvh.idxCount * 3 * sizeof( bvhvec4 ), bvh.bvh8Tris );
