@@ -173,7 +173,7 @@ void TraceWorkerThread( uint32_t* buf, int threadIdx )
 					bvhvec3 v1 = triangles[primIdx * 3 + 1];
 					bvhvec3 v2 = triangles[primIdx * 3 + 2];
 					N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) );
-					if (tinybvh_dot( N, ray.D) > 0) N = -N;
+					if (tinybvh_dot( N, ray.D ) > 0) N = -N;
 				}
 				else
 				{
