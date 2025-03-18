@@ -3,8 +3,8 @@
 #define SCRHEIGHT 600
 #include "external/fenster.h" // https://github.com/zserge/fenster
 
-//#define COLOR_PRIM // compute color as hashed triangle Index
-//#define COLOR_DEPTH // compute color as depth of intersection
+// #define COLOR_PRIM // compute color as hashed triangle Index
+// #define COLOR_DEPTH // compute color as depth of intersection
 
 #define LOADSCENE
 
@@ -159,6 +159,8 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 
 	// handle user input and update camera
 	UpdateCamera( delta_time_s, f );
+	int mx = tinybvh_clamp( f.x, 0, SCRWIDTH - 1 );
+	int my = tinybvh_clamp( f.y, 0, SCRHEIGHT - 1 );
 
 	// clear the screen with a debug-friendly color
 	for (int i = 0; i < SCRWIDTH * SCRHEIGHT; i++) buf[i] = 0xff00ff;
@@ -191,7 +193,6 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 		for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++, i++) if (rays[i].hit.t < 10000)
 		{
 			int pixel_x = tx * 4 + x, pixel_y = ty * 4 + y, primIdx = rays[i].hit.prim;
-
 		#ifdef COLOR_DEPTH
 			buf[pixel_x + pixel_y * SCRWIDTH] = depths[i] << 17; // render depth as red
 		#elif defined COLOR_PRIM
@@ -203,17 +204,30 @@ void Tick( float delta_time_s, fenster& f, uint32_t* buf )
 			bvhvec3 v1 = vertices[v1idx];
 			bvhvec3 v2 = vertices[v2idx];
 			bvhvec3 N = tinybvh_normalize( tinybvh_cross( v1 - v0, v2 - v0 ) );
-			int c = (int)(255.9f * fabs( tinybvh_dot( N, L ) ));
+			// shadow
+			static bvhvec3 lightPos( 20, 27, 3 );
+			bvhvec3 I = rays[i].O + rays[i].hit.t * rays[i].D;
+			bvhvec3 L = lightPos - I;
+			float dist = tinybvh_length( L );
+			L *= 1.0f / dist;
+			Ray s( I + L * 0.001f, L, dist - 0.002f );
+			float shade = bvh.IsOccluded( s ) ? 0.2f : 1.0f;
+			// final plot
+			int c = (int)(255.9f * shade * fabs( tinybvh_dot( N, L ) ));
 			buf[pixel_x + pixel_y * SCRWIDTH] = c + (c << 8) + (c << 16);
 		#endif
 		}
 	}
 
+	// crosshair
+	for (int x = 0; x < SCRWIDTH; x += 2) buf[x + my * SCRWIDTH] ^= 0xAAAAAA;
+	for (int y = 0; y < SCRHEIGHT; y += 2) buf[mx + y * SCRWIDTH] ^= 0xAAAAAA;
+
 	// print frame time / rate in window title
 	char title[50];
 	sprintf( title, "tiny_bvh %.2f s %.2f Hz", delta_time_s, 1.0f / delta_time_s );
 	fenster_update_title( &f, title );
-	}
+}
 
 void Shutdown()
 {
