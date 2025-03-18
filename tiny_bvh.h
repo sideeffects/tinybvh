@@ -368,6 +368,7 @@ struct bvhvec4slice
 // isolation; hence the tinybvh_ prefix.
 inline float tinybvh_safercp( const float x ) { return x > 1e-12f ? (1.0f / x) : (x < -1e-12f ? (1.0f / x) : BVH_FAR); }
 inline bvhvec3 tinybvh_safercp( const bvhvec3 a ) { return bvhvec3( tinybvh_safercp( a.x ), tinybvh_safercp( a.y ), tinybvh_safercp( a.z ) ); }
+inline bvhvec3 tinybvh_rcp( const bvhvec3 a ) { return bvhvec3( 1.0f / a.x, 1.0f / a.y, 1.0f / a.z ); }
 inline float tinybvh_min( const float a, const float b ) { return a < b ? a : b; }
 inline float tinybvh_max( const float a, const float b ) { return a > b ? a : b; }
 inline double tinybvh_min( const double a, const double b ) { return a < b ? a : b; }
@@ -609,7 +610,7 @@ struct ALIGNED( 64 ) Ray
 	Ray( bvhvec3 origin, bvhvec3 direction, float t = BVH_FAR )
 	{
 		memset( this, 0, sizeof( Ray ) );
-		O = origin, D = tinybvh_normalize( direction ), rD = tinybvh_safercp( D );
+		O = origin, D = tinybvh_normalize( direction ), rD = tinybvh_rcp( D );
 		hit.t = t;
 	}
 	ALIGNED( 16 ) bvhvec3 O; uint32_t dummy1;
@@ -2357,34 +2358,22 @@ void BVH::Refit( const uint32_t /* unused */ )
 		if (node.isLeaf()) // leaf: adjust to current triangle vertex positions
 		{
 			bvhvec4 bmin( BVH_FAR ), bmax( -BVH_FAR );
-			if (vertIdx)
+			if (vertIdx) for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
 			{
-				for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
-				{
-					const uint32_t vidx = primIdx[first + j] * 3;
-					const uint32_t i0 = vertIdx[vidx], i1 = vertIdx[vidx + 1], i2 = vertIdx[vidx + 2];
-					const bvhvec4 v0 = verts[i0], v1 = verts[i1], v2 = verts[i2];
-					const bvhvec4 t1 = tinybvh_min( v0, bmin );
-					const bvhvec4 t2 = tinybvh_max( v0, bmax );
-					const bvhvec4 t3 = tinybvh_min( v1, v2 );
-					const bvhvec4 t4 = tinybvh_max( v1, v2 );
-					bmin = tinybvh_min( t1, t3 );
-					bmax = tinybvh_max( t2, t4 );
-				}
+				const uint32_t vidx = primIdx[first + j] * 3;
+				const uint32_t i0 = vertIdx[vidx], i1 = vertIdx[vidx + 1], i2 = vertIdx[vidx + 2];
+				const bvhvec4 v0 = verts[i0], v1 = verts[i1], v2 = verts[i2];
+				const bvhvec4 t1 = tinybvh_min( v0, bmin ), t2 = tinybvh_max( v0, bmax );
+				const bvhvec4 t3 = tinybvh_min( v1, v2 ), t4 = tinybvh_max( v1, v2 );
+				bmin = tinybvh_min( t1, t3 ), bmax = tinybvh_max( t2, t4 );
 			}
-			else
+			else for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
 			{
-				for (uint32_t first = node.leftFirst, j = 0; j < node.triCount; j++)
-				{
-					const uint32_t vidx = primIdx[first + j] * 3;
-					const bvhvec4 v0 = verts[vidx], v1 = verts[vidx + 1], v2 = verts[vidx + 2];
-					const bvhvec4 t1 = tinybvh_min( v0, bmin );
-					const bvhvec4 t2 = tinybvh_max( v0, bmax );
-					const bvhvec4 t3 = tinybvh_min( v1, v2 );
-					const bvhvec4 t4 = tinybvh_max( v1, v2 );
-					bmin = tinybvh_min( t1, t3 );
-					bmax = tinybvh_max( t2, t4 );
-				}
+				const uint32_t vidx = primIdx[first + j] * 3;
+				const bvhvec4 v0 = verts[vidx], v1 = verts[vidx + 1], v2 = verts[vidx + 2];
+				const bvhvec4 t1 = tinybvh_min( v0, bmin ), t2 = tinybvh_max( v0, bmax );
+				const bvhvec4 t3 = tinybvh_min( v1, v2 ), t4 = tinybvh_max( v1, v2 );
+				bmin = tinybvh_min( t1, t3 ), bmax = tinybvh_max( t2, t4 );
 			}
 			node.aabbMin = bmin, node.aabbMax = bmax;
 			continue;
@@ -2416,10 +2405,8 @@ void BVH::CombineLeafs( const uint32_t primCount )
 			if (left.isLeaf() && right.isLeaf())
 			{
 				if (left.triCount + right.triCount <= primCount)
-				{
-					node.triCount = left.triCount + right.triCount;
+					node.triCount = left.triCount + right.triCount,
 					node.leftFirst = left.leftFirst;
-				}
 			}
 			else
 			{
@@ -2472,8 +2459,7 @@ bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
 					if (d * d > rr * e) continue;
 					const float aa = tinybvh_dot( A, A ), ab = tinybvh_dot( A, B ), ac = tinybvh_dot( A, C );
 					const float bb = tinybvh_dot( B, B ), bc = tinybvh_dot( B, C ), cc = tinybvh_dot( C, C );
-					if ((aa > rr && ab > aa && ac > aa) ||
-						(bb > rr && ab > bb && bc > bb) ||
+					if ((aa > rr && ab > aa && ac > aa) || (bb > rr && ab > bb && bc > bb) ||
 						(cc > rr && ac > cc && bc > cc)) continue;
 					const bvhvec3 AB = B - A, BC = C - B, CA = A - C;
 					const float d1 = ab - aa, d2 = bc - bb, d3 = ac - cc;
@@ -2570,7 +2556,7 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
 				tmp.instIdx = instIdx << (32 - INST_IDX_BITS);
 				tmp.hit = ray.hit;
-				tmp.rD = tinybvh_safercp( tmp.D );
+				tmp.rD = tinybvh_rcp( tmp.D );
 				// 2. Traverse BLAS with the transformed ray
 				// Note: Valid BVH layout options for BLASses are the regular BVH layout,
 				// the AVX-optimized BVH_SOA layout and the wide BVH4_CPU layout. If all
@@ -2676,7 +2662,7 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
 				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
 				tmp.hit.t = ray.hit.t;
-				tmp.rD = tinybvh_safercp( tmp.D );
+				tmp.rD = tinybvh_rcp( tmp.D );
 				// 2. Traverse BLAS with the transformed ray
 				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU ||
 					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 || blas->layout == LAYOUT_BVH4_AVX2 );
