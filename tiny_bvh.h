@@ -104,7 +104,7 @@ THE SOFTWARE.
 #define AVXBINS 8 // must stay at 8.
 
 // TLAS setting
-// Note: Except when INST_IDX_BITS is set to 32, the instance index is encoded in 
+// Note: Except when INST_IDX_BITS is set to 32, the instance index is encoded in
 // the top bits of the prim idx field.
 // Max number of instances in TLAS: 2 ^ INST_IDX_BITS
 // Max number of primitives per BLAS: 2 ^ (32 - INST_IDX_BITS)
@@ -1239,23 +1239,10 @@ public:
 	};
 	struct BVHNodeCompact
 	{
-		// Novel 128-byte 8-way BVH node, with quantized child node bounds, similar to CWBVH.
-		uint64_t cbminx8;			// 8, stores aabbMin.x for 8 children, quantized.
-		float bminx, bminy, bminz;	// 12, actually: bmin - ext.
-		float bextx, bexty, bextz;	// 12, extend of the node, scaled conversatively.
-		SIMDIVEC8 cbminmaxyz8;		// 32, stores cbminy8, cbminz8, cbmaxy8, cbmaxz8
-		SIMDIVEC8 child8, perm8;	// 64, includes cbmaxx8<<24 in perm8.
-	};
-	struct BVHNodeCompact2
-	{
-		// Novel 192-byte 8-way BVH node, with replicated data for rapid extraction.
-		float bminx, bminy, bminz, d0, bminx_, bminy_, bminz_, d1;	// 32
-		float bextx, bexty, bextz, d2, bextx_, bexty_, bextz_, d3;	// 32
-		SIMDIVEC8 child8, perm8;									// 64
-		SIMDVEC4 cbminmaxx8;										// 16
-		SIMDVEC4 cbminmaxy8;										// 16
-		SIMDVEC4 cbminmaxz8;										// 16
-		uint64_t dummy4, dummy5;									// 16, total: 192
+		// Novel 128-byte 8-way BVH node.
+		float d0, bminx, bminy, bminz, d1, bextx, bexty, bextz;		// 32
+		SIMDIVEC4 cbminmaxx8, cbminmaxy8;							// 32
+		SIMDIVEC8 child8, perm8;									// 64, total: 128
 	};
 	struct CacheLine { SIMDVEC8 a, b; };
 	BVH8_CPU( BVHContext ctx = {} ) { layout = LAYOUT_BVH8_AVX2; context = ctx; }
@@ -2685,7 +2672,7 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 				tmp.rD = tinybvh_rcp( tmp.D );
 				// 2. Traverse BLAS with the transformed ray
 				assert( blas->layout == LAYOUT_BVH || blas->layout == LAYOUT_BVH4_CPU ||
-					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 || 
+					blas->layout == LAYOUT_BVH_SOA || blas->layout == LAYOUT_BVH8_AVX2 ||
 					blas->layout == LAYOUT_BVH4_AVX2 );
 				if (blas->layout == LAYOUT_BVH)
 				{
@@ -4638,7 +4625,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 	uint32_t nodesNeeded = bvh8.usedNodes;
 	uint32_t leafsNeeded = bvh8.LeafCount();
 #ifdef BVH8_CPU_COMPACT
-	uint32_t blocksNeeded = nodesNeeded * (sizeof( BVHNodeCompact2 ) / 64); // here, block = cacheline.
+	uint32_t blocksNeeded = nodesNeeded * (sizeof( BVHNodeCompact ) / 64); // here, block = cacheline.
 #else
 	uint32_t blocksNeeded = nodesNeeded * (sizeof( BVHNode ) / 64); // here, block = cacheline.
 #endif
@@ -4664,9 +4651,9 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 	#ifdef BVH8_CPU_COMPACT
 		BVHNode tmp;
 		BVHNode* newNode = &tmp;
-		BVHNodeCompact2* compact = (BVHNodeCompact2*)(bvh8Data + newBlockPtr);
-		newBlockPtr += sizeof( BVHNodeCompact2 ) / 64;
-		memset( compact, 0, sizeof( BVHNodeCompact2 ) );
+		BVHNodeCompact* compact = (BVHNodeCompact*)(bvh8Data + newBlockPtr);
+		newBlockPtr += sizeof( BVHNodeCompact ) / 64;
+		memset( compact, 0, sizeof( BVHNodeCompact ) );
 	#else
 		BVHNode* newNode = (BVHNode*)(bvh8Data + newBlockPtr);
 		newBlockPtr += sizeof( BVHNode ) / 64;
@@ -4757,22 +4744,34 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 	#ifdef BVH8_CPU_COMPACT
 		// convert node data to compact layout
 		compact->perm8 = newNode->perm8;
-		compact->bextx = compact->bextx_ = (orig.aabbMax.x - orig.aabbMin.x) * 1.004f, compact->bminx = compact->bminx_ = orig.aabbMin.x;
-		compact->bexty = compact->bexty_ = (orig.aabbMax.y - orig.aabbMin.y) * 1.004f, compact->bminy = compact->bminy_ = orig.aabbMin.y;
-		compact->bextz = compact->bextz_ = (orig.aabbMax.z - orig.aabbMin.z) * 1.004f, compact->bminz = compact->bminz_ = orig.aabbMin.z;
+		compact->bextx = (orig.aabbMax.x - orig.aabbMin.x), compact->bminx = orig.aabbMin.x;
+		compact->bexty = (orig.aabbMax.y - orig.aabbMin.y), compact->bminy = orig.aabbMin.y;
+		compact->bextz = (orig.aabbMax.z - orig.aabbMin.z), compact->bminz = orig.aabbMin.z;
+		__m128 cbminmaxz8;
 		for (int i = 0; i < 8; i++) if (((uint32_t*)&newNode->child8)[i])
 		{
-			((uint8_t*)&compact->cbminmaxx8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->xmin8)[i] - orig.aabbMin.x) / compact->bextx), 0, 255 );
-			((uint8_t*)&compact->cbminmaxy8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->ymin8)[i] - orig.aabbMin.y) / compact->bexty), 0, 255 );
-			((uint8_t*)&compact->cbminmaxz8)[i] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->zmin8)[i] - orig.aabbMin.z) / compact->bextz), 0, 255 );
-			((uint8_t*)&compact->cbminmaxx8)[i + 8] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->xmax8)[i] - orig.aabbMin.x) / compact->bextx) + 1, 0, 255 );
-			((uint8_t*)&compact->cbminmaxy8)[i + 8] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->ymax8)[i] - orig.aabbMin.y) / compact->bexty) + 1, 0, 255 );
-			((uint8_t*)&compact->cbminmaxz8)[i + 8] = (unsigned)tinybvh_clamp( (int)(256.0f * (((float*)&newNode->zmax8)[i] - orig.aabbMin.z) / compact->bextz) + 1, 0, 255 );
+			((uint8_t*)&compact->cbminmaxx8)[i] = (unsigned)tinybvh_clamp( (int)(255.0f * (((float*)&newNode->xmin8)[i] - orig.aabbMin.x) / compact->bextx), 0, 255 );
+			((uint8_t*)&compact->cbminmaxy8)[i] = (unsigned)tinybvh_clamp( (int)(255.0f * (((float*)&newNode->ymin8)[i] - orig.aabbMin.y) / compact->bexty), 0, 255 );
+			((uint8_t*)&cbminmaxz8)[i] = (unsigned)tinybvh_clamp( (int)(255.0f * (((float*)&newNode->zmin8)[i] - orig.aabbMin.z) / compact->bextz), 0, 255 );
+			((uint8_t*)&compact->cbminmaxx8)[i + 8] = (unsigned)tinybvh_clamp( (int)(255.0f * (((float*)&newNode->xmax8)[i] - orig.aabbMin.x) / compact->bextx) + 1, 0, 255 );
+			((uint8_t*)&compact->cbminmaxy8)[i + 8] = (unsigned)tinybvh_clamp( (int)(255.0f * (((float*)&newNode->ymax8)[i] - orig.aabbMin.y) / compact->bexty) + 1, 0, 255 );
+			((uint8_t*)&cbminmaxz8)[i + 8] = (unsigned)tinybvh_clamp( (int)(255.0f * (((float*)&newNode->zmax8)[i] - orig.aabbMin.z) / compact->bextz) + 1, 0, 255 );
 		}
 		else // mark node as invalid.
 			((unsigned char*)&compact->cbminmaxx8)[i] = 255,
 			((unsigned char*)&compact->perm8)[i] &= 0xffffff;
 		compact->child8 = newNode->child8;
+		compact->bextx *= 1 / 255.0f;
+		compact->bexty *= 1 / 255.0f;
+		compact->bextz *= 1 / 255.0f;
+		// squeeze
+		*(uint32_t*)&compact->d0 = ((uint32_t*)&cbminmaxz8)[0];
+		*(uint32_t*)&compact->d1 = ((uint32_t*)&cbminmaxz8)[1];
+		for (int i = 0; i < 8; i++)
+		{
+			const uint32_t b = ((uint8_t*)&cbminmaxz8)[i + 8];
+			((uint32_t*)&compact->perm8)[i] |= b << 24;
+		}
 	#endif
 		// pop next task
 		if (!stackPtr) break;
@@ -5687,7 +5686,7 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 	bvhuint2 traversalStack[128];
 	uint32_t hitAddr = 0, stackPtr = 0;
 	bvhvec2 triangleuv( 0, 0 );
-	const bvhvec4* blasNodes = bvh8Data, *blasTris = bvh8Tris;
+	const bvhvec4* blasNodes = bvh8Data, * blasTris = bvh8Tris;
 	float tmin = 0, tmax = ray.hit.t;
 	const uint32_t octinv = (7 - ((ray.D.x < 0 ? 4 : 0) | (ray.D.y < 0 ? 2 : 0) | (ray.D.z < 0 ? 1 : 0))) * 0x1010101;
 	bvhuint2 ngroup = bvhuint2( 0, 0b10000000000000000000000000000000 ), tgroup = bvhuint2( 0 );
@@ -5781,7 +5780,8 @@ int32_t BVH8_CWBVH::Intersect( Ray& ray ) const
 			hitAddr = as_uint( blasTris[triAddr + 2].w );
 		}
 		if (ngroup.y > 0x00FFFFFF) continue;
-		if (stackPtr > 0) { STACK_POP( /* nodeGroup */ ); } else
+		if (stackPtr > 0) { STACK_POP( /* nodeGroup */ ); }
+		else
 		{
 			ray.hit.t = tmax;
 			if (tmax < BVH_FAR) ray.hit.u = triangleuv.x, ray.hit.v = triangleuv.y, ray.hit.prim = hitAddr;
@@ -6412,9 +6412,7 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 	union ALIGNED( 32 ) { __m256i c8s; uint32_t cs[8]; };
 	constexpr int signShift = (posX ? 3 : 0) + (posY ? 6 : 0) + (posZ ? 12 : 0);
 #ifdef BVH8_CPU_COMPACT
-	const __m256i mantissa8 = _mm256_set1_epi32( 255 << 15 );
-	const __m256i exponent8 = _mm256_set1_epi32( 0x3f800000 );
-	const __m256 r255 = _mm256_set1_ps( 1.0f / 255.0f );
+	const __m256i selector8 = _mm256_set_epi32( 4, 0, 4, 0, 4, 0, 4, 0 );
 #endif
 #ifdef BVH8_WOOP_TRIS
 	// precalculated data for 'modified-Woop' intersection
@@ -6441,35 +6439,31 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 		while (nodeIdx >= 0) // top bit: leaf flag
 		{
 		#ifdef BVH8_CPU_COMPACT
-			const BVHNodeCompact2* n = (BVHNodeCompact2*)(bvh8Data + nodeIdx);
+			const BVHNodeCompact* n = (BVHNodeCompact*)(bvh8Data + nodeIdx);
 			const __m256i index = _mm256_srli_epi32( n->perm8, signShift );
 			__m256i c8 = n->child8;
-			const __m256 line0 = _mm256_load_ps( (const float*)n );		// float bminx, bminy, bminz, , bminx_, bminy_, bminz_, ;
-			const __m256 line1 = _mm256_load_ps( (const float*)n + 8 );	// float bextx, bexty, bextz, , bextx_, bexty_, bextz_, ;
-			const __m256 nodeMin8x = _mm256_shuffle_ps( line0, line0, _MM_SHUFFLE( 0, 0, 0, 0 ) ); 		
-			const __m256 nodeMin8y = _mm256_shuffle_ps( line0, line0, _MM_SHUFFLE( 1, 1, 1, 1 ) ); 		
-			const __m256 nodeMin8z = _mm256_shuffle_ps( line0, line0, _MM_SHUFFLE( 2, 2, 2, 2 ) ); 		
-			const __m256 nodeExt8x = _mm256_shuffle_ps( line1, line1, _MM_SHUFFLE( 0, 0, 0, 0 ) ); 		
-			const __m256 nodeExt8y = _mm256_shuffle_ps( line1, line1, _MM_SHUFFLE( 1, 1, 1, 1 ) ); 		
-			const __m256 nodeExt8z = _mm256_shuffle_ps( line1, line1, _MM_SHUFFLE( 2, 2, 2, 2 ) ); 
-			const __m256i bmin8xi = _mm256_cvtepu8_epi32( _mm_castps_si128( posX ? n->cbminmaxx8 : _mm_shuffle_ps( n->cbminmaxx8, n->cbminmaxx8, 78 ) ) );
-			const __m256i bmax8xi = _mm256_cvtepu8_epi32( _mm_castps_si128( posX ? _mm_shuffle_ps( n->cbminmaxx8, n->cbminmaxx8, 78 ) : n->cbminmaxx8 ) );
-			const __m256i bmin8yi = _mm256_cvtepu8_epi32( _mm_castps_si128( posY ? n->cbminmaxy8 : _mm_shuffle_ps( n->cbminmaxy8, n->cbminmaxy8, 78 ) ) );
-			const __m256i bmax8yi = _mm256_cvtepu8_epi32( _mm_castps_si128( posY ? _mm_shuffle_ps( n->cbminmaxy8, n->cbminmaxy8, 78 ) : n->cbminmaxy8 ) );
-			const __m256i bmin8zi = _mm256_cvtepu8_epi32( _mm_castps_si128( posZ ? n->cbminmaxz8 : _mm_shuffle_ps( n->cbminmaxz8, n->cbminmaxz8, 78 ) ) );
-			const __m256i bmax8zi = _mm256_cvtepu8_epi32( _mm_castps_si128( posZ ? _mm_shuffle_ps( n->cbminmaxz8, n->cbminmaxz8, 78 ) : n->cbminmaxz8 ) );
-			const __m256 bminx8 = _mm256_add_ps( nodeMin8x, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmin8xi ), r255 ), nodeExt8x ) );
-			const __m256 bmaxx8 = _mm256_add_ps( nodeMin8x, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmax8xi ), r255 ), nodeExt8x ) );
-			const __m256 bminy8 = _mm256_add_ps( nodeMin8y, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmin8yi ), r255 ), nodeExt8y ) );
-			const __m256 bmaxy8 = _mm256_add_ps( nodeMin8y, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmax8yi ), r255 ), nodeExt8y ) );
-			const __m256 bminz8 = _mm256_add_ps( nodeMin8z, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmin8zi ), r255 ), nodeExt8z ) );
-			const __m256 bmaxz8 = _mm256_add_ps( nodeMin8z, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmax8zi ), r255 ), nodeExt8z ) );
-			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( bminx8, ox8 ), rdx8 );
-			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( bminy8, oy8 ), rdy8 );
-			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( bminz8, oz8 ), rdz8 );
-			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( bmaxx8, ox8 ), rdx8 );
-			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( bmaxy8, oy8 ), rdy8 );
-			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( bmaxz8, oz8 ), rdz8 );
+			const __m256 line0 = _mm256_load_ps( (const float*)n );
+			const __m256 line0a = _mm256_permute2f128_ps( line0, line0, 0 );
+			const __m256 line0b = _mm256_permute2f128_ps( line0, line0, 17 );
+			const __m256 nodeExt8x = _mm256_shuffle_ps( line0b, line0b, 85 );
+			const __m256 nodeExt8y = _mm256_shuffle_ps( line0b, line0b, 170 );
+			const __m256 nodeExt8z = _mm256_shuffle_ps( line0b, line0b, 255 );
+			const __m128i line0c = _mm_castps_si128( _mm256_castps256_ps128( _mm256_permutevar8x32_ps( line0, selector8 ) ) );
+			const __m256 nodeMin8x = _mm256_sub_ps( _mm256_shuffle_ps( line0a, line0a, 85 ), ox8 );
+			const __m256 nodeMin8y = _mm256_sub_ps( _mm256_shuffle_ps( line0a, line0a, 170 ), oy8 );
+			const __m256 nodeMin8z = _mm256_sub_ps( _mm256_shuffle_ps( line0a, line0a, 255 ), oz8 );
+			const __m256i bmin8xi = _mm256_cvtepu8_epi32( posX ? n->cbminmaxx8 : _mm_shuffle_epi32( n->cbminmaxx8, 78 ) );
+			const __m256i bmin8yi = _mm256_cvtepu8_epi32( posY ? n->cbminmaxy8 : _mm_shuffle_epi32( n->cbminmaxy8, 78 ) );
+			const __m256i bmin8zi = posZ ? _mm256_cvtepu8_epi32( line0c ) : _mm256_srli_epi32( n->perm8, 24 );
+			const __m256 tx1 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmin8xi ), nodeExt8x, nodeMin8x ), rdx8 );
+			const __m256 ty1 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmin8yi ), nodeExt8y, nodeMin8y ), rdy8 );
+			const __m256 tz1 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmin8zi ), nodeExt8z, nodeMin8z ), rdz8 );
+			const __m256i bmax8xi = _mm256_cvtepu8_epi32( posX ? _mm_shuffle_epi32( n->cbminmaxx8, 78 ) : n->cbminmaxx8 );
+			const __m256i bmax8yi = _mm256_cvtepu8_epi32( posY ? _mm_shuffle_epi32( n->cbminmaxy8, 78 ) : n->cbminmaxy8 );
+			const __m256i bmax8zi = posZ ? _mm256_srli_epi32( n->perm8, 24 ) : _mm256_cvtepu8_epi32( line0c );
+			const __m256 tx2 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmax8xi ), nodeExt8x, nodeMin8x ), rdx8 );
+			const __m256 ty2 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmax8yi ), nodeExt8y, nodeMin8y ), rdy8 );
+			const __m256 tz2 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmax8zi ), nodeExt8z, nodeMin8z ), rdz8 );
 		#else
 			const BVHNode* n = (BVHNode*)(bvh8Data + nodeIdx);
 			const __m256i index = _mm256_srli_epi32( n->perm8, signShift );
@@ -6481,6 +6475,7 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( posY ? n->ymax8 : n->ymin8, oy8 ), rdy8 );
 			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n->zmax8 : n->zmin8, oz8 ), rdz8 );
 		#endif
+			uint32_t t = sizeof( BVHNodeCompact );
 			__m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( zero8, tx1 ), ty1 ), tz1 );
 			__m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx2, t8 ), ty2 ), tz2 );
 			tmin = _mm256_permutevar8x32_ps( tmin, index );
@@ -6667,10 +6662,7 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 	union ALIGNED( 32 ) { __m256i c8s; uint32_t cs[8]; };
 	const __m256 t8 = _mm256_set1_ps( ray.hit.t );
 #ifdef BVH8_CPU_COMPACT
-	const __m256 zero8 = _mm256_setzero_ps();
-	const __m256i mantissa8 = _mm256_set1_epi32( 255 << 15 );
-	const __m256i exponent8 = _mm256_set1_epi32( 0x3f800000 );
-	const __m256 r255 = _mm256_set1_ps( 1.0f / 255.0f );
+	const __m256i selector8 = _mm256_set_epi32( 4, 0, 4, 0, 4, 0, 4, 0 );
 #endif
 #ifdef BVH8_WOOP_TRIS
 	// precalculated data for 'modified-Woop' intersection
@@ -6691,34 +6683,30 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 		while (nodeIdx >= 0) // top bit: leaf flag
 		{
 		#ifdef BVH8_CPU_COMPACT
-			const BVHNodeCompact2* n = (BVHNodeCompact2*)(bvh8Data + nodeIdx);
+			const BVHNodeCompact* n = (BVHNodeCompact*)(bvh8Data + nodeIdx);
 			__m256i c8 = n->child8;
-			const __m256 line0 = _mm256_load_ps( (const float*)n );		// float bminx, bminy, bminz, , bminx_, bminy_, bminz_, ;
-			const __m256 line1 = _mm256_load_ps( (const float*)n + 8 );	// float bextx, bexty, bextz, , bextx_, bexty_, bextz_, ;
-			const __m256 nodeMin8x = _mm256_shuffle_ps( line0, line0, _MM_SHUFFLE( 0, 0, 0, 0 ) ); 		
-			const __m256 nodeMin8y = _mm256_shuffle_ps( line0, line0, _MM_SHUFFLE( 1, 1, 1, 1 ) ); 		
-			const __m256 nodeMin8z = _mm256_shuffle_ps( line0, line0, _MM_SHUFFLE( 2, 2, 2, 2 ) ); 		
-			const __m256 nodeExt8x = _mm256_shuffle_ps( line1, line1, _MM_SHUFFLE( 0, 0, 0, 0 ) ); 		
-			const __m256 nodeExt8y = _mm256_shuffle_ps( line1, line1, _MM_SHUFFLE( 1, 1, 1, 1 ) ); 		
-			const __m256 nodeExt8z = _mm256_shuffle_ps( line1, line1, _MM_SHUFFLE( 2, 2, 2, 2 ) ); 
-			const __m256i bmin8xi = _mm256_cvtepu8_epi32( _mm_castps_si128( posX ? n->cbminmaxx8 : _mm_shuffle_ps( n->cbminmaxx8, n->cbminmaxx8, 78 ) ) );
-			const __m256i bmax8xi = _mm256_cvtepu8_epi32( _mm_castps_si128( posX ? _mm_shuffle_ps( n->cbminmaxx8, n->cbminmaxx8, 78 ) : n->cbminmaxx8 ) );
-			const __m256i bmin8yi = _mm256_cvtepu8_epi32( _mm_castps_si128( posY ? n->cbminmaxy8 : _mm_shuffle_ps( n->cbminmaxy8, n->cbminmaxy8, 78 ) ) );
-			const __m256i bmax8yi = _mm256_cvtepu8_epi32( _mm_castps_si128( posY ? _mm_shuffle_ps( n->cbminmaxy8, n->cbminmaxy8, 78 ) : n->cbminmaxy8 ) );
-			const __m256i bmin8zi = _mm256_cvtepu8_epi32( _mm_castps_si128( posZ ? n->cbminmaxz8 : _mm_shuffle_ps( n->cbminmaxz8, n->cbminmaxz8, 78 ) ) );
-			const __m256i bmax8zi = _mm256_cvtepu8_epi32( _mm_castps_si128( posZ ? _mm_shuffle_ps( n->cbminmaxz8, n->cbminmaxz8, 78 ) : n->cbminmaxz8 ) );
-			const __m256 bminx8 = _mm256_add_ps( nodeMin8x, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmin8xi ), r255 ), nodeExt8x ) );
-			const __m256 bmaxx8 = _mm256_add_ps( nodeMin8x, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmax8xi ), r255 ), nodeExt8x ) );
-			const __m256 bminy8 = _mm256_add_ps( nodeMin8y, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmin8yi ), r255 ), nodeExt8y ) );
-			const __m256 bmaxy8 = _mm256_add_ps( nodeMin8y, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmax8yi ), r255 ), nodeExt8y ) );
-			const __m256 bminz8 = _mm256_add_ps( nodeMin8z, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmin8zi ), r255 ), nodeExt8z ) );
-			const __m256 bmaxz8 = _mm256_add_ps( nodeMin8z, _mm256_mul_ps( _mm256_mul_ps( _mm256_cvtepi32_ps( bmax8zi ), r255 ), nodeExt8z ) );
-			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( bminx8, ox8 ), rdx8 );
-			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( bminy8, oy8 ), rdy8 );
-			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( bminz8, oz8 ), rdz8 );
-			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( bmaxx8, ox8 ), rdx8 );
-			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( bmaxy8, oy8 ), rdy8 );
-			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( bmaxz8, oz8 ), rdz8 );
+			const __m256 line0 = _mm256_load_ps( (const float*)n );
+			const __m256 line0a = _mm256_permute2f128_ps( line0, line0, 0 );
+			const __m256 line0b = _mm256_permute2f128_ps( line0, line0, 17 );
+			const __m256 nodeExt8x = _mm256_shuffle_ps( line0b, line0b, _MM_SHUFFLE( 1, 1, 1, 1 ) );
+			const __m256 nodeExt8y = _mm256_shuffle_ps( line0b, line0b, _MM_SHUFFLE( 2, 2, 2, 2 ) );
+			const __m256 nodeExt8z = _mm256_shuffle_ps( line0b, line0b, _MM_SHUFFLE( 3, 3, 3, 3 ) );
+			const __m256i line0c = _mm256_castps_si256( _mm256_permutevar8x32_ps( line0, selector8 ) );
+			const __m256 nodeMin8x = _mm256_sub_ps( _mm256_shuffle_ps( line0a, line0a, _MM_SHUFFLE( 1, 1, 1, 1 ) ), ox8 );
+			const __m256 nodeMin8y = _mm256_sub_ps( _mm256_shuffle_ps( line0a, line0a, _MM_SHUFFLE( 2, 2, 2, 2 ) ), oy8 );
+			const __m256 nodeMin8z = _mm256_sub_ps( _mm256_shuffle_ps( line0a, line0a, _MM_SHUFFLE( 3, 3, 3, 3 ) ), oz8 );
+			const __m256i bmin8xi = _mm256_cvtepu8_epi32( posX ? n->cbminmaxx8 : _mm_shuffle_epi32( n->cbminmaxx8, 78 ) );
+			const __m256i bmin8yi = _mm256_cvtepu8_epi32( posY ? n->cbminmaxy8 : _mm_shuffle_epi32( n->cbminmaxy8, 78 ) );
+			const __m256i bmin8zi = posZ ? _mm256_cvtepu8_epi32( _mm256_castsi256_si128( line0c ) ) : _mm256_srli_epi32( n->perm8, 24 );
+			const __m256 tx1 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmin8xi ), nodeExt8x, nodeMin8x ), rdx8 );
+			const __m256 ty1 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmin8yi ), nodeExt8y, nodeMin8y ), rdy8 );
+			const __m256 tz1 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmin8zi ), nodeExt8z, nodeMin8z ), rdz8 );
+			const __m256i bmax8xi = _mm256_cvtepu8_epi32( posX ? _mm_shuffle_epi32( n->cbminmaxx8, 78 ) : n->cbminmaxx8 );
+			const __m256i bmax8yi = _mm256_cvtepu8_epi32( posY ? _mm_shuffle_epi32( n->cbminmaxy8, 78 ) : n->cbminmaxy8 );
+			const __m256i bmax8zi = posZ ? _mm256_srli_epi32( n->perm8, 24 ) : _mm256_cvtepu8_epi32( _mm256_castsi256_si128( line0c ) );
+			const __m256 tx2 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmax8xi ), nodeExt8x, nodeMin8x ), rdx8 );
+			const __m256 ty2 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmax8yi ), nodeExt8y, nodeMin8y ), rdy8 );
+			const __m256 tz2 = _mm256_mul_ps( _mm256_fmadd_ps( _mm256_cvtepi32_ps( bmax8zi ), nodeExt8z, nodeMin8z ), rdz8 );
 		#else
 			const BVHNode* n = (BVHNode*)(bvh8Data + nodeIdx);
 			const __m256i c8 = n->child8;
