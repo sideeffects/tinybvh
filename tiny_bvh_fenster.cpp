@@ -58,7 +58,7 @@ void sphere_flake( float x, float y, float z, float s, int d = 0 )
 	if (d < 3) sphere_flake( x + s * 1.55f, y, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x - s * 1.5f, y, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x, y + s * 1.5f, z, s * 0.5f, d + 1 );
-	if (d < 3) sphere_flake( x, x - s * 1.5f, z, s * 0.5f, d + 1 );
+	if (d < 3) sphere_flake( x, y - s * 1.5f, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x, y, z + s * 1.5f, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake( x, y, z - s * 1.5f, s * 0.5f, d + 1 );
 }
@@ -81,7 +81,7 @@ void sphere_flake_indexed( float x, float y, float z, float s, int d = 0 )
 	if (d < 3) sphere_flake_indexed( x + s * 1.55f, y, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake_indexed( x - s * 1.5f, y, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake_indexed( x, y + s * 1.5f, z, s * 0.5f, d + 1 );
-	if (d < 3) sphere_flake_indexed( x, x - s * 1.5f, z, s * 0.5f, d + 1 );
+	if (d < 3) sphere_flake_indexed( x, y - s * 1.5f, z, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake_indexed( x, y, z + s * 1.5f, s * 0.5f, d + 1 );
 	if (d < 3) sphere_flake_indexed( x, y, z - s * 1.5f, s * 0.5f, d + 1 );
 }
