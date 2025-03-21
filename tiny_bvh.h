@@ -5914,11 +5914,13 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 	ALIGNED( 64 ) int32_t stackPtr = 0, nodeIdx = 0;
 	union ALIGNED( 32 ) { __m256i c8s; uint32_t cs[8]; };
 	constexpr int signShift = (posX ? 3 : 0) + (posY ? 6 : 0) + (posZ ? 12 : 0);
-	const __m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
-	const __m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
-	const __m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
+	const __m256 ox8 = _mm256_set1_ps( ray.O.x * ray.rD.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
+	const __m256 oy8 = _mm256_set1_ps( ray.O.y * ray.rD.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
+	const __m256 oz8 = _mm256_set1_ps( ray.O.z * ray.rD.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
+	const __m128 ox4 = _mm_set1_ps( ray.O.x ), oy4 = _mm_set1_ps( ray.O.y ), oz4 = _mm_set1_ps( ray.O.z );
 	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
-	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
+	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), one4 = _mm_set1_ps( 1.0f );
+	const __m128 zero4 = _mm_setzero_ps(), inf4 = _mm_set1_ps( 1e34f );
 #ifdef _DEBUG
 	// sorry, not even this can be tolerated in this function. Only in debug.
 	uint32_t steps = 0;
@@ -5931,12 +5933,12 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 		while (!(nodeIdx & LEAF_BIT))
 		{
 			const BVHNode* n = (BVHNode*)(bvh8Data + nodeIdx);
-			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( posX ? n->xmin8 : n->xmax8, ox8 ), rdx8 );
-			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( posY ? n->ymin8 : n->ymax8, oy8 ), rdy8 );
-			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n->zmin8 : n->zmax8, oz8 ), rdz8 );
-			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( posX ? n->xmax8 : n->xmin8, ox8 ), rdx8 );
-			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( posY ? n->ymax8 : n->ymin8, oy8 ), rdy8 );
-			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n->zmax8 : n->zmin8, oz8 ), rdz8 );
+			const __m256 tx1 = _mm256_fmsub_ps( posX ? n->xmin8 : n->xmax8, rdx8, ox8 );
+			const __m256 ty1 = _mm256_fmsub_ps( posY ? n->ymin8 : n->ymax8, rdy8, oy8 );
+			const __m256 tz1 = _mm256_fmsub_ps( posZ ? n->zmin8 : n->zmax8, rdz8, oz8 );
+			const __m256 tx2 = _mm256_fmsub_ps( posX ? n->xmax8 : n->xmin8, rdx8, ox8 );
+			const __m256 ty2 = _mm256_fmsub_ps( posY ? n->ymax8 : n->ymin8, rdy8, oy8 );
+			const __m256 tz2 = _mm256_fmsub_ps( posZ ? n->zmax8 : n->zmin8, rdz8, oz8 );
 			__m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( zero8, tx1 ), ty1 ), tz1 );
 			__m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx2, t8 ), ty2 ), tz2 );
 			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
@@ -5952,13 +5954,14 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 				const __m256i index = _mm256_srli_epi32( n->perm8, signShift );
 				const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( _mm256_permutevar8x32_epi32( mask8, index ) ) );
 				tmin = _mm256_permutevar8x32_ps( tmin, index );
-				const __m256i c8 = _mm256_permutevar8x32_epi32( n->child8, index );
 				const __m256i cpi = idxLUT256[mask];
-				const __m256i child8 = _mm256_permutevar8x32_epi32( c8, cpi );
+				const __m256i c8 = _mm256_permutevar8x32_epi32( n->child8, index );
 				const __m256 dist8 = _mm256_permutevar8x32_ps( tmin, cpi );
+				const __m256i child8 = _mm256_permutevar8x32_epi32( c8, cpi );
 				_mm256_storeu_si256( (__m256i*)(nodeStack + stackPtr), child8 );
 				_mm256_storeu_ps( (float*)(distStack + stackPtr), dist8 );
-				stackPtr += 7 - invalidNodes, nodeIdx = nodeStack[stackPtr];
+				stackPtr += 7 - invalidNodes;
+				nodeIdx = nodeStack[stackPtr];
 			}
 			else
 			{
@@ -5973,24 +5976,24 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 		const __m128 hx4 = _mm_fmsub_ps( dy4, leaf->e2z4, _mm_mul_ps( dz4, leaf->e2y4 ) );
 		const __m128 hy4 = _mm_fmsub_ps( dz4, leaf->e2x4, _mm_mul_ps( dx4, leaf->e2z4 ) );
 		const __m128 hz4 = _mm_fmsub_ps( dx4, leaf->e2y4, _mm_mul_ps( dy4, leaf->e2x4 ) );
-		const __m128 sx4 = _mm_sub_ps( _mm256_extractf128_ps( ox8, 0 ), leaf->v0x4 );
-		const __m128 sy4 = _mm_sub_ps( _mm256_extractf128_ps( oy8, 0 ), leaf->v0y4 );
-		const __m128 sz4 = _mm_sub_ps( _mm256_extractf128_ps( oz8, 0 ), leaf->v0z4 );
+		const __m128 sx4 = _mm_sub_ps( ox4, leaf->v0x4 );
+		const __m128 sy4 = _mm_sub_ps( oy4, leaf->v0y4 );
+		const __m128 sz4 = _mm_sub_ps( oz4, leaf->v0z4 );
 		const __m128 det4 = _mm_fmadd_ps( leaf->e1z4, hz4, _mm_fmadd_ps( leaf->e1x4, hx4, _mm_mul_ps( leaf->e1y4, hy4 ) ) );
-		const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
-		const __m128 inv_det4 = fastrcp4( det4 );
-		const __m128 u4 = _mm_mul_ps( _mm_fmadd_ps( sz4, hz4, _mm_fmadd_ps( sx4, hx4, _mm_mul_ps( sy4, hy4 ) ) ), inv_det4 );
 		const __m128 qz4 = _mm_fmsub_ps( sx4, leaf->e1y4, _mm_mul_ps( sy4, leaf->e1x4 ) );
 		const __m128 qx4 = _mm_fmsub_ps( sy4, leaf->e1z4, _mm_mul_ps( sz4, leaf->e1y4 ) );
 		const __m128 qy4 = _mm_fmsub_ps( sz4, leaf->e1x4, _mm_mul_ps( sx4, leaf->e1z4 ) );
-		const __m128 v4 = _mm_mul_ps( _mm_fmadd_ps( dz4, qz4, _mm_fmadd_ps( dx4, qx4, _mm_mul_ps( dy4, qy4 ) ) ), inv_det4 );
+		const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
+		const __m128 inv_det4 = fastrcp4( det4 );
+		const __m128 u4 = _mm_mul_ps( _mm_fmadd_ps( sz4, hz4, _mm_fmadd_ps( sx4, hx4, _mm_mul_ps( sy4, hy4 ) ) ), inv_det4 );
 		const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, one4 ) );
+		const __m128 v4 = _mm_mul_ps( _mm_fmadd_ps( dz4, qz4, _mm_fmadd_ps( dx4, qx4, _mm_mul_ps( dy4, qy4 ) ) ), inv_det4 );
 		const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 ) );
 		const __m128 ta4 = _mm_mul_ps( _mm_fmadd_ps( leaf->e2z4, qz4, _mm_fmadd_ps( leaf->e2x4, qx4, _mm_mul_ps( leaf->e2y4, qy4 ) ) ), inv_det4 );
 		const __m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
 		if (_mm_movemask_ps( combined ))
 		{
-			const __m128 dist4 = _mm_blendv_ps( _mm_set1_ps( 1e30f ), ta4, combined );
+			const __m128 dist4 = _mm_blendv_ps( inf4, ta4, combined );
 			// compute broadcasted horizontal minimum of dist4
 			const __m128 a = _mm_min_ps( dist4, _mm_shuffle_ps( dist4, dist4, _MM_SHUFFLE( 2, 1, 0, 3 ) ) );
 			const __m128 c = _mm_min_ps( a, _mm_shuffle_ps( a, a, _MM_SHUFFLE( 1, 0, 3, 2 ) ) );
@@ -6003,8 +6006,7 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 				const __m128 _u4 = u4, _v4 = v4;
 				ray.hit.t = t, ray.hit.u = ((float*)&_u4)[lane], ray.hit.v = ((float*)&_v4)[lane];
 			#if INST_IDX_BITS == 32
-				ray.hit.prim = leaf->primIdx[lane];
-				ray.hit.inst = ray.instIdx;
+				ray.hit.prim = leaf->primIdx[lane], ray.hit.inst = ray.instIdx;
 			#else
 				ray.hit.prim = leaf->primIdx[lane] + ray.instIdx;
 			#endif
@@ -6055,9 +6057,10 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 	ALIGNED( 64 ) int32_t stackPtr = 0, nodeIdx = 0;
 	union ALIGNED( 32 ) { __m256i c8s; uint32_t cs[8]; };
 	const __m256 t8 = _mm256_set1_ps( ray.hit.t );
-	const __m256 ox8 = _mm256_set1_ps( ray.O.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
-	const __m256 oy8 = _mm256_set1_ps( ray.O.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
-	const __m256 oz8 = _mm256_set1_ps( ray.O.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
+	const __m256 ox8 = _mm256_set1_ps( ray.O.x * ray.rD.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
+	const __m256 oy8 = _mm256_set1_ps( ray.O.y * ray.rD.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
+	const __m256 oz8 = _mm256_set1_ps( ray.O.z * ray.rD.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
+	const __m128 ox4 = _mm_set1_ps( ray.O.x ), oy4 = _mm_set1_ps( ray.O.y ), oz4 = _mm_set1_ps( ray.O.z );
 	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
 	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), t4 = _mm_set1_ps( ray.hit.t );
 	const __m128 one4 = _mm_set1_ps( 1.0f ), zero4 = _mm_setzero_ps();
@@ -6067,12 +6070,12 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 		{
 			const BVHNode* n = (BVHNode*)(bvh8Data + nodeIdx);
 			const __m256i c8 = n->child8;
-			const __m256 tx1 = _mm256_mul_ps( _mm256_sub_ps( posX ? n->xmin8 : n->xmax8, ox8 ), rdx8 );
-			const __m256 ty1 = _mm256_mul_ps( _mm256_sub_ps( posY ? n->ymin8 : n->ymax8, oy8 ), rdy8 );
-			const __m256 tz1 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n->zmin8 : n->zmax8, oz8 ), rdz8 );
-			const __m256 tx2 = _mm256_mul_ps( _mm256_sub_ps( posX ? n->xmax8 : n->xmin8, ox8 ), rdx8 );
-			const __m256 ty2 = _mm256_mul_ps( _mm256_sub_ps( posY ? n->ymax8 : n->ymin8, oy8 ), rdy8 );
-			const __m256 tz2 = _mm256_mul_ps( _mm256_sub_ps( posZ ? n->zmax8 : n->zmin8, oz8 ), rdz8 );
+			const __m256 tx1 = _mm256_fmsub_ps( posX ? n->xmin8 : n->xmax8, rdx8, ox8 );
+			const __m256 ty1 = _mm256_fmsub_ps( posY ? n->ymin8 : n->ymax8, rdy8, oy8 );
+			const __m256 tz1 = _mm256_fmsub_ps( posZ ? n->zmin8 : n->zmax8, rdz8, oz8 );
+			const __m256 tx2 = _mm256_fmsub_ps( posX ? n->xmax8 : n->xmin8, rdx8, ox8 );
+			const __m256 ty2 = _mm256_fmsub_ps( posY ? n->ymax8 : n->ymin8, rdy8, oy8 );
+			const __m256 tz2 = _mm256_fmsub_ps( posZ ? n->zmax8 : n->zmin8, rdz8, oz8 );
 			const __m256 tmin = _mm256_max_ps( _mm256_max_ps( _mm256_max_ps( _mm256_setzero_ps(), tx1 ), ty1 ), tz1 );
 			const __m256 tmax = _mm256_min_ps( _mm256_min_ps( _mm256_min_ps( tx2, t8 ), ty2 ), tz2 );
 			const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( tmin ), _mm256_castps_si256( tmax ) );
@@ -6105,16 +6108,16 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 		const __m128 hx4 = _mm_fmsub_ps( dy4, leaf->e2z4, _mm_mul_ps( dz4, leaf->e2y4 ) );
 		const __m128 hy4 = _mm_fmsub_ps( dz4, leaf->e2x4, _mm_mul_ps( dx4, leaf->e2z4 ) );
 		const __m128 hz4 = _mm_fmsub_ps( dx4, leaf->e2y4, _mm_mul_ps( dy4, leaf->e2x4 ) );
-		const __m128 sx4 = _mm_sub_ps( _mm256_extractf128_ps( ox8, 0 ), leaf->v0x4 );
-		const __m128 sy4 = _mm_sub_ps( _mm256_extractf128_ps( oy8, 0 ), leaf->v0y4 );
-		const __m128 sz4 = _mm_sub_ps( _mm256_extractf128_ps( oz8, 0 ), leaf->v0z4 );
+		const __m128 sx4 = _mm_sub_ps( ox4, leaf->v0x4 );
+		const __m128 sy4 = _mm_sub_ps( oy4, leaf->v0y4 );
+		const __m128 sz4 = _mm_sub_ps( oz4, leaf->v0z4 );
 		const __m128 det4 = _mm_fmadd_ps( leaf->e1z4, hz4, _mm_fmadd_ps( leaf->e1x4, hx4, _mm_mul_ps( leaf->e1y4, hy4 ) ) );
-		const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
-		const __m128 inv_det4 = fastrcp4( det4 );
-		const __m128 u4 = _mm_mul_ps( _mm_fmadd_ps( sz4, hz4, _mm_fmadd_ps( sx4, hx4, _mm_mul_ps( sy4, hy4 ) ) ), inv_det4 );
 		const __m128 qz4 = _mm_fmsub_ps( sx4, leaf->e1y4, _mm_mul_ps( sy4, leaf->e1x4 ) );
 		const __m128 qx4 = _mm_fmsub_ps( sy4, leaf->e1z4, _mm_mul_ps( sz4, leaf->e1y4 ) );
 		const __m128 qy4 = _mm_fmsub_ps( sz4, leaf->e1x4, _mm_mul_ps( sx4, leaf->e1z4 ) );
+		const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
+		const __m128 inv_det4 = fastrcp4( det4 );
+		const __m128 u4 = _mm_mul_ps( _mm_fmadd_ps( sz4, hz4, _mm_fmadd_ps( sx4, hx4, _mm_mul_ps( sy4, hy4 ) ) ), inv_det4 );
 		const __m128 v4 = _mm_mul_ps( _mm_fmadd_ps( dz4, qz4, _mm_fmadd_ps( dx4, qx4, _mm_mul_ps( dy4, qy4 ) ) ), inv_det4 );
 		const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, one4 ) );
 		const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 ) );
