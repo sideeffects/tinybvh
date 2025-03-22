@@ -4413,6 +4413,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 	CopyBasePropertiesFrom( bvh8 );
 	// start conversion
 	uint32_t newBlockPtr = 0, nodeIdx = 0, stack[128], stackPtr = 0;
+	int leafPrimCount[5] = { 0 };
 	while (1)
 	{
 		const MBVH<8>::MBVHNode& orig = bvh8.mbvhNode[nodeIdx];
@@ -4459,6 +4460,7 @@ void BVH8_CPU::ConvertFrom( const MBVH<8>& original )
 				((uint32_t*)&newNode->child8)[cidx] = newBlockPtr + LEAF_BIT;
 				BVHTri4Leaf* leaf = (BVHTri4Leaf*)(bvh8Data + newBlockPtr);
 				newBlockPtr += 3;
+				leafPrimCount[child.triCount]++;
 				for (uint32_t l = 0; l < 4; l++)
 				{
 					uint32_t primIdx = bvh8.bvh.primIdx[child.firstTri + tinybvh_min( l, child.triCount - 1u )];
@@ -6026,7 +6028,7 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 					__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
 					const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( dist8 ), _mm256_castps_si256( t8 ) );
 					const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-					const __m256i cpi = _mm256_cvtepu8_epi32( _mm_cvtsi64_si128( idxLUT[mask] ) );
+					const __m256i cpi = idxLUT256[mask];
 					dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
 					_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
 					_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
