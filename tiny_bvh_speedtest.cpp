@@ -1233,7 +1233,7 @@ int main()
 	}
 	printf( "%7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
 	// copy diffuse rays to Embree format
-	for( int view = 0; view < 3; view++ )
+	for (int view = 0; view < 3; view++)
 	{
 		for (unsigned i = 0; i < Nsmall; i++)
 		{
