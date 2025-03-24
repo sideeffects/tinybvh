@@ -8,7 +8,7 @@
 #define SCRHEIGHT	320
 
 // GPU ray tracing
-#define ENABLE_OPENCL
+// #define ENABLE_OPENCL
 
 #if 1
 
@@ -17,7 +17,7 @@
 #define BUILD_REFERENCE
 #define BUILD_DOUBLE
 #define BUILD_AVX
-// #define BUILD_NEON
+#define BUILD_NEON
 #define BUILD_SBVH
 #define REFIT_BVH2
 #define REFIT_MBVH4
@@ -77,6 +77,7 @@ using namespace tinybvh;
 bvhvec4* triangles = 0;
 #include <fstream>
 int verts = 0;
+float avgCost = 0;
 float traceTime, buildTime, refitTime, * refDist = 0, * refDistFull = 0;
 unsigned refOccluded[3] = {}, * refOccl[3] = {};
 unsigned Nfull, Nsmall;
@@ -170,9 +171,9 @@ float TestPrimaryRays( uint32_t layout, unsigned N, unsigned passes, float* avgC
 		case _BVH: for (unsigned i = 0; i < N; i++) travCost += bvh->Intersect( batch[i] ); break;
 		case _DEFAULT: for (unsigned i = 0; i < N; i++) travCost += ref_bvh->Intersect( batch[i] ); break;
 		case _GPU2: for (unsigned i = 0; i < N; i++) travCost += bvh_gpu->Intersect( batch[i] ); break;
-		case _CPU4: for (unsigned i = 0; i < N; i++) travCost += bvh4_cpu->Intersect( batch[i] ); break;
 		case _GPU4: for (unsigned i = 0; i < N; i++) travCost += bvh4_gpu->Intersect( batch[i] ); break;
 		#ifdef BVH_USEAVX
+		case _CPU4: for (unsigned i = 0; i < N; i++) travCost += bvh4_cpu->Intersect( batch[i] ); break;
 		case _CWBVH: for (unsigned i = 0; i < N; i++) travCost += cwbvh->Intersect( batch[i] ); break;
 		case _SOA: for (unsigned i = 0; i < N; i++) travCost += bvh_soa->Intersect( batch[i] ); break;
 		case _CPU8: for (unsigned i = 0; i < N; i++) travCost += bvh8_cpu->Intersect( batch[i] ); break;
@@ -205,12 +206,12 @@ float TestDiffuseRays( uint32_t layout, unsigned passes, float* avgCost = 0 )
 		case _BVH: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh->Intersect( batch[i] ); break;
 		case _DEFAULT: for (unsigned i = 0; i < Nsmall; i++) travCost += ref_bvh->Intersect( batch[i] ); break;
 		case _GPU2: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh_gpu->Intersect( batch[i] ); break;
-		case _CPU4: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh4_cpu->Intersect( batch[i] ); break;
 		case _GPU4: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh4_gpu->Intersect( batch[i] ); break;
 		#ifdef BVH_USEAVX
+		case _CPU4: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh4_cpu->Intersect( batch[i] ); break;
 		case _CWBVH: for (unsigned i = 0; i < Nsmall; i++) travCost += cwbvh->Intersect( batch[i] ); break;
 		case _SOA: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh_soa->Intersect( batch[i] ); break;
-		case _CPU8: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh8_cpu->Intersect( batch[i] ); break;
+		case _CPU8: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh8_cpu->Intersect( batch[i] );
 		#endif
 		default: break;
 		};
@@ -276,9 +277,9 @@ float TestShadowRays( uint32_t layout, unsigned N, unsigned passes )
 		case _DEFAULT: for (unsigned i = 0; i < N; i++) occluded += bvh->IsOccluded( batch[i] ); break;
 		#ifdef BVH_USEAVX
 		case _SOA: for (unsigned i = 0; i < N; i++) occluded += bvh_soa->IsOccluded( batch[i] ); break;
+		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
 		#endif
 		case _GPU2: for (unsigned i = 0; i < N; i++) occluded += bvh_gpu->IsOccluded( batch[i] ); break;
-		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
 		#ifdef BVH_USEAVX2
 		case _CPU8: for (unsigned i = 0; i < N; i++) occluded += bvh8_cpu->IsOccluded( batch[i] ); break;
 		#endif
@@ -544,8 +545,6 @@ int main()
 
 #endif
 
-	float avgCost;
-
 #ifdef BUILD_REFERENCE
 
 	// measure single-core bvh construction time - reference builder
@@ -623,18 +622,17 @@ int main()
 
 	// measure single-core bvh refit time
 	printf( "- BVH2 refitting: " );
+	BVH tmpBVH;
+	tmpBVH.Build( triangles, verts / 3 );
+	float sahBefore = tmpBVH.SAHCost();
+	for (int pass = 0; pass < 10; pass++)
 	{
-		BVH tmpBVH;
-		tmpBVH.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++)
-		{
-			if (pass == 1) t.reset();
-			tmpBVH.Refit();
-		}
-		refitTime = t.elapsed() / 9.0f;
+		if (pass == 1) t.reset();
+		tmpBVH.Refit();
 	}
+	refitTime = t.elapsed() / 9.0f;
 	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
-	printf( "- SAH=%.2f\n", bvh->SAHCost() );
+	printf( "- SAH=%.2f\n", tmpBVH.SAHCost() );
 
 #endif
 
@@ -642,18 +640,16 @@ int main()
 
 	// measure single-core mbvh refit time
 	printf( "- BVH4 refitting: " );
+	MBVH<4> tmpBVH4;
+	tmpBVH4.Build( triangles, verts / 3 );
+	for (int pass = 0; pass < 10; pass++)
 	{
-		MBVH<4> tmpBVH4;
-		tmpBVH4.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++)
-		{
-			if (pass == 1) t.reset();
-			tmpBVH4.Refit();
-		}
-		refitTime = t.elapsed() / 9.0f;
+		if (pass == 1) t.reset();
+		tmpBVH4.Refit();
 	}
+	refitTime = t.elapsed() / 9.0f;
 	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
-	printf( "- SAH=%.2f\n", bvh->SAHCost() );
+	printf( "- SAH=%.2f\n", tmpBVH4.SAHCost() );
 
 #endif
 
@@ -661,18 +657,16 @@ int main()
 
 	// measure single-core mbvh refit time
 	printf( "- BVH8 refitting: " );
+	MBVH<8> tmpBVH8;
+	tmpBVH8.Build( triangles, verts / 3 );
+	for (int pass = 0; pass < 10; pass++)
 	{
-		MBVH<8> tmpBVH8;
-		tmpBVH8.Build( triangles, verts / 3 );
-		for (int pass = 0; pass < 10; pass++)
-		{
-			if (pass == 1) t.reset();
-			tmpBVH8.Refit();
-		}
-		refitTime = t.elapsed() / 9.0f;
+		if (pass == 1) t.reset();
+		tmpBVH8.Refit();
 	}
+	refitTime = t.elapsed() / 9.0f;
 	printf( "%7.2fms for %7i triangles ", refitTime * 1000.0f, verts / 3 );
-	printf( "- SAH=%.2f\n", bvh->SAHCost() );
+	printf( "- SAH=%.2f\n", tmpBVH8.SAHCost() );
 
 #endif
 
@@ -1185,7 +1179,6 @@ int main()
 	{
 		if (pass == 1) t.reset(); // first pass is cache warming
 		const int batchCount = Nfull / (30 * 256); // batches of 30 packets of 256 rays
-
 		batchIdx = threadCount;
 		std::vector<std::thread> threads;
 		for (uint32_t i = 0; i < threadCount; i++)
@@ -1205,60 +1198,60 @@ int main()
 
 	// report threaded CPU performance
 	printf( "BVH traversal speed - EMBREE reference\n" );
-
 	// trace all rays three times to estimate average performance
 	// - coherent, Embree, single-threaded
 	printf( "- HQ BVH      - primary: " );
-	struct RTCRayHit* rayhits = (RTCRayHit*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * 16 * sizeof( RTCRayHit ) );
+	struct RTCRayHit* rayhits[3];
 	// copy primary rays to Embree format
-	for (unsigned i = 0; i < Nsmall; i++)
+	for (int view = 0; view < 3; view++)
 	{
-		rayhits[i].ray.org_x = smallBatch[0][i].O.x, rayhits[i].ray.org_y = smallBatch[0][i].O.y, rayhits[i].ray.org_z = smallBatch[0][i].O.z;
-		rayhits[i].ray.dir_x = smallBatch[0][i].D.x, rayhits[i].ray.dir_y = smallBatch[0][i].D.y, rayhits[i].ray.dir_z = smallBatch[0][i].D.z;
-		rayhits[i].ray.tnear = 0, rayhits[i].ray.tfar = smallBatch[0][i].hit.t;
-		rayhits[i].ray.mask = -1, rayhits[i].ray.flags = 0;
-		rayhits[i].hit.geomID = RTC_INVALID_GEOMETRY_ID;
-		rayhits[i].hit.instID[0] = RTC_INVALID_GEOMETRY_ID;
+		rayhits[view] = (RTCRayHit*)tinybvh::malloc64( SCRWIDTH * SCRHEIGHT * 16 * sizeof( RTCRayHit ) );
+		for (unsigned i = 0; i < Nsmall; i++)
+		{
+			rayhits[view][i].ray.org_x = smallBatch[0][i].O.x, rayhits[view][i].ray.org_y = smallBatch[0][i].O.y, rayhits[view][i].ray.org_z = smallBatch[0][i].O.z;
+			rayhits[view][i].ray.dir_x = smallBatch[0][i].D.x, rayhits[view][i].ray.dir_y = smallBatch[0][i].D.y, rayhits[view][i].ray.dir_z = smallBatch[0][i].D.z;
+			rayhits[view][i].ray.tnear = 0, rayhits[view][i].ray.tfar = smallBatch[0][i].hit.t;
+			rayhits[view][i].ray.mask = -1, rayhits[view][i].ray.flags = 0;
+			rayhits[view][i].hit.geomID = RTC_INVALID_GEOMETRY_ID;
+			rayhits[view][i].hit.instID[0] = RTC_INVALID_GEOMETRY_ID;
+		}
 	}
-	for (int pass = 0; pass < 4; pass++)
+	// evaluate viewpoints
+	for (uint32_t pass = 0; pass < 4; pass++)
 	{
+		uint32_t view = pass == 0 ? 0 : (3 - pass); // 0, 2, 1, 0
 		if (pass == 1) t.reset(); // first pass is cache warming
-		for (int i = 0; i < Nsmall; i++) rtcIntersect1( embreeScene, rayhits + i );
+		for (uint32_t i = 0; i < Nsmall; i++) rtcIntersect1( embreeScene, rayhits[view] + i );
 	}
 	traceTime = t.elapsed() / 3.0f;
 	// retrieve intersection results
 	for (unsigned i = 0; i < Nsmall; i++)
 	{
-		smallBatch[0][i].hit.t = rayhits[i].ray.tfar;
-		smallBatch[0][i].hit.u = rayhits[i].hit.u, smallBatch[0][i].hit.u = rayhits[i].hit.v;
-		smallBatch[0][i].hit.prim = rayhits[i].hit.primID;
+		smallBatch[0][i].hit.t = rayhits[0][i].ray.tfar;
+		smallBatch[0][i].hit.u = rayhits[0][i].hit.u, smallBatch[0][i].hit.u = rayhits[0][i].hit.v;
+		smallBatch[0][i].hit.prim = rayhits[0][i].hit.primID;
 	}
-	// printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	printf( "%7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
 	// copy diffuse rays to Embree format
-	for (unsigned i = 0; i < Nsmall; i++)
+	for (int view = 0; view < 3; view++)
 	{
-		rayhits[i].ray.org_x = smallDiffuse[0][i].O.x, rayhits[i].ray.org_y = smallDiffuse[0][i].O.y, rayhits[i].ray.org_z = smallDiffuse[0][i].O.z;
-		rayhits[i].ray.dir_x = smallDiffuse[0][i].D.x, rayhits[i].ray.dir_y = smallDiffuse[0][i].D.y, rayhits[i].ray.dir_z = smallDiffuse[0][i].D.z;
-		rayhits[i].ray.tnear = 0, rayhits[i].ray.tfar = smallDiffuse[0][i].hit.t;
-		rayhits[i].ray.mask = -1, rayhits[i].ray.flags = 0;
-		rayhits[i].hit.geomID = RTC_INVALID_GEOMETRY_ID;
-		rayhits[i].hit.instID[0] = RTC_INVALID_GEOMETRY_ID;
+		for (unsigned i = 0; i < Nsmall; i++)
+		{
+			rayhits[view][i].ray.org_x = smallDiffuse[0][i].O.x, rayhits[view][i].ray.org_y = smallDiffuse[0][i].O.y, rayhits[view][i].ray.org_z = smallDiffuse[0][i].O.z;
+			rayhits[view][i].ray.dir_x = smallDiffuse[0][i].D.x, rayhits[view][i].ray.dir_y = smallDiffuse[0][i].D.y, rayhits[view][i].ray.dir_z = smallDiffuse[0][i].D.z;
+			rayhits[view][i].ray.tnear = 0, rayhits[view][i].ray.tfar = smallDiffuse[0][i].hit.t;
+			rayhits[view][i].ray.mask = -1, rayhits[view][i].ray.flags = 0;
+			rayhits[view][i].hit.geomID = RTC_INVALID_GEOMETRY_ID;
+			rayhits[view][i].hit.instID[0] = RTC_INVALID_GEOMETRY_ID;
+		}
 	}
-	for (int pass = 0; pass < 4; pass++)
+	for (uint32_t pass = 0; pass < 4; pass++)
 	{
+		uint32_t view = pass == 0 ? 0 : (3 - pass); // 0, 2, 1, 0
 		if (pass == 1) t.reset(); // first pass is cache warming
-		for (int i = 0; i < Nsmall; i++) rtcIntersect1( embreeScene, rayhits + i );
+		for (uint32_t i = 0; i < Nsmall; i++) rtcIntersect1( embreeScene, rayhits[view] + i );
 	}
 	traceTime = t.elapsed() / 3.0f;
-	// retrieve intersection results
-	for (unsigned i = 0; i < Nsmall; i++)
-	{
-		smallDiffuse[0][i].hit.t = rayhits[i].ray.tfar;
-		smallDiffuse[0][i].hit.u = rayhits[i].hit.u, smallDiffuse[0][i].hit.u = rayhits[i].hit.v;
-		smallDiffuse[0][i].hit.prim = rayhits[i].hit.primID;
-	}
-	// printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s)\n", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	printf( "diffuse: %7.2fMRays/s\n", (float)Nsmall / traceTime * 1e-6f );
 	tinybvh::free64( rayhits );
 
