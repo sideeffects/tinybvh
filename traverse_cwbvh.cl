@@ -319,10 +319,9 @@ float4 traverse_cwbvh( global const float4* cwbvhNodes, global const float4* cwb
 			const float f = 1 / a;
 			const float3 s = O.xyz - v0.xyz;
 			const float u = f * dot( s, r );
-			if (u < 0 || u > 1) continue;
 			const float3 q = cross( s, e2 );
 			const float v = f * dot( D.xyz, q );
-			if (v < 0 || u + v > 1) continue;
+			if (u < 0 || v < 0 || u + v > 1) continue;
 			const float d = f * dot( e1, q );
 			if (d <= 0.0f || d >= tmax) continue;
 			uv = (float2)(u, v), tmax = d;
@@ -540,10 +539,9 @@ bool isoccluded_cwbvh( global const float4* cwbvhNodes, global const float4* cwb
 			const float f = 1 / a;
 			const float3 s = O.xyz - v0;
 			const float u = f * dot( s, r );
-			if (u < 0 || u > 1) continue;
 			const float3 q = cross( s, e2 );
 			const float v = f * dot( D.xyz, q );
-			if (v < 0 || u + v > 1) continue;
+			if (u < 0 || v < 0 || u + v > 1) continue;
 			const float d = f * dot( e1, q );
 			if (d > 0.0f && d < tmax) return true;
 		#endif

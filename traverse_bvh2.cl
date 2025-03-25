@@ -50,10 +50,9 @@ float4 traverse_ailalaine( global struct BVHNodeAlt* altNode, global unsigned* i
 				const float f = 1 / a;
 				const float3 s = O - tri[0].xyz;
 				const float u = f * dot( s, h );
-				if (u < 0 || u > 1) continue;
 				const float3 q = cross( s, edge1.xyz );
 				const float v = f * dot( D, q );
-				if (v < 0 || u + v > 1) continue;
+				if (u < 0 || v < 0 || u + v > 1) continue;
 				const float d = f * dot( edge2.xyz, q );
 				if (d > 0.0f && d < hit.x) hit = (float4)(d, u, v, as_float( triIdx ));
 			}
@@ -129,10 +128,9 @@ bool isoccluded_ailalaine( global struct BVHNodeAlt* altNode, global unsigned* i
 				const float f = 1 / a;
 				const float3 s = O - tri[0].xyz;
 				const float u = f * dot( s, h );
-				if (u < 0 || u > 1) continue;
 				const float3 q = cross( s, edge1.xyz );
 				const float v = f * dot( D, q );
-				if (v < 0 || u + v > 1) continue;
+				if (u < 0 || v < 0 || u + v > 1) continue;
 				const float d = f * dot( edge2.xyz, q );
 				if (d > 0.0f && d < tmax) return true;
 			}
