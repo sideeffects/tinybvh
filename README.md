@@ -68,7 +68,7 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -mavx2 -mfma -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.4.7
+# Version 1.4.8
 
 Version 1.4.0 introduces a new BVH layout for fast single-ray traversal on CPU: BVH8_CPU. This supersedes the previous fastest scheme, BVH4_CPU. 
 
@@ -148,9 +148,7 @@ Plans, ordered by priority:
   * Improve speed of SBVH builder
 * Features & outstanding issues:
   * 'Watertight' triangle intersection option
-  * Detect AVX, AVX2, SSE, NEON flags
   * Use PARANOID flag to check NaNs and more
-  * Reduce duplicate code for a smaller file
 * Demo of tinybvh on GPU using other apis:
   * Ray tracing in pure OpenGL
   * Ray tracing in pure DirectX
