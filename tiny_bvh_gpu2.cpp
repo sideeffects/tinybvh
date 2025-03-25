@@ -180,7 +180,7 @@ void Init()
 		instance[b] = BLASInstance( 1 /* dragon */ );
 		BLASInstance& i = instance[b];
 		i.transform[0] = i.transform[5] = i.transform[10] = 0.07f;
-		i.transform[3] = x, i.transform[7] = y, i.transform[11] = z;
+		i.transform[3] = (float)x, i.transform[7] = (float)y, i.transform[11] = (float)z;
 	}
 
 	// vertex data for static scenery
