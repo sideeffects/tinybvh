@@ -75,8 +75,8 @@ inline float fmax_fmax( const float a, const float b, const float c )
 }
 
 #ifdef USE_VLOAD_VSTORE
-#define STACK_POP(X) { unsigned* a = &stack[--stackPtr]; X = vload2( 0, a ); }
-#define STACK_PUSH(X) { unsigned* a = &stack[stackPtr++]; vstore2( X, 0, a ); }
+#define STACK_POP(X) { unsigned* a = (unsigned*)&stack[--stackPtr]; X = vload2( 0, a ); }
+#define STACK_PUSH(X) { unsigned* a = (unsigned*)&stack[stackPtr++]; vstore2( X, 0, a ); }
 #else
 #define STACK_POP(X) { X = stack[--stackPtr]; }
 #define STACK_PUSH(X) { stack[stackPtr++] = X; }
