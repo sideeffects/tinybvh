@@ -153,8 +153,6 @@ THE SOFTWARE.
 // BVH8_CPU align to big boundaries - experimental.
 #define BVH8_ALIGN_4K
 // #define BVH8_ALIGN_32K
-// BVH8_CPU single-prim leafs - experimental.
-// #define BVH8_SINGLE_PRIM_LEAFS
 // BVH8_CPU uses leafs with up to eight prims - experimental.
 #define BVH8_MASSIVE_LEAFS
 
@@ -1341,10 +1339,9 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 	const float f = 1 / a;							\
 	const bvhvec3 s = ray.O - v0;					\
 	const float u = f * tinybvh_dot( s, h );		\
-	if (u < 0) exit;								\
 	const bvhvec3 q = tinybvh_cross( s, e1 );		\
 	const float v = f * tinybvh_dot( ray.D, q );	\
-	if (v < 0 || u + v > 1) exit;					\
+	if (u < 0 || v < 0 || u + v > 1) exit;			\
 	const float t = f * tinybvh_dot( e2, q );		\
 	if (t < 0 || t > tmax) exit;
 
@@ -2730,10 +2727,9 @@ void BVH::Intersect256Rays( Ray* packet ) const
 					const float a = tinybvh_dot( e1, h );
 					if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
 					const float f = 1 / a, u = f * tinybvh_dot( s, h );
-					if (u < 0 || u > 1) continue;
 					const bvhvec3 q = tinybvh_cross( s, e1 );
 					const float v = f * tinybvh_dot( ray.D, q );
-					if (v < 0 || u + v > 1) continue;
+					if (u < 0 || v < 0 || u + v > 1) continue;
 					const float t = f * tinybvh_dot( e2, q );
 					if (t <= 0 || t >= ray.hit.t) continue;
 					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
@@ -4401,21 +4397,13 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 	bvh8 = original;
 	// prepare input bvh8
 	uint32_t firstIdx = 0;
-#if defined BVH8_SINGLE_PRIM_LEAFS || defined BVH8_MASSIVE_LEAFS
-	bvh8.bvh.CombineLeafs( 8, firstIdx, 0 );
-	bvh8.bvh.SplitLeafs( 8 );
-#else
 	bvh8.bvh.CombineLeafs( 4, firstIdx, 0 );
 	bvh8.bvh.SplitLeafs( 4 );
-#endif
 	bvh8.ConvertFrom( bvh8.bvh, true );
 	// allocate if needed
 	uint32_t nodesNeeded = bvh8.usedNodes, leafsNeeded = bvh8.LeafCount();
 	uint32_t blocksNeeded = nodesNeeded * (sizeof( BVHNode ) / 64); // here, block = cacheline.
-#ifdef BVH8_SINGLE_PRIM_LEAFS
-	blocksNeeded += leafsNeeded * (sizeof( BVHNode ) / 64); // for 'splitter' nodes
-	blocksNeeded += triCount; // for single-prim leaf storage
-#elif defined BVH8_MASSIVE_LEAFS
+#ifdef BVH8_MASSIVE_LEAFS
 	blocksNeeded += leafsNeeded * (sizeof( BVHTri8Leaf ) / 64);
 #else
 	blocksNeeded += leafsNeeded * (sizeof( BVHTri4Leaf ) / 64);
@@ -4471,34 +4459,7 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 			((float*)&newNode->zmin8)[cidx] = child.aabbMin.z, ((float*)&newNode->zmax8)[cidx] = child.aabbMax.z;
 			if (child.isLeaf())
 			{
-			#if defined( BVH8_SINGLE_PRIM_LEAFS )
-				// replace the multi-prim child by a new interior node: This uses an extra
-				// interior node traversal step to ensure that each leaf has 1 primitive.
-				BVHNode* splitter = (BVHNode*)(bvh8Data + newBlockPtr);
-				memset( splitter, 0, sizeof( BVHNode ) );
-				((uint32_t*)&newNode->child8)[cidx] = newBlockPtr;
-				newBlockPtr += sizeof( BVHNode ) / 64;
-				for (uint32_t i0, i1, i2, l = 0; l < child.triCount; l++)
-				{
-					BVHTri1Leaf* leaf = (BVHTri1Leaf*)(bvh8Data + newBlockPtr);
-					((uint32_t*)&splitter->child8)[l] = newBlockPtr++ | LEAF_BIT;
-					uint32_t primIdx = bvh8.bvh.primIdx[child.firstTri + l];
-					if (indexedEnabled && bvh8.bvh.vertIdx != 0)
-						i0 = bvh8.bvh.vertIdx[primIdx * 3], i1 = bvh8.bvh.vertIdx[primIdx * 3 + 1], i2 = bvh8.bvh.vertIdx[primIdx * 3 + 2];
-					else
-						i0 = primIdx * 3, i1 = primIdx * 3 + 1, i2 = primIdx * 3 + 2;
-					const bvhvec3 v0 = bvh8.bvh.verts[i0], v1 = bvh8.bvh.verts[i1], v2 = bvh8.bvh.verts[i2];
-					leaf->v0 = v0, leaf->e1 = v1 - v0, leaf->e2 = v2 - v0;
-					leaf->primIdx = primIdx;
-					const bvhvec3 tribmin = tinybvh_min( tinybvh_min( v0, v1 ), v2 );
-					const bvhvec3 tribmax = tinybvh_max( tinybvh_max( v0, v1 ), v2 );
-					((float*)&splitter->xmin8)[l] = tribmin.x, ((float*)&splitter->xmax8)[l] = tribmax.x;
-					((float*)&splitter->ymin8)[l] = tribmin.y, ((float*)&splitter->ymax8)[l] = tribmax.y;
-					((float*)&splitter->zmin8)[l] = tribmin.z, ((float*)&splitter->zmax8)[l] = tribmax.z;
-				}
-				for (uint32_t q = 0; q < 8; q++) for (uint32_t l = 0; l < 8; l++)
-					((uint32_t*)&splitter->perm8)[l] += l << (q * 3);
-			#elif defined ( BVH8_MASSIVE_LEAFS )
+			#ifdef BVH8_MASSIVE_LEAFS
 				// emit leaf node: group of up to 8 triangles in AoS format.
 				((uint32_t*)&newNode->child8)[cidx] = newBlockPtr + LEAF_BIT;
 				BVHTri8Leaf* leaf = (BVHTri8Leaf*)(bvh8Data + newBlockPtr);
@@ -5138,10 +5099,9 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 					const float a = tinybvh_dot( e1, h );
 					if (fabs( a ) < 0.0000001f) continue; // ray parallel to triangle
 					const float f = 1 / a, u = f * tinybvh_dot( s, h );
-					if (u < 0 || u > 1) continue;
 					const bvhvec3 q = tinybvh_cross( s, e1 );
 					const float v = f * tinybvh_dot( ray.D, q );
-					if (v < 0 || u + v > 1) continue;
+					if (u < 0 || v < 0 || u + v > 1) continue;
 					const float t = f * tinybvh_dot( e2, q );
 					if (t <= 0 || t >= ray.hit.t) continue;
 					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v, ray.hit.prim = idx;
@@ -5974,17 +5934,12 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 	const __m256 rx8 = _mm256_set1_ps( ray.O.x * ray.rD.x ), rdx8 = _mm256_set1_ps( ray.rD.x );
 	const __m256 ry8 = _mm256_set1_ps( ray.O.y * ray.rD.y ), rdy8 = _mm256_set1_ps( ray.rD.y );
 	const __m256 rz8 = _mm256_set1_ps( ray.O.z * ray.rD.z ), rdz8 = _mm256_set1_ps( ray.rD.z );
-#if defined ( BVH8_MASSIVE_LEAFS )
+#ifdef BVH8_MASSIVE_LEAFS
 	const __m256 ox8 = _mm256_set1_ps( ray.O.x ), oy8 = _mm256_set1_ps( ray.O.y ), oz8 = _mm256_set1_ps( ray.O.z );
 	const __m256 dx8 = _mm256_set1_ps( ray.D.x ), dy8 = _mm256_set1_ps( ray.D.y ), dz8 = _mm256_set1_ps( ray.D.z );
 	const __m256 epsNeg8 = _mm256_set1_ps( -0.000001f ), eps8 = _mm256_set1_ps( 0.000001f ), one8 = _mm256_set1_ps( 1.0f );
 	const __m256 inf8 = _mm256_set1_ps( 1e34f );
 	const __m256i signMask8 = _mm256_set1_epi32( 0x7fffffff );
-#elif !defined ( BVH8_SINGLE_PRIM_LEAFS )
-	const __m128 ox4 = _mm_set1_ps( ray.O.x ), oy4 = _mm_set1_ps( ray.O.y ), oz4 = _mm_set1_ps( ray.O.z );
-	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
-	const __m128 epsNeg4 = _mm_set1_ps( -0.000001f ), eps4 = _mm_set1_ps( 0.000001f ), one4 = _mm_set1_ps( 1.0f );
-	const __m128 zero4 = _mm_setzero_ps(), inf4 = _mm_set1_ps( 1e34f );
 #endif
 #ifdef _DEBUG
 	// sorry, not even this can be tolerated in this function. Only in debug.
@@ -6017,9 +5972,9 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 			else if (invalidNodes < 7)
 			{
 				const __m256i index = _mm256_srli_epi32( n->perm8, signShift );
-				const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( _mm256_permutevar8x32_epi32( mask8, index ) ) );
+				const uint32_t m = _mm256_movemask_ps( _mm256_castsi256_ps( _mm256_permutevar8x32_epi32( mask8, index ) ) );
 				tmin = _mm256_permutevar8x32_ps( tmin, index );
-				const __m256i cpi = idxLUT256[mask];
+				const __m256i cpi = idxLUT256[m];
 				const __m256i c8 = _mm256_permutevar8x32_epi32( n->child8, index );
 				const __m256 dist8 = _mm256_permutevar8x32_ps( tmin, cpi );
 				const __m256i child8 = _mm256_permutevar8x32_epi32( c8, cpi );
@@ -6037,50 +5992,7 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 		// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
 		uint32_t n;
 		memcpy( &n, &nodeIdx, 4 );
-	#ifdef BVH8_SINGLE_PRIM_LEAFS
-		const BVHTri1Leaf* leaf = (BVHTri1Leaf*)(bvh8Data + (n & 0x1fffffff));
-		const bvhvec3 v0 = leaf->v0, e1 = leaf->e1, e2 = leaf->e2;
-		const bvhvec3 h = tinybvh_cross( ray.D, e2 );
-		const float a = tinybvh_dot( e1, h );
-		if (fabs( a ) >= 0.000001f)
-		{
-			const float f = 1 / a;
-			const bvhvec3 s = ray.O - v0;
-			const float u = f * tinybvh_dot( s, h );
-			if (u >= 0 && u <= 1)
-			{
-				const bvhvec3 q = tinybvh_cross( s, e1 );
-				const float v = f * tinybvh_dot( ray.D, q );
-				const float t = f * tinybvh_dot( e2, q );
-				if (v >= 0 && u + v <= 1 && t > 0 && t <= ray.hit.t)
-				{
-					ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
-				#if INST_IDX_BITS == 32
-					ray.hit.prim = leaf->primIdx, ray.hit.inst = ray.instIdx;
-				#else
-					ray.hit.prim = leaf->primIdx + ray.instIdx;
-				#endif
-					t8 = _mm256_set1_ps( t );
-					// compress stack
-					uint32_t outStackPtr = 0;
-					for (int32_t i = 0; i < stackPtr; i += 8)
-					{
-						__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
-						__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
-						const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( dist8 ), _mm256_castps_si256( t8 ) );
-						const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-						const __m256i cpi = idxLUT256[mask];
-						dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
-						_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
-						_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
-						const int32_t numItems = tinybvh_min( 8, stackPtr - i ), validMask = (1 << numItems) - 1;
-						outStackPtr += __popc( (255 - mask) & validMask );
-					}
-					stackPtr = outStackPtr;
-				}
-			}
-		}
-	#elif defined BVH8_MASSIVE_LEAFS
+	#ifdef BVH8_MASSIVE_LEAFS
 		const BVHTri8Leaf* leaf = (BVHTri8Leaf*)(bvh8Data + (n & 0x1fffffff));
 		const __m256 hx8 = _mm256_fmsub_ps( dy8, leaf->e2z8, _mm256_mul_ps( dz8, leaf->e2y8 ) );
 		const __m256 hy8 = _mm256_fmsub_ps( dz8, leaf->e2x8, _mm256_mul_ps( dx8, leaf->e2z8 ) );
@@ -6109,14 +6021,14 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 			const __m128 hiDual = _mm_movehl_ps( minQuad, minQuad ), minDual = _mm_min_ps( loDual, hiDual );
 			const __m128 lo = minDual, hi = _mm_shuffle_ps( minDual, minDual, 1 ), v = _mm_min_ss( lo, hi );
 			const __m128 res = _mm_shuffle_ps( v, v, 0 );
-			const __m256 v8 = _mm256_castps128_ps256( res ), c8 = _mm256_insertf128_ps( v8, res, 1 );
+			const __m256 r8 = _mm256_castps128_ps256( res ), c8 = _mm256_insertf128_ps( r8, res, 1 );
 			const uint32_t lane = __bfind( _mm256_movemask_ps( _mm256_cmp_ps( c8, dist8, _CMP_EQ_OQ ) ) );
 			// update hit record
 			const __m256 _d8 = dist8;
 			const float t = ((float*)&_d8)[lane];
 			if (t < ray.hit.t)
 			{
-				const __m256 _u8 = u8, _v8 = v8;
+				const __m256 _u8 = u8, _v8 = r8;
 				ray.hit.t = t, ray.hit.u = ((float*)&_u8)[lane], ray.hit.v = ((float*)&_v8)[lane];
 			#if INST_IDX_BITS == 32
 				ray.hit.prim = leaf->primIdx[lane], ray.hit.inst = ray.instIdx;
@@ -6129,12 +6041,12 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 				for (int32_t i = 0; i < stackPtr; i += 8)
 				{
 					__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
-					__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
-					const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( dist8 ), _mm256_castps_si256( t8 ) );
+					__m256 d8 = _mm256_load_ps( (float*)(distStack + i) );
+					const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( d8 ), _mm256_castps_si256( t8 ) );
 					const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
 					const __m256i cpi = idxLUT256[mask];
-					dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
-					_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
+					d8 = _mm256_permutevar8x32_ps( d8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
+					_mm256_storeu_ps( (float*)(distStack + outStackPtr), d8 );
 					_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
 					const int32_t numItems = tinybvh_min( 8, stackPtr - i ), validMask = (1 << numItems) - 1;
 					outStackPtr += __popc( (255 - mask) & validMask );
@@ -7350,10 +7262,9 @@ int32_t BVH_Double::Intersect( RayEx& ray ) const
 				const double f = 1 / a;
 				const bvhdbl3 s = ray.O - bvhdbl3( verts[vertIdx] );
 				const double u = f * tinybvh_dot( s, h );
-				if (u < 0 || u > 1) continue;
 				const bvhdbl3 q = tinybvh_cross( s, e1 );
 				const double v = f * tinybvh_dot( ray.D, q );
-				if (v < 0 || u + v > 1) continue;
+				if (u < 0 || v < 0 || u + v > 1) continue;
 				const double t = f * tinybvh_dot( e2, q );
 				if (t > 0 && t < ray.hit.t)
 				{
@@ -7455,10 +7366,9 @@ bool BVH_Double::IsOccluded( const RayEx& ray ) const
 				const double f = 1 / a;
 				const bvhdbl3 s = ray.O - bvhdbl3( verts[vertIdx] );
 				const double u = f * tinybvh_dot( s, h );
-				if (u < 0 || u > 1) continue;
 				const bvhdbl3 q = tinybvh_cross( s, e1 );
 				const double v = f * tinybvh_dot( ray.D, q );
-				if (v < 0 || u + v > 1) continue;
+				if (u < 0 || v < 0 || u + v > 1) continue;
 				const double t = f * tinybvh_dot( e2, q );
 				if (t > 0 && t < ray.hit.t) return true;
 			}
