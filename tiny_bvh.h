@@ -154,7 +154,9 @@ THE SOFTWARE.
 #define BVH8_ALIGN_4K
 // #define BVH8_ALIGN_32K
 // BVH8_CPU uses leafs with up to eight prims - experimental.
-#define BVH8_MASSIVE_LEAFS
+// #define BVH8_MASSIVE_LEAFS
+// #define BVH8_FILLER_TRIS
+// #define ASSUME_SINGLE_HIT
 
 // ============================================================================
 //
@@ -4461,7 +4463,7 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 			{
 			#ifdef BVH8_MASSIVE_LEAFS
 				// emit leaf node: group of up to 8 triangles in AoS format.
-				((uint32_t*)&newNode->child8)[cidx] = newBlockPtr + LEAF_BIT;
+				( (uint32_t*)&newNode->child8 )[cidx] = newBlockPtr + LEAF_BIT;
 				BVHTri8Leaf* leaf = (BVHTri8Leaf*)(bvh8Data + newBlockPtr);
 				newBlockPtr += 5;
 				for (uint32_t i0, i1, i2, l = 0; l < 8; l++)
@@ -5940,6 +5942,10 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 	const __m256 epsNeg8 = _mm256_set1_ps( -0.000001f ), eps8 = _mm256_set1_ps( 0.000001f ), one8 = _mm256_set1_ps( 1.0f );
 	const __m256 inf8 = _mm256_set1_ps( 1e34f );
 	const __m256i signMask8 = _mm256_set1_epi32( 0x7fffffff );
+#else
+	const __m128 ox4 = _mm_set1_ps( ray.O.x ), oy4 = _mm_set1_ps( ray.O.y ), oz4 = _mm_set1_ps( ray.O.z );
+	const __m128 dx4 = _mm_set1_ps( ray.D.x ), dy4 = _mm_set1_ps( ray.D.y ), dz4 = _mm_set1_ps( ray.D.z );
+	const __m128 one4 = _mm_set1_ps( 1 ), inf4 = _mm_set1_ps( 1e34f );
 #endif
 #ifdef _DEBUG
 	// sorry, not even this can be tolerated in this function. Only in debug.
@@ -5997,21 +6003,67 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 		const __m256 hx8 = _mm256_fmsub_ps( dy8, leaf->e2z8, _mm256_mul_ps( dz8, leaf->e2y8 ) );
 		const __m256 hy8 = _mm256_fmsub_ps( dz8, leaf->e2x8, _mm256_mul_ps( dx8, leaf->e2z8 ) );
 		const __m256 hz8 = _mm256_fmsub_ps( dx8, leaf->e2y8, _mm256_mul_ps( dy8, leaf->e2x8 ) );
-		const __m256 sx8 = _mm256_sub_ps( ox8, leaf->v0x8 );
-		const __m256 sy8 = _mm256_sub_ps( oy8, leaf->v0y8 );
+		const __m256 sx8 = _mm256_sub_ps( ox8, leaf->v0x8 ), sy8 = _mm256_sub_ps( oy8, leaf->v0y8 );
 		const __m256 sz8 = _mm256_sub_ps( oz8, leaf->v0z8 );
 		const __m256 det8 = _mm256_fmadd_ps( leaf->e1z8, hz8, _mm256_fmadd_ps( leaf->e1x8, hx8, _mm256_mul_ps( leaf->e1y8, hy8 ) ) );
 		const __m256 qz8 = _mm256_fmsub_ps( sx8, leaf->e1y8, _mm256_mul_ps( sy8, leaf->e1x8 ) );
 		const __m256 qx8 = _mm256_fmsub_ps( sy8, leaf->e1z8, _mm256_mul_ps( sz8, leaf->e1y8 ) );
 		const __m256 qy8 = _mm256_fmsub_ps( sz8, leaf->e1x8, _mm256_mul_ps( sx8, leaf->e1z8 ) );
-		const __m256 absDet8 = _mm256_castsi256_ps( _mm256_and_si256( _mm256_castps_si256( det8 ), signMask8 ) );
-		const __m256 mask1 = _mm256_cmp_ps( absDet8, eps8, _CMP_GE_OQ ), inv_det8 = fastrcp8( det8 );
+		const __m256 inv_det8 = fastrcp8( det8 );
 		const __m256 u8 = _mm256_mul_ps( _mm256_fmadd_ps( sz8, hz8, _mm256_fmadd_ps( sx8, hx8, _mm256_mul_ps( sy8, hy8 ) ) ), inv_det8 );
-		const __m256 mask2 = _mm256_and_ps( _mm256_cmp_ps( u8, zero8, _CMP_GE_OQ ), _mm256_cmp_ps( u8, one8, _CMP_LE_OQ ) );
 		const __m256 v8 = _mm256_mul_ps( _mm256_fmadd_ps( dz8, qz8, _mm256_fmadd_ps( dx8, qx8, _mm256_mul_ps( dy8, qy8 ) ) ), inv_det8 );
-		const __m256 mask3 = _mm256_and_ps( _mm256_cmp_ps( v8, zero8, _CMP_GE_OQ ), _mm256_cmp_ps( _mm256_add_ps( u8, v8 ), one8, _CMP_LE_OQ ) );
 		const __m256 ta8 = _mm256_mul_ps( _mm256_fmadd_ps( leaf->e2z8, qz8, _mm256_fmadd_ps( leaf->e2x8, qx8, _mm256_mul_ps( leaf->e2y8, qy8 ) ) ), inv_det8 );
-		const __m256 combined = _mm256_and_ps( _mm256_and_ps( _mm256_and_ps( mask1, mask2 ), mask3 ), _mm256_cmp_ps( ta8, zero8, _CMP_GT_OQ ) );
+		const __m256 mask1 = _mm256_cmp_ps( u8, zero8, _CMP_GE_OQ );
+		const __m256 mask2 = _mm256_cmp_ps( v8, zero8, _CMP_GE_OQ );
+		const __m256 mask3 = _mm256_cmp_ps( _mm256_add_ps( u8, v8 ), one8, _CMP_LE_OQ );
+		const __m256 mask4 = _mm256_cmp_ps( ta8, t8, _CMP_LT_OQ );
+		const __m256 mask5 = _mm256_cmp_ps( ta8, zero8, _CMP_GT_OQ );
+		const __m256 combined = _mm256_and_ps( _mm256_and_ps( _mm256_and_ps( mask1, mask2 ), _mm256_and_ps( mask3, mask4 ) ), mask5 );
+	#ifdef ASSUME_SINGLE_HIT
+		const int bits = _mm256_movemask_ps( combined );
+		if (bits)
+		{
+			uint32_t lane;
+			if (__popc( bits ) == 1) lane = __bfind( bits ); else
+			{
+				// find closest hit distance
+				const __m256 dist8 = _mm256_blendv_ps( inf8, ta8, combined );
+				const __m128 hiQuad = _mm256_extractf128_ps( dist8, 1 ), loQuad = _mm256_castps256_ps128( dist8 );
+				const __m128 minQuad = _mm_min_ps( loQuad, hiQuad ), loDual = minQuad;
+				const __m128 hiDual = _mm_movehl_ps( minQuad, minQuad ), minDual = _mm_min_ps( loDual, hiDual );
+				const __m128 lo = minDual, hi = _mm_shuffle_ps( minDual, minDual, 1 ), v = _mm_min_ss( lo, hi );
+				const __m128 res = _mm_shuffle_ps( v, v, 0 );
+				const __m256 r8 = _mm256_castps128_ps256( res ), c8 = _mm256_insertf128_ps( r8, res, 1 );
+				lane = __bfind( _mm256_movemask_ps( _mm256_cmp_ps( c8, dist8, _CMP_EQ_OQ ) ) );
+			}
+			const __m256 _d8 = ta8;
+			const float t = ((float*)&_d8)[lane];
+			const __m256 _u8 = u8, _v8 = v8;
+			ray.hit.t = t, ray.hit.u = ((float*)&_u8)[lane], ray.hit.v = ((float*)&_v8)[lane];
+		#if INST_IDX_BITS == 32
+			ray.hit.prim = leaf->primIdx[lane], ray.hit.inst = ray.instIdx;
+		#else
+			ray.hit.prim = leaf->primIdx[lane] + ray.instIdx;
+		#endif
+			t8 = _mm256_set1_ps( t );
+			// compress stack
+			uint32_t outStackPtr = 0;
+			for (int32_t i = 0; i < stackPtr; i += 8)
+			{
+				__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
+				__m256 d8 = _mm256_load_ps( (float*)(distStack + i) );
+				const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( d8 ), _mm256_castps_si256( t8 ) );
+				const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
+				const __m256i cpi = idxLUT256[mask];
+				d8 = _mm256_permutevar8x32_ps( d8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
+				_mm256_storeu_ps( (float*)(distStack + outStackPtr), d8 );
+				_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
+				const int32_t numItems = tinybvh_min( 8, stackPtr - i ), validMask = (1 << numItems) - 1;
+				outStackPtr += __popc( (255 - mask) & validMask );
+			}
+			stackPtr = outStackPtr;
+		}
+	#else
 		if (_mm256_movemask_ps( combined ))
 		{
 			// find closest hit distance
@@ -6026,54 +6078,52 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 			// update hit record
 			const __m256 _d8 = dist8;
 			const float t = ((float*)&_d8)[lane];
-			if (t < ray.hit.t)
+			const __m256 _u8 = u8, _v8 = v8;
+			ray.hit.t = t, ray.hit.u = ((float*)&_u8)[lane], ray.hit.v = ((float*)&_v8)[lane];
+		#if INST_IDX_BITS == 32
+			ray.hit.prim = leaf->primIdx[lane], ray.hit.inst = ray.instIdx;
+		#else
+			ray.hit.prim = leaf->primIdx[lane] + ray.instIdx;
+		#endif
+			t8 = _mm256_set1_ps( t );
+			// compress stack
+			uint32_t outStackPtr = 0;
+			for (int32_t i = 0; i < stackPtr; i += 8)
 			{
-				const __m256 _u8 = u8, _v8 = r8;
-				ray.hit.t = t, ray.hit.u = ((float*)&_u8)[lane], ray.hit.v = ((float*)&_v8)[lane];
-			#if INST_IDX_BITS == 32
-				ray.hit.prim = leaf->primIdx[lane], ray.hit.inst = ray.instIdx;
-			#else
-				ray.hit.prim = leaf->primIdx[lane] + ray.instIdx;
-			#endif
-				t8 = _mm256_set1_ps( t );
-				// compress stack
-				uint32_t outStackPtr = 0;
-				for (int32_t i = 0; i < stackPtr; i += 8)
-				{
-					__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
-					__m256 d8 = _mm256_load_ps( (float*)(distStack + i) );
-					const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( d8 ), _mm256_castps_si256( t8 ) );
-					const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-					const __m256i cpi = idxLUT256[mask];
-					d8 = _mm256_permutevar8x32_ps( d8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
-					_mm256_storeu_ps( (float*)(distStack + outStackPtr), d8 );
-					_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
-					const int32_t numItems = tinybvh_min( 8, stackPtr - i ), validMask = (1 << numItems) - 1;
-					outStackPtr += __popc( (255 - mask) & validMask );
-				}
-				stackPtr = outStackPtr;
+				__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
+				__m256 d8 = _mm256_load_ps( (float*)(distStack + i) );
+				const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( d8 ), _mm256_castps_si256( t8 ) );
+				const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
+				const __m256i cpi = idxLUT256[mask];
+				d8 = _mm256_permutevar8x32_ps( d8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
+				_mm256_storeu_ps( (float*)(distStack + outStackPtr), d8 );
+				_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
+				const int32_t numItems = tinybvh_min( 8, stackPtr - i ), validMask = (1 << numItems) - 1;
+				outStackPtr += __popc( (255 - mask) & validMask );
 			}
+			stackPtr = outStackPtr;
 		}
+	#endif
 	#else
 		const BVHTri4Leaf* leaf = (BVHTri4Leaf*)(bvh8Data + (n & 0x1fffffff));
 		const __m128 hx4 = _mm_fmsub_ps( dy4, leaf->e2z4, _mm_mul_ps( dz4, leaf->e2y4 ) );
 		const __m128 hy4 = _mm_fmsub_ps( dz4, leaf->e2x4, _mm_mul_ps( dx4, leaf->e2z4 ) );
 		const __m128 hz4 = _mm_fmsub_ps( dx4, leaf->e2y4, _mm_mul_ps( dy4, leaf->e2x4 ) );
-		const __m128 sx4 = _mm_sub_ps( ox4, leaf->v0x4 );
-		const __m128 sy4 = _mm_sub_ps( oy4, leaf->v0y4 );
+		const __m128 sx4 = _mm_sub_ps( ox4, leaf->v0x4 ), sy4 = _mm_sub_ps( oy4, leaf->v0y4 );
 		const __m128 sz4 = _mm_sub_ps( oz4, leaf->v0z4 );
 		const __m128 det4 = _mm_fmadd_ps( leaf->e1z4, hz4, _mm_fmadd_ps( leaf->e1x4, hx4, _mm_mul_ps( leaf->e1y4, hy4 ) ) );
 		const __m128 qz4 = _mm_fmsub_ps( sx4, leaf->e1y4, _mm_mul_ps( sy4, leaf->e1x4 ) );
 		const __m128 qx4 = _mm_fmsub_ps( sy4, leaf->e1z4, _mm_mul_ps( sz4, leaf->e1y4 ) );
 		const __m128 qy4 = _mm_fmsub_ps( sz4, leaf->e1x4, _mm_mul_ps( sx4, leaf->e1z4 ) );
-		const __m128 mask1 = _mm_or_ps( _mm_cmple_ps( det4, epsNeg4 ), _mm_cmpge_ps( det4, eps4 ) );
 		const __m128 inv_det4 = fastrcp4( det4 );
 		const __m128 u4 = _mm_mul_ps( _mm_fmadd_ps( sz4, hz4, _mm_fmadd_ps( sx4, hx4, _mm_mul_ps( sy4, hy4 ) ) ), inv_det4 );
-		const __m128 mask2 = _mm_and_ps( _mm_cmpge_ps( u4, zero4 ), _mm_cmple_ps( u4, one4 ) );
 		const __m128 v4 = _mm_mul_ps( _mm_fmadd_ps( dz4, qz4, _mm_fmadd_ps( dx4, qx4, _mm_mul_ps( dy4, qy4 ) ) ), inv_det4 );
-		const __m128 mask3 = _mm_and_ps( _mm_cmpge_ps( v4, zero4 ), _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 ) );
 		const __m128 ta4 = _mm_mul_ps( _mm_fmadd_ps( leaf->e2z4, qz4, _mm_fmadd_ps( leaf->e2x4, qx4, _mm_mul_ps( leaf->e2y4, qy4 ) ) ), inv_det4 );
-		const __m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), mask3 ), _mm_cmpgt_ps( ta4, zero4 ) );
+		const __m128 mask1 = _mm_cmpge_ps( u4, _mm_setzero_ps() ), mask2 = _mm_cmpge_ps( v4, _mm_setzero_ps() );
+		const __m128 mask3 = _mm_cmple_ps( _mm_add_ps( u4, v4 ), one4 );
+		const __m128 mask4 = _mm_cmpgt_ps( ta4, _mm_setzero_ps() );
+		const __m128 mask5 = _mm_cmplt_ps( ta4, _mm256_extractf128_ps( t8, 0 ) );
+		const __m128 combined = _mm_and_ps( _mm_and_ps( _mm_and_ps( mask1, mask2 ), _mm_and_ps( mask3, mask4 ) ), mask5 );
 		if (_mm_movemask_ps( combined ))
 		{
 			const __m128 dist4 = _mm_blendv_ps( inf4, ta4, combined );
@@ -6084,33 +6134,30 @@ template <bool posX, bool posY, bool posZ> int32_t BVH8_CPU::Intersect( Ray& ray
 			// update hit record
 			const __m128 _d4 = dist4;
 			const float t = ((float*)&_d4)[lane];
-			if (t < ray.hit.t)
+			const __m128 _u4 = u4, _v4 = v4;
+			ray.hit.t = t, ray.hit.u = ((float*)&_u4)[lane], ray.hit.v = ((float*)&_v4)[lane];
+		#if INST_IDX_BITS == 32
+			ray.hit.prim = leaf->primIdx[lane], ray.hit.inst = ray.instIdx;
+		#else
+			ray.hit.prim = leaf->primIdx[lane] + ray.instIdx;
+		#endif
+			t8 = _mm256_set1_ps( t );
+			// compress stack
+			uint32_t outStackPtr = 0;
+			for (int32_t i = 0; i < stackPtr; i += 8)
 			{
-				const __m128 _u4 = u4, _v4 = v4;
-				ray.hit.t = t, ray.hit.u = ((float*)&_u4)[lane], ray.hit.v = ((float*)&_v4)[lane];
-			#if INST_IDX_BITS == 32
-				ray.hit.prim = leaf->primIdx[lane], ray.hit.inst = ray.instIdx;
-			#else
-				ray.hit.prim = leaf->primIdx[lane] + ray.instIdx;
-			#endif
-				t8 = _mm256_set1_ps( t );
-				// compress stack
-				uint32_t outStackPtr = 0;
-				for (int32_t i = 0; i < stackPtr; i += 8)
-				{
-					__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
-					__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
-					const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( dist8 ), _mm256_castps_si256( t8 ) );
-					const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
-					const __m256i cpi = idxLUT256[mask];
-					dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
-					_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
-					_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
-					const int32_t numItems = tinybvh_min( 8, stackPtr - i ), validMask = (1 << numItems) - 1;
-					outStackPtr += __popc( (255 - mask) & validMask );
-				}
-				stackPtr = outStackPtr;
+				__m256i node8 = _mm256_load_si256( (__m256i*)(nodeStack + i) );
+				__m256 dist8 = _mm256_load_ps( (float*)(distStack + i) );
+				const __m256i mask8 = _mm256_cmpgt_epi32( _mm256_castps_si256( dist8 ), _mm256_castps_si256( t8 ) );
+				const uint32_t mask = _mm256_movemask_ps( _mm256_castsi256_ps( mask8 ) );
+				const __m256i cpi = idxLUT256[mask];
+				dist8 = _mm256_permutevar8x32_ps( dist8, cpi ), node8 = _mm256_permutevar8x32_epi32( node8, cpi );
+				_mm256_storeu_ps( (float*)(distStack + outStackPtr), dist8 );
+				_mm256_storeu_si256( (__m256i*)(nodeStack + outStackPtr), node8 );
+				const int32_t numItems = tinybvh_min( 8, stackPtr - i ), validMask = (1 << numItems) - 1;
+				outStackPtr += __popc( (255 - mask) & validMask );
 			}
+			stackPtr = outStackPtr;
 		}
 	#endif
 		if (!stackPtr) break;
@@ -6200,22 +6247,23 @@ template <bool posX, bool posY, bool posZ> bool BVH8_CPU::IsOccluded( const Ray&
 		const __m256 hx8 = _mm256_fmsub_ps( dy8, leaf->e2z8, _mm256_mul_ps( dz8, leaf->e2y8 ) );
 		const __m256 hy8 = _mm256_fmsub_ps( dz8, leaf->e2x8, _mm256_mul_ps( dx8, leaf->e2z8 ) );
 		const __m256 hz8 = _mm256_fmsub_ps( dx8, leaf->e2y8, _mm256_mul_ps( dy8, leaf->e2x8 ) );
-		const __m256 sx8 = _mm256_sub_ps( ox8, leaf->v0x8 );
-		const __m256 sy8 = _mm256_sub_ps( oy8, leaf->v0y8 );
+		const __m256 sx8 = _mm256_sub_ps( ox8, leaf->v0x8 ), sy8 = _mm256_sub_ps( oy8, leaf->v0y8 );
 		const __m256 sz8 = _mm256_sub_ps( oz8, leaf->v0z8 );
 		const __m256 det8 = _mm256_fmadd_ps( leaf->e1z8, hz8, _mm256_fmadd_ps( leaf->e1x8, hx8, _mm256_mul_ps( leaf->e1y8, hy8 ) ) );
 		const __m256 qz8 = _mm256_fmsub_ps( sx8, leaf->e1y8, _mm256_mul_ps( sy8, leaf->e1x8 ) );
 		const __m256 qx8 = _mm256_fmsub_ps( sy8, leaf->e1z8, _mm256_mul_ps( sz8, leaf->e1y8 ) );
 		const __m256 qy8 = _mm256_fmsub_ps( sz8, leaf->e1x8, _mm256_mul_ps( sx8, leaf->e1z8 ) );
-		const __m256 absDet8 = _mm256_castsi256_ps( _mm256_and_si256( _mm256_castps_si256( det8 ), signMask8 ) );
-		const __m256 mask1 = _mm256_cmp_ps( absDet8, eps8, _CMP_GE_OQ ), inv_det8 = fastrcp8( det8 );
+		const __m256 inv_det8 = fastrcp8( det8 );
 		const __m256 u8 = _mm256_mul_ps( _mm256_fmadd_ps( sz8, hz8, _mm256_fmadd_ps( sx8, hx8, _mm256_mul_ps( sy8, hy8 ) ) ), inv_det8 );
-		const __m256 mask2 = _mm256_and_ps( _mm256_cmp_ps( u8, zero8, _CMP_GE_OQ ), _mm256_cmp_ps( u8, one8, _CMP_LE_OQ ) );
 		const __m256 v8 = _mm256_mul_ps( _mm256_fmadd_ps( dz8, qz8, _mm256_fmadd_ps( dx8, qx8, _mm256_mul_ps( dy8, qy8 ) ) ), inv_det8 );
-		const __m256 mask3 = _mm256_and_ps( _mm256_cmp_ps( v8, zero8, _CMP_GE_OQ ), _mm256_cmp_ps( _mm256_add_ps( u8, v8 ), one8, _CMP_LE_OQ ) );
 		const __m256 ta8 = _mm256_mul_ps( _mm256_fmadd_ps( leaf->e2z8, qz8, _mm256_fmadd_ps( leaf->e2x8, qx8, _mm256_mul_ps( leaf->e2y8, qy8 ) ) ), inv_det8 );
-		const __m256 combined = _mm256_and_ps( _mm256_and_ps( _mm256_and_ps( mask1, mask2 ), mask3 ), _mm256_cmp_ps( ta8, zero8, _CMP_GT_OQ ) );
-		if (_mm256_movemask_ps( _mm256_and_ps( combined, _mm256_cmp_ps( ta8, t8, _CMP_LT_OQ ) ) )) return true;
+		const __m256 mask1 = _mm256_cmp_ps( u8, zero8, _CMP_GE_OQ );
+		const __m256 mask2 = _mm256_cmp_ps( v8, zero8, _CMP_GE_OQ );
+		const __m256 mask3 = _mm256_cmp_ps( _mm256_add_ps( u8, v8 ), one8, _CMP_LE_OQ );
+		const __m256 mask4 = _mm256_cmp_ps( ta8, t8, _CMP_LT_OQ );
+		const __m256 mask5 = _mm256_cmp_ps( ta8, zero8, _CMP_GT_OQ );
+		const __m256 combined = _mm256_and_ps( _mm256_and_ps( _mm256_and_ps( mask1, mask2 ), _mm256_and_ps( mask3, mask4 ) ), mask5 );
+		if (_mm256_movemask_ps( combined )) return true;
 	#else
 		// Moeller-Trumbore ray/triangle intersection algorithm for four triangles
 		const BVHTri4Leaf* leaf = (BVHTri4Leaf*)(bvh8Data + (n & 0x1fffffff));
