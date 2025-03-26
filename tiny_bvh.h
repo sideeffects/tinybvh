@@ -155,7 +155,7 @@ THE SOFTWARE.
 // #define BVH8_ALIGN_32K
 // BVH8_CPU uses leafs with up to eight prims - experimental.
 // #define BVH8_MASSIVE_LEAFS
-// #define BVH8_FILLER_TRIS
+#define BVH8_FILLER_TRIS
 // #define ASSUME_SINGLE_HIT
 
 // ============================================================================
@@ -1167,6 +1167,12 @@ struct BVHTri4Leaf
 	SIMDVEC4 e2x4, e2y4, e2z4;
 	uint32_t primIdx[4];		// total: 160 bytes.
 	SIMDVEC4 dummy0, dummy1;	// pad to 3 full cachelines.
+	inline void SetData( const bvhvec3& v0, const bvhvec3& e1, const bvhvec3& e2, const uint32_t pidx, const uint32_t slot )
+	{
+		((float*)&v0x4)[slot] = v0.x, ((float*)&v0y4)[slot] = v0.y, ((float*)&v0z4)[slot] = v0.z;
+		((float*)&e1x4)[slot] = e1.x, ((float*)&e1y4)[slot] = e1.y, ((float*)&e1z4)[slot] = e1.z;
+		((float*)&e2x4)[slot] = e2.x, ((float*)&e2y4)[slot] = e2.y, ((float*)&e2z4)[slot] = e2.z, primIdx[slot] = pidx;
+	}
 };
 
 // Storage for up to eight triangles, in SoA layout, for BVH8_CPU.
@@ -1176,6 +1182,12 @@ struct BVHTri8Leaf
 	SIMDVEC8 e1x8, e1y8, e1z8;
 	SIMDVEC8 e2x8, e2y8, e2z8;
 	uint32_t primIdx[8];		// total: 320 bytes = 5 cachelines.
+	inline void SetData( const bvhvec3& v0, const bvhvec3& e1, const bvhvec3& e2, const uint32_t pidx, const uint32_t slot )
+	{
+		((float*)&v0x8)[slot] = v0.x, ((float*)&v0y8)[slot] = v0.y, ((float*)&v0z8)[slot] = v0.z;
+		((float*)&e1x8)[slot] = e1.x, ((float*)&e1y8)[slot] = e1.y, ((float*)&e1z8)[slot] = e1.z;
+		((float*)&e2x8)[slot] = e2.x, ((float*)&e2y8)[slot] = e2.y, ((float*)&e2z8)[slot] = e2.z, primIdx[slot] = pidx;
+	}
 };
 
 // Storage for a single triangle, for BVH8_CPU.
@@ -1334,6 +1346,7 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 }
 #endif
 
+// code compaction: Moeller-Trumbore ray/tri test.
 #define MOLLER_TRUMBORE_TEST( tmax, exit ) \
 	const bvhvec3 h = tinybvh_cross( ray.D, e2 );	\
 	const float a = tinybvh_dot( e1, h );			\
@@ -1346,6 +1359,11 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 	if (u < 0 || v < 0 || u + v > 1) exit;			\
 	const float t = f * tinybvh_dot( e2, q );		\
 	if (t < 0 || t > tmax) exit;
+
+// code compaction: fetching triangle vertices, with or without indices.
+#define GET_PRIM_INDICES_I0_I1_I2( bvh, idx ) if (indexedEnabled && bvh.vertIdx != 0) \
+	i0 = bvh.vertIdx[idx * 3], i1 = bvh.vertIdx[idx * 3 + 1], i2 = bvh.vertIdx[idx * 3 + 2]; \
+	else i0 = idx * 3, i1 = idx * 3 + 1, i2 = idx * 3 + 2;
 
 #ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
@@ -4424,7 +4442,7 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 	}
 	CopyBasePropertiesFrom( bvh8 );
 	// start conversion
-	uint32_t newBlockPtr = 0, nodeIdx = 0, stack[256], stackPtr = 0;
+	uint32_t newBlockPtr = 0, nodeIdx = 0, stack[256], stackPtr = 0, placed = 0;
 	while (1)
 	{
 		const MBVH<8>::MBVHNode& orig = bvh8.mbvhNode[nodeIdx];
@@ -4465,40 +4483,102 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 				// emit leaf node: group of up to 8 triangles in AoS format.
 				( (uint32_t*)&newNode->child8 )[cidx] = newBlockPtr + LEAF_BIT;
 				BVHTri8Leaf* leaf = (BVHTri8Leaf*)(bvh8Data + newBlockPtr);
-				newBlockPtr += 5;
+				newBlockPtr += sizeof( BVHTri8Leaf ) / 64;
 				for (uint32_t i0, i1, i2, l = 0; l < 8; l++)
 				{
 					uint32_t primIdx = bvh8.bvh.primIdx[child.firstTri + tinybvh_min( l, child.triCount - 1u )];
-					if (indexedEnabled && bvh8.bvh.vertIdx != 0)
-						i0 = bvh8.bvh.vertIdx[primIdx * 3], i1 = bvh8.bvh.vertIdx[primIdx * 3 + 1], i2 = bvh8.bvh.vertIdx[primIdx * 3 + 2];
-					else
-						i0 = primIdx * 3, i1 = primIdx * 3 + 1, i2 = primIdx * 3 + 2;
-					const bvhvec4 v0 = bvh8.bvh.verts[i0];
-					((float*)&leaf->v0x8)[l] = v0.x, ((float*)&leaf->v0y8)[l] = v0.y, ((float*)&leaf->v0z8)[l] = v0.z;
-					const bvhvec4 e1 = bvh8.bvh.verts[i1] - v0, e2 = bvh8.bvh.verts[i2] - v0;
-					((float*)&leaf->e1x8)[l] = e1.x, ((float*)&leaf->e1y8)[l] = e1.y, ((float*)&leaf->e1z8)[l] = e1.z;
-					((float*)&leaf->e2x8)[l] = e2.x, ((float*)&leaf->e2y8)[l] = e2.y, ((float*)&leaf->e2z8)[l] = e2.z;
-					leaf->primIdx[l] = primIdx;
+					GET_PRIM_INDICES_I0_I1_I2( bvh8.bvh, primIdx );
+					const bvhvec4 v0 = bvh8.bvh.verts[i0], e1 = bvh8.bvh.verts[i1] - v0, e2 = bvh8.bvh.verts[i2] - v0;
+					leaf->SetData( v0, e1, e2, primIdx, l );
 				}
+			#ifdef BVH8_FILLER_TRIS
+				if (child.triCount < 8)
+				{
+					// there is room left; pad with nearby tris - low hit prob, but they're free.
+					for (uint32_t slot = child.triCount; slot < 8; slot++)
+					{
+						uint32_t nearestTri = 0;
+						float bestDist = 1e30f;
+						bvhvec3 NC = (child.aabbMin + child.aabbMax) * 0.5f;
+						for (uint32_t j = 0; j < 8; j++) if (j != i && orig.child[j] != 0)
+						{
+							const MBVH<8>::MBVHNode& sibling = bvh8.mbvhNode[orig.child[j]];
+							if (sibling.isLeaf())
+							{
+								for (uint32_t k = 0; k < sibling.triCount; k++)
+								{
+									uint32_t i0, i1, i2, primIdx = bvh8.bvh.primIdx[sibling.firstTri + k];
+									GET_PRIM_INDICES_I0_I1_I2( bvh8.bvh, primIdx );
+									bvhvec3 C = (bvh8.bvh.verts[i0] + bvh8.bvh.verts[i1] + bvh8.bvh.verts[i2]) * 0.33333f;
+									float sqdist = tinybvh_dot( C - NC, C - NC );
+									if (sqdist < bestDist)
+									{
+										bool dupe = false;
+										for (int i = 0; i < 8; i++) if (leaf->primIdx[i] == primIdx) dupe = true;
+										if (!dupe) bestDist = sqdist, nearestTri = primIdx;
+									}
+								}
+							}
+						}
+						if (nearestTri == 0) break;
+						uint32_t i0, i1, i2;
+						GET_PRIM_INDICES_I0_I1_I2( bvh8.bvh, nearestTri );
+						const bvhvec4 v0 = bvh8.bvh.verts[i0], e1 = bvh8.bvh.verts[i1] - v0, e2 = bvh8.bvh.verts[i2] - v0;
+						leaf->SetData( v0, e1, e2, nearestTri, slot );
+						placed++;
+					}
+				}
+			#endif
 			#else
 				// emit leaf node: group of up to 4 triangles in AoS format.
 				((uint32_t*)&newNode->child8)[cidx] = newBlockPtr + LEAF_BIT;
 				BVHTri4Leaf* leaf = (BVHTri4Leaf*)(bvh8Data + newBlockPtr);
-				newBlockPtr += 3;
+				newBlockPtr += sizeof( BVHTri4Leaf ) / 64;
 				for (uint32_t i0, i1, i2, l = 0; l < 4; l++)
 				{
 					uint32_t primIdx = bvh8.bvh.primIdx[child.firstTri + tinybvh_min( l, child.triCount - 1u )];
-					if (indexedEnabled && bvh8.bvh.vertIdx != 0)
-						i0 = bvh8.bvh.vertIdx[primIdx * 3], i1 = bvh8.bvh.vertIdx[primIdx * 3 + 1], i2 = bvh8.bvh.vertIdx[primIdx * 3 + 2];
-					else
-						i0 = primIdx * 3, i1 = primIdx * 3 + 1, i2 = primIdx * 3 + 2;
-					const bvhvec4 v0 = bvh8.bvh.verts[i0];
-					((float*)&leaf->v0x4)[l] = v0.x, ((float*)&leaf->v0y4)[l] = v0.y, ((float*)&leaf->v0z4)[l] = v0.z;
-					const bvhvec4 e1 = bvh8.bvh.verts[i1] - v0, e2 = bvh8.bvh.verts[i2] - v0;
-					((float*)&leaf->e1x4)[l] = e1.x, ((float*)&leaf->e1y4)[l] = e1.y, ((float*)&leaf->e1z4)[l] = e1.z;
-					((float*)&leaf->e2x4)[l] = e2.x, ((float*)&leaf->e2y4)[l] = e2.y, ((float*)&leaf->e2z4)[l] = e2.z;
-					leaf->primIdx[l] = primIdx;
+					GET_PRIM_INDICES_I0_I1_I2( bvh8.bvh, primIdx );
+					const bvhvec4 v0 = bvh8.bvh.verts[i0], e1 = bvh8.bvh.verts[i1] - v0, e2 = bvh8.bvh.verts[i2] - v0;
+					leaf->SetData( v0, e1, e2, primIdx, l );
 				}
+			#ifdef BVH8_FILLER_TRIS
+				if (child.triCount < 4)
+				{
+					// there is room left; pad with nearby tris - low hit prob, but they're free.
+					for (uint32_t slot = child.triCount; slot < 4; slot++)
+					{
+						uint32_t nearestTri = 0;
+						float bestDist = 1e30f;
+						bvhvec3 NC = (child.aabbMin + child.aabbMax) * 0.5f;
+						for (uint32_t j = 0; j < 8; j++) if (j != i && orig.child[j] != 0)
+						{
+							const MBVH<8>::MBVHNode& sibling = bvh8.mbvhNode[orig.child[j]];
+							if (sibling.isLeaf())
+							{
+								for (uint32_t k = 0; k < sibling.triCount; k++)
+								{
+									uint32_t i0, i1, i2, primIdx = bvh8.bvh.primIdx[sibling.firstTri + k];
+									GET_PRIM_INDICES_I0_I1_I2( bvh8.bvh, primIdx );
+									bvhvec3 C = (bvh8.bvh.verts[i0] + bvh8.bvh.verts[i1] + bvh8.bvh.verts[i2]) * 0.33333f;
+									float sqdist = tinybvh_dot( C - NC, C - NC );
+									if (sqdist < bestDist)
+									{
+										bool dupe = false;
+										for (int i = 0; i < 4; i++) if (leaf->primIdx[i] == primIdx) dupe = true;
+										if (!dupe) bestDist = sqdist, nearestTri = primIdx;
+									}
+								}
+							}
+						}
+						if (nearestTri == 0) break;
+						uint32_t i0, i1, i2;
+						GET_PRIM_INDICES_I0_I1_I2( bvh8.bvh, nearestTri );
+						const bvhvec4 v0 = bvh8.bvh.verts[i0], e1 = bvh8.bvh.verts[i1] - v0, e2 = bvh8.bvh.verts[i2] - v0;
+						leaf->SetData( v0, e1, e2, nearestTri, slot );
+						placed++;
+					}
+				}
+			#endif
 			#endif
 			}
 			else
