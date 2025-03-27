@@ -44,7 +44,10 @@
 #else
 
 // debug run
-#define TRAVERSE_8WAY_OPTIMIZED
+#define TRAVERSE_8WAY
+#define TRAVERSE_4WAY
+#define EMBREE_BUILD // win64-only for now.
+#define EMBREE_TRAVERSE // win64-only for now.
 
 #endif
 
@@ -78,7 +81,7 @@ bvhvec4* triangles = 0;
 #include <fstream>
 int verts = 0;
 float avgCost = 0;
-float traceTime, buildTime, refitTime, * refDist = 0, * refDistFull = 0;
+float traceTime, buildTime, refitTime, * refDist = 0, * refDistFull = 0, refU, refV;
 unsigned refOccluded[3] = {}, * refOccl[3] = {};
 unsigned Nfull, Nsmall;
 Ray* fullBatch[3], * smallBatch[3], * smallDiffuse[3];
@@ -300,16 +303,18 @@ float TestShadowRays( uint32_t layout, unsigned N, unsigned passes )
 
 void ValidateTraceResult( float* ref, unsigned N, unsigned line )
 {
-	float refSum = 0, batchSum = 0;
+	float refSum = 0, batchSum = 0, batchU = 0, batchV = 0;
 	Ray* batch = N == Nsmall ? smallBatch[0] : fullBatch[0];
 	for (unsigned i = 0; i < N; i += 4)
 		refSum += ref[i] == 1e30f ? 100 : ref[i],
-		batchSum += batch[i].hit.t == 1e30f ? 100 : batch[i].hit.t;
+		batchSum += batch[i].hit.t == 1e30f ? 100 : batch[i].hit.t,
+		batchU += batch[i].hit.t > 100 ? 0 : batch[i].hit.u,
+		batchV += batch[i].hit.t > 100 ? 0 : batch[i].hit.v;
 	float diff = fabs( refSum - batchSum );
 	if (diff / refSum > 0.01f)
 	{
 	#if 1
-		printf( "!! Validation failed on line %i: %.1f != %.1f\n", line, refSum, batchSum );
+		printf( "!! Validation failed for t on line %i: %.1f != %.1f\n", line, refSum, batchSum );
 	#else
 		fprintf( stderr, "Validation failed on line %i - dumping img.raw.\n", line );
 		int step = (N == SCRWIDTH * SCRHEIGHT ? 1 : 16);
@@ -328,6 +333,16 @@ void ValidateTraceResult( float* ref, unsigned N, unsigned line )
 		s.close();
 		exit( 1 );
 	#endif
+	}
+	diff = fabs( refU - batchU );
+	if (diff / refU > 0.001f)
+	{
+		printf( "!! Validation for u failed on line %i: %.1f != %.1f\n", line, refU, batchU );
+	}
+	diff = fabs( refV - batchV );
+	if (diff / refV > 0.001f)
+	{
+		printf( "!! Validation for v failed on line %i: %.1f != %.1f\n", line, refV, batchV );
 	}
 }
 
@@ -512,13 +527,18 @@ int main()
 	bvh->Build( triangles, verts / 3 );
 	printf( "creating diffuse rays...\n" );
 	refDist = new float[Nsmall];
+	refU = 0, refV = 0;
 	for (int i = 0; i < 3; i++) for (unsigned j = 0; j < Nsmall; j++)
 	{
 		const bvhvec3 O = smallBatch[i][j].O, D = smallBatch[i][j].D;
 		bvhvec3 I, R = tinybvh_normalize( bvhvec3( uniform_rand() - 0.5f, uniform_rand() - 0.5f, uniform_rand() - 0.5f ) );
 		Ray ray( O, D );
 		bvh->Intersect( ray );
-		if (i == 0) refDist[j] = ray.hit.t;
+		if (i == 0)
+		{
+			refDist[j] = ray.hit.t;
+			if ((j & 3) == 0) if (ray.hit.t < 100) refU += ray.hit.u, refV += ray.hit.v;
+		}
 		if (ray.hit.t < 100)
 		{
 			I = O + ray.hit.t * D;
@@ -1253,7 +1273,7 @@ int main()
 	}
 	traceTime = t.elapsed() / 3.0f;
 	printf( "diffuse: %7.2fMRays/s\n", (float)Nsmall / traceTime * 1e-6f );
-	tinybvh::free64( rayhits );
+	for (int i = 0; i < 3; i++) tinybvh::free64( rayhits[i] );
 
 #endif
 #endif
