@@ -88,7 +88,7 @@ THE SOFTWARE.
 // Library version:
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	4
-#define TINY_BVH_VERSION_SUB	8
+#define TINY_BVH_VERSION_SUB	9
 
 // Run-time checks; disabled by default.
 // #define PARANOID // checks out-of-bound access of slices
@@ -560,8 +560,14 @@ typedef struct { int v0, v1, v2, v3, v4, v5, v6, v7; } SIMDIVEC8;
 
 // error handling
 #define FATAL_ERROR(s) FATAL_ERROR_IF(1,s)
+#ifdef _WINDOWS_ // windows.h has been included
+#define FATAL_ERROR_IF(c,s) if (c) { char t[512]; sprintf( t, \
+	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); \
+	MessageBox( NULL, t, "Fatal error", MB_OK ); exit( 1 ); }
+#else
 #define FATAL_ERROR_IF(c,s) if (c) { fprintf( stderr, \
 	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); exit( 1 ); }
+#endif
 
 // ============================================================================
 //
@@ -1364,6 +1370,10 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 #define GET_PRIM_INDICES_I0_I1_I2( bvh, idx ) if (indexedEnabled && bvh.vertIdx != 0) \
 	i0 = bvh.vertIdx[idx * 3], i1 = bvh.vertIdx[idx * 3 + 1], i2 = bvh.vertIdx[idx * 3 + 2]; \
 	else i0 = idx * 3, i1 = idx * 3 + 1, i2 = idx * 3 + 2;
+
+// ray validation: throw an error if the input ray contains nans.
+#define VALIDATE_RAY(r) { float test = r.D.x + r.D.y + r.D.z + ray.hit.t + r.O.x \
+	+ r.O.y + r.O.z; FATAL_ERROR_IF( isnan( test ), "Input rayt contains NaNs." ); }	
 
 #ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
@@ -2350,6 +2360,7 @@ void BVH::Refit( const uint32_t /* unused */ )
 	FATAL_ERROR_IF( !refittable, "BVH::Refit( .. ), refitting an SBVH." );
 	FATAL_ERROR_IF( bvhNode == 0, "BVH::Refit( .. ), bvhNode == 0." );
 	FATAL_ERROR_IF( may_have_holes, "BVH::Refit( .. ), bvh may have holes." );
+	FATAL_ERROR_IF( isTLAS(), "BVH::Refit( .. ), do not refit a TLAS, use Build(..)." );
 	for (int32_t i = usedNodes - 1; i >= 0; i--) if (i != 1)
 	{
 		BVHNode& node = bvhNode[i];
@@ -2469,6 +2480,7 @@ bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
 
 int32_t BVH::Intersect( Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
 	if (isTLAS()) return IntersectTLAS( ray );
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
@@ -3416,6 +3428,7 @@ void BVH_GPU::ConvertFrom( const BVH& original, bool compact )
 
 int32_t BVH_GPU::Intersect( Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
 	const uint32_t* primIdx = bvh.primIdx;
@@ -4211,6 +4224,7 @@ static uint32_t as_uint( const float v ) { return *(uint32_t*)&v; }
 int32_t BVH4_GPU::Intersect( Ray& ray ) const
 {
 	// traverse a blas
+	VALIDATE_RAY( ray );
 	uint32_t offset = 0, stack[128], stackPtr = 0, tmp2 /* for SWAP macro */;
 	float cost = 0;
 	while (1)
@@ -5340,6 +5354,7 @@ void BVH::Intersect256RaysSSE( Ray* packet ) const
 // Traverse the 'structure of arrays' BVH layout.
 int32_t BVH_SoA::Intersect( Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
 	const uint32_t* primIdx = bvh.primIdx;
@@ -5638,6 +5653,7 @@ inline void IntersectCompactTri( Ray& r, __m128& t4, const float* T )
 }
 int32_t BVH4_CPU::Intersect( Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
 	uint32_t nodeIdx = 0, stack[1024], stackPtr = 0;
 	float cost = 0;
 	const __m128 ox4 = _mm_set1_ps( ray.O.x ), rdx4 = _mm_set1_ps( ray.rD.x );
@@ -5985,6 +6001,7 @@ ALIGNED( 64 ) static const __m256i idxLUT256[256] = {
 
 int32_t BVH8_CPU::Intersect( Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
 	const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
 	if (!posX) goto negx;
 	if (posY) { if (posZ) return Intersect<true, true, true>( ray ); else return Intersect<true, true, false>( ray ); }
@@ -6647,6 +6664,7 @@ void BVH::BuildNEON()
 // Traverse the second alternative BVH layout (ALT_SOA).
 int32_t BVH_SoA::Intersect( Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
 	BVHNode* node = &bvhNode[0], * stack[64];
 	const bvhvec4slice& verts = bvh.verts;
 	const uint32_t* primIdx = bvh.primIdx;
@@ -6810,6 +6828,7 @@ inline int32_t ARMVecMovemask( uint32x4_t v ) {
 
 int32_t BVH4_CPU::Intersect( Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
 	uint32_t nodeIdx = 0, stack[1024], stackPtr = 0;
 	float cost = 0;
 	const float32x4_t ox4 = vdupq_n_f32( ray.O.x ), rdx4 = vdupq_n_f32( ray.rD.x );
