@@ -366,7 +366,7 @@ struct bvhvec4slice
 // Note: Since this header file is expected to be included in a source file
 // of a separate project, the static keyword doesn't provide sufficient
 // isolation; hence the tinybvh_ prefix.
-inline float tinybvh_safercp( const float x ) { if (x > 1e-12f || x < -1e-12f) return 1.0f / x; else return x > 0 ? BVH_FAR : -BVH_FAR; }
+inline float tinybvh_safercp( const float x ) { if (x > 1e-12f || x < -1e-12f) return 1.0f / x; else return x >= 0 ? BVH_FAR : -BVH_FAR; }
 inline bvhvec3 tinybvh_safercp( const bvhvec3 a ) { return bvhvec3( tinybvh_safercp( a.x ), tinybvh_safercp( a.y ), tinybvh_safercp( a.z ) ); }
 inline bvhvec3 tinybvh_rcp( const bvhvec3 a ) { return tinybvh_safercp( a ); /* bvhvec3( 1.0f / a.x, 1.0f / a.y, 1.0f / a.z ); */ }
 inline float tinybvh_min( const float a, const float b ) { return a < b ? a : b; }
@@ -556,17 +556,6 @@ typedef struct { float v0, v1, v2, v3, v4, v5, v6, v7; } SIMDVEC8;
 typedef struct { int v0, v1, v2, v3, v4, v5, v6, v7; } SIMDIVEC8;
 #define SIMD_SETVEC(a,b,c,d) bvhvec4( d, c, b, a )
 #define SIMD_SETRVEC(a,b,c,d) bvhvec4( a, b, c, d )
-#endif
-
-// error handling
-#define FATAL_ERROR(s) FATAL_ERROR_IF(1,s)
-#ifdef _WINDOWS_ // windows.h has been included
-#define FATAL_ERROR_IF(c,s) if (c) { char t[512]; sprintf( t, \
-	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); \
-	MessageBox( NULL, t, "Fatal error", MB_OK ); exit( 1 ); }
-#else
-#define FATAL_ERROR_IF(c,s) if (c) { fprintf( stderr, \
-	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); exit( 1 ); }
 #endif
 
 // ============================================================================
@@ -1352,6 +1341,17 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 }
 #endif
 
+// error handling
+#define BVH_FATAL_ERROR(s) FATAL_ERROR_IF(1,s)
+#ifdef _WINDOWS_ // windows.h has been included
+#define BVH_FATAL_ERROR_IF(c,s) if (c) { char t[512]; sprintf( t, \
+	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); \
+	MessageBox( NULL, t, "Fatal error", MB_OK ); exit( 1 ); }
+#else
+#define BVH_FATAL_ERROR_IF(c,s) if (c) { fprintf( stderr, \
+	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); exit( 1 ); }
+#endif
+
 // code compaction: Moeller-Trumbore ray/tri test.
 #define MOLLER_TRUMBORE_TEST( tmax, exit ) \
 	const bvhvec3 h = tinybvh_cross( ray.D, e2 );	\
@@ -1362,7 +1362,8 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 	const float u = f * tinybvh_dot( s, h );		\
 	const bvhvec3 q = tinybvh_cross( s, e1 );		\
 	const float v = f * tinybvh_dot( ray.D, q );	\
-	if (u < 0 || v < 0 || u + v > 1) exit;			\
+	const bool miss = u < 0 || v < 0 || u + v > 1;	\
+	if (miss) exit;									\
 	const float t = f * tinybvh_dot( e2, q );		\
 	if (t < 0 || t > tmax) exit;
 
@@ -1373,7 +1374,7 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 
 // ray validation: throw an error if the input ray contains nans.
 #define VALIDATE_RAY(r) { float test = r.D.x + r.D.y + r.D.z + ray.hit.t + r.O.x \
-	+ r.O.y + r.O.z; FATAL_ERROR_IF( std::isnan( test ), "Input rayt contains NaNs." ); }	
+	+ r.O.y + r.O.z; BVH_FATAL_ERROR_IF( std::isnan( test ), "Input rayt contains NaNs." ); }
 
 #ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
@@ -1390,7 +1391,7 @@ bvhvec4slice::bvhvec4slice( const bvhvec4* data, uint32_t count, uint32_t stride
 const bvhvec4& bvhvec4slice::operator[]( size_t i ) const
 {
 #ifdef PARANOID
-	FATAL_ERROR_IF( i >= count, "bvhvec4slice::[..], Reading outside slice." );
+	BVH_FATAL_ERROR_IF( i >= count, "bvhvec4slice::[..], Reading outside slice." );
 #endif
 	return *reinterpret_cast<const bvhvec4*>(data + stride * i);
 }
@@ -1629,7 +1630,7 @@ void BVH::BuildQuick( const bvhvec4* vertices, const uint32_t primCount )
 }
 void BVH::BuildQuick( const bvhvec4slice& vertices )
 {
-	FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildQuick( .. ), primCount == 0." );
+	BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildQuick( .. ), primCount == 0." );
 	// allocate on first build
 	const uint32_t primCount = vertices.count / 3;
 	const uint32_t spaceNeeded = primCount * 2; // upper limit
@@ -1644,7 +1645,7 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 		primIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
-	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildQuick( .. ), bvh not rebuildable." );
+	else BVH_FATAL_ERROR_IF( !rebuildable, "BVH::BuildQuick( .. ), bvh not rebuildable." );
 	verts = vertices; // note: we're not copying this data; don't delete.
 	idxCount = triCount = primCount;
 	// reset node pool
@@ -1740,7 +1741,7 @@ void BVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t
 
 void BVH::Build( void (*customGetAABB)(const unsigned, bvhvec3&, bvhvec3&), const uint32_t primCount )
 {
-	FATAL_ERROR_IF( primCount == 0, "BVH::Build( void (*customGetAABB)( .. ), instCount ), instCount == 0." );
+	BVH_FATAL_ERROR_IF( primCount == 0, "BVH::Build( void (*customGetAABB)( .. ), instCount ), instCount == 0." );
 	triCount = idxCount = primCount;
 	const uint32_t spaceNeeded = primCount * 2; // upper limit
 	if (allocatedNodes < spaceNeeded)
@@ -1771,7 +1772,7 @@ void BVH::Build( void (*customGetAABB)(const unsigned, bvhvec3&, bvhvec3&), cons
 
 void BVH::Build( BLASInstance* instances, const uint32_t instCount, BVHBase** blasses, const uint32_t bCount )
 {
-	FATAL_ERROR_IF( instCount == 0, "BVH::Build( BLASInstance*, instCount ), instCount == 0." );
+	BVH_FATAL_ERROR_IF( instCount == 0, "BVH::Build( BLASInstance*, instCount ), instCount == 0." );
 	triCount = idxCount = instCount;
 	const uint32_t spaceNeeded = instCount * 2; // upper limit
 	if (allocatedNodes < spaceNeeded)
@@ -1836,17 +1837,17 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 		memset( &bvhNode[1], 0, 32 );	// node 1 remains unused, for cache line alignment.
 		primIdx = (uint32_t*)AlignedAlloc( primCount * sizeof( uint32_t ) );
 		if (vertices) fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
-		else FATAL_ERROR_IF( fragment == 0, "BVH::PrepareBuild( 0, .. ), not called from ::Build( aabb )." );
+		else BVH_FATAL_ERROR_IF( fragment == 0, "BVH::PrepareBuild( 0, .. ), not called from ::Build( aabb )." );
 	}
-	else FATAL_ERROR_IF( !rebuildable, "BVH::PrepareBuild( .. ), bvh not rebuildable." );
+	else BVH_FATAL_ERROR_IF( !rebuildable, "BVH::PrepareBuild( .. ), bvh not rebuildable." );
 	verts = vertices, idxCount = triCount = primCount, vertIdx = (uint32_t*)indices;
 	// prepare fragments
-	FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareBuild( .. ), empty vertex slice." );
+	BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareBuild( .. ), empty vertex slice." );
 	BVHNode& root = bvhNode[0];
 	root.leftFirst = 0, root.triCount = triCount, root.aabbMin = bvhvec3( BVH_FAR ), root.aabbMax = bvhvec3( -BVH_FAR );
 	if (!indices)
 	{
-		FATAL_ERROR_IF( prims != 0, "BVH::PrepareBuild( .. ), indices == 0." );
+		BVH_FATAL_ERROR_IF( prims != 0, "BVH::PrepareBuild( .. ), indices == 0." );
 		// building a BVH over triangles specified as three 16-byte vertices each.
 		for (uint32_t i = 0; i < triCount; i++)
 		{
@@ -1860,7 +1861,7 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 	}
 	else
 	{
-		FATAL_ERROR_IF( prims == 0, "BVH::PrepareBuild( .. ), prims == 0." );
+		BVH_FATAL_ERROR_IF( prims == 0, "BVH::PrepareBuild( .. ), prims == 0." );
 		// building a BVH over triangles consisting of vertices indexed by 'indices'.
 		for (uint32_t i = 0; i < triCount; i++)
 		{
@@ -2022,7 +2023,7 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 		primIdx = (uint32_t*)AlignedAlloc( (primCount + slack) * sizeof( uint32_t ) );
 		fragment = (Fragment*)AlignedAlloc( (primCount + slack) * sizeof( Fragment ) );
 	}
-	else FATAL_ERROR_IF( !rebuildable, "BVH::PrepareHQBuild( .. ), bvh not rebuildable." );
+	else BVH_FATAL_ERROR_IF( !rebuildable, "BVH::PrepareHQBuild( .. ), bvh not rebuildable." );
 	verts = vertices; // note: we're not copying this data; don't delete.
 	idxCount = primCount + slack, triCount = primCount, vertIdx = (uint32_t*)indices;
 	// prepare fragments
@@ -2030,8 +2031,8 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 	root.leftFirst = 0, root.triCount = triCount, root.aabbMin = bvhvec3( BVH_FAR ), root.aabbMax = bvhvec3( -BVH_FAR );
 	if (!indices)
 	{
-		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareHQBuild( .. ), primCount == 0." );
-		FATAL_ERROR_IF( prims != 0, "BVH::PrepareHQBuild( .. ), indices == 0." );
+		BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareHQBuild( .. ), primCount == 0." );
+		BVH_FATAL_ERROR_IF( prims != 0, "BVH::PrepareHQBuild( .. ), indices == 0." );
 		// building a BVH over triangles specified as three 16-byte vertices each.
 		for (uint32_t i = 0; i < triCount; i++)
 		{
@@ -2045,8 +2046,8 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 	}
 	else
 	{
-		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareHQBuild( .. ), empty vertex slice." );
-		FATAL_ERROR_IF( prims == 0, "BVH::PrepareHQBuild( .. ), prims == 0." );
+		BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareHQBuild( .. ), empty vertex slice." );
+		BVH_FATAL_ERROR_IF( prims == 0, "BVH::PrepareHQBuild( .. ), prims == 0." );
 		// building a BVH over triangles consisting of vertices indexed by 'indices'.
 		for (uint32_t i = 0; i < triCount; i++)
 		{
@@ -2357,10 +2358,10 @@ void BVH::Optimize( const uint32_t iterations, bool extreme )
 // slower ray tracing. Rebuild when this happens.
 void BVH::Refit( const uint32_t /* unused */ )
 {
-	FATAL_ERROR_IF( !refittable, "BVH::Refit( .. ), refitting an SBVH." );
-	FATAL_ERROR_IF( bvhNode == 0, "BVH::Refit( .. ), bvhNode == 0." );
-	FATAL_ERROR_IF( may_have_holes, "BVH::Refit( .. ), bvh may have holes." );
-	FATAL_ERROR_IF( isTLAS(), "BVH::Refit( .. ), do not refit a TLAS, use Build(..)." );
+	BVH_FATAL_ERROR_IF( !refittable, "BVH::Refit( .. ), refitting an SBVH." );
+	BVH_FATAL_ERROR_IF( bvhNode == 0, "BVH::Refit( .. ), bvhNode == 0." );
+	BVH_FATAL_ERROR_IF( may_have_holes, "BVH::Refit( .. ), bvh may have holes." );
+	BVH_FATAL_ERROR_IF( isTLAS(), "BVH::Refit( .. ), do not refit a TLAS, use Build(..)." );
 	for (int32_t i = usedNodes - 1; i >= 0; i--) if (i != 1)
 	{
 		BVHNode& node = bvhNode[i];
@@ -2922,7 +2923,7 @@ int32_t BVH::LeafCount() const
 // compacted tree to work correctly.
 void BVH::Compact()
 {
-	FATAL_ERROR_IF( bvhNode == 0, "BVH::Compact(), bvhNode == 0." );
+	BVH_FATAL_ERROR_IF( bvhNode == 0, "BVH::Compact(), bvhNode == 0." );
 	if (bvhNode[0].isLeaf()) return; // nothing to compact.
 	BVHNode* tmp = (BVHNode*)AlignedAlloc( sizeof( BVHNode ) * allocatedNodes /* do *not* trim */ );
 	uint32_t* idx = (uint32_t*)AlignedAlloc( sizeof( uint32_t ) * idxCount );
@@ -3034,9 +3035,9 @@ float BVH_Verbose::SAHCost( const uint32_t nodeIdx ) const
 
 void BVH_Verbose::Refit( const uint32_t nodeIdx, bool skipLeafs )
 {
-	FATAL_ERROR_IF( !refittable && !skipLeafs, "BVH_Verbose::Refit( .. ), refitting an SBVH." );
-	FATAL_ERROR_IF( bvhNode == 0, "BVH_Verbose::Refit( .. ), bvhNode == 0." );
-	FATAL_ERROR_IF( bvh_over_indices && !skipLeafs, "BVH_Verbose::Refit( .. ), bvh used indexed tris." );
+	BVH_FATAL_ERROR_IF( !refittable && !skipLeafs, "BVH_Verbose::Refit( .. ), refitting an SBVH." );
+	BVH_FATAL_ERROR_IF( bvhNode == 0, "BVH_Verbose::Refit( .. ), bvhNode == 0." );
+	BVH_FATAL_ERROR_IF( bvh_over_indices && !skipLeafs, "BVH_Verbose::Refit( .. ), bvh used indexed tris." );
 	BVHNode& node = bvhNode[nodeIdx];
 	if (node.isLeaf()) // leaf: adjust to current triangle vertex positions
 	{
@@ -3093,7 +3094,7 @@ void BVH_Verbose::CheckFit( const uint32_t nodeIdx, bool skipLeafs )
 
 void BVH_Verbose::Compact()
 {
-	FATAL_ERROR_IF( bvhNode == 0, "BVH_Verbose::Compact(), bvhNode == 0." );
+	BVH_FATAL_ERROR_IF( bvhNode == 0, "BVH_Verbose::Compact(), bvhNode == 0." );
 	if (bvhNode[0].isLeaf()) return; // nothing to compact.
 	BVHNode* tmp = (BVHNode*)AlignedAlloc( sizeof( BVHNode ) * usedNodes );
 	memcpy( tmp, bvhNode, 2 * sizeof( BVHNode ) );
@@ -4741,7 +4742,7 @@ void BVH8_CWBVH::ConvertFrom( MBVH<8>& original, bool )
 	// get a copy of the original bvh8
 	if (&original != &bvh8) ownBVH8 = false; // bvh isn't ours; don't delete in destructor.
 	bvh8 = original;
-	FATAL_ERROR_IF( bvh8.mbvhNode[0].isLeaf(), "BVH8_CWBVH::ConvertFrom( .. ), converting a single-node bvh." );
+	BVH_FATAL_ERROR_IF( bvh8.mbvhNode[0].isLeaf(), "BVH8_CWBVH::ConvertFrom( .. ), converting a single-node bvh." );
 	// allocate memory
 	uint32_t spaceNeeded = bvh8.triCount * 5; // CWBVH nodes use 80 bytes each.
 	if (spaceNeeded > allocatedBlocks)
@@ -4958,8 +4959,8 @@ void BVH::BuildAVX( const bvhvec4slice& vertices, const uint32_t* indices, const
 }
 void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims )
 {
-	FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), primCount == 0." );
-	FATAL_ERROR_IF( vertices.stride & 15, "BVH::PrepareAVXBuild( .. ), stride must be multiple of 16." );
+	BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), primCount == 0." );
+	BVH_FATAL_ERROR_IF( vertices.stride & 15, "BVH::PrepareAVXBuild( .. ), stride must be multiple of 16." );
 	// some constants
 	static const __m128 min4 = _mm_set1_ps( BVH_FAR ), max4 = _mm_set1_ps( -BVH_FAR );
 	// reset node pool
@@ -4976,7 +4977,7 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 		memset( &bvhNode[1], 0, 32 ); // avoid crash in refit.
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
-	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildAVX( .. ), bvh not rebuildable." );
+	else BVH_FATAL_ERROR_IF( !rebuildable, "BVH::BuildAVX( .. ), bvh not rebuildable." );
 	verts = vertices; // note: we're not copying this data; don't delete.
 	vertIdx = (uint32_t*)indices;
 	triCount = idxCount = primCount;
@@ -4992,8 +4993,8 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 	uint32_t stride4 = verts.stride / 16;
 	if (indices)
 	{
-		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
-		FATAL_ERROR_IF( prims == 0, "BVH::PrepareAVXBuild( .. ), prims == 0." );
+		BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
+		BVH_FATAL_ERROR_IF( prims == 0, "BVH::PrepareAVXBuild( .. ), prims == 0." );
 		// build the BVH over indexed triangles
 		for (uint32_t i = 0; i < triCount; i++)
 		{
@@ -5007,8 +5008,8 @@ void BVH::PrepareAVXBuild( const bvhvec4slice& vertices, const uint32_t* indices
 	}
 	else
 	{
-		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
-		FATAL_ERROR_IF( prims != 0, "BVH::PrepareAVXBuild( .. ), indices == 0." );
+		BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
+		BVH_FATAL_ERROR_IF( prims != 0, "BVH::PrepareAVXBuild( .. ), indices == 0." );
 		// build the BVH over a list of vertices: three per triangle
 		for (uint32_t i = 0; i < triCount; i++)
 		{
@@ -6270,6 +6271,7 @@ the_end:
 
 bool BVH8_CPU::IsOccluded( const Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
 	const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
 	if (!posX) goto negx;
 	if (posY) { if (posZ) return IsOccluded<true, true, true>( ray ); else return IsOccluded<true, true, false>( ray ); }
@@ -6447,8 +6449,8 @@ void BVH::BuildNEON( const bvhvec4slice& vertices, const uint32_t* indices, cons
 }
 void BVH::PrepareNEONBuild( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t prims )
 {
-	FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareNEONBuild( .. ), primCount == 0." );
-	FATAL_ERROR_IF( vertices.stride & 15, "BVH::PrepareNEONBuild( .. ), stride must be multiple of 16." );
+	BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareNEONBuild( .. ), primCount == 0." );
+	BVH_FATAL_ERROR_IF( vertices.stride & 15, "BVH::PrepareNEONBuild( .. ), stride must be multiple of 16." );
 	// some constants
 	static const float32x4_t min4 = vdupq_n_f32( BVH_FAR ), max4 = vdupq_n_f32( -BVH_FAR );
 	// reset node pool
@@ -6465,7 +6467,7 @@ void BVH::PrepareNEONBuild( const bvhvec4slice& vertices, const uint32_t* indice
 		memset( &bvhNode[1], 0, 32 ); // avoid crash in refit.
 		fragment = (Fragment*)AlignedAlloc( primCount * sizeof( Fragment ) );
 	}
-	else FATAL_ERROR_IF( !rebuildable, "BVH::BuildAVX( .. ), bvh not rebuildable." );
+	else BVH_FATAL_ERROR_IF( !rebuildable, "BVH::BuildAVX( .. ), bvh not rebuildable." );
 	verts = vertices; // note: we're not copying this data; don't delete.
 	vertIdx = (uint32_t*)indices;
 	triCount = idxCount = primCount;
@@ -6480,8 +6482,8 @@ void BVH::PrepareNEONBuild( const bvhvec4slice& vertices, const uint32_t* indice
 	float32x4_t rootMin = min4, rootMax = max4;
 	if (indices)
 	{
-		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
-		FATAL_ERROR_IF( prims == 0, "BVH::PrepareAVXBuild( .. ), prims == 0." );
+		BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
+		BVH_FATAL_ERROR_IF( prims == 0, "BVH::PrepareAVXBuild( .. ), prims == 0." );
 		// build the BVH over indexed triangles
 		for (uint32_t i = 0; i < triCount; i++)
 		{
@@ -6495,8 +6497,8 @@ void BVH::PrepareNEONBuild( const bvhvec4slice& vertices, const uint32_t* indice
 	}
 	else
 	{
-		FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
-		FATAL_ERROR_IF( prims != 0, "BVH::PrepareAVXBuild( .. ), indices == 0." );
+		BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::PrepareAVXBuild( .. ), empty vertex slice." );
+		BVH_FATAL_ERROR_IF( prims != 0, "BVH::PrepareAVXBuild( .. ), indices == 0." );
 		// build the BVH over a list of vertices: three per triangle
 		for (uint32_t i = 0; i < triCount; i++)
 		{
@@ -6682,8 +6684,8 @@ int32_t BVH_SoA::Intersect( Ray& ray ) const
 			for (uint32_t i = 0; i < node->triCount; i++, cost += c_int)
 			{
 				const uint32_t tidx = primIdx[node->firstTri + i], vertIdx = tidx * 3;
-				const bvhvec3 e1 = verts[vertIdx + 1] - verts[vertIdx];
-				const bvhvec3 e2 = verts[vertIdx + 2] - verts[vertIdx];
+				const bvhvec3 e0 = verts[vertIdx];
+				const bvhvec3 e1 = verts[vertIdx + 1] - v0, e2 = verts[vertIdx + 2] - v0;
 				MOLLER_TRUMBORE_TEST( ray.hit.t, continue );
 				ray.hit.t = t, ray.hit.u = u, ray.hit.v = v, ray.hit.prim = tidx;
 			}
@@ -7163,7 +7165,7 @@ BVH_Double::~BVH_Double()
 
 void BVH_Double::Build( void (*customGetAABB)(const uint64_t, bvhdbl3&, bvhdbl3&), const uint64_t primCount )
 {
-	FATAL_ERROR_IF( primCount == 0, "BVH_Double::Build( void (*customGetAABB)( .. ), instCount ), instCount == 0." );
+	BVH_FATAL_ERROR_IF( primCount == 0, "BVH_Double::Build( void (*customGetAABB)( .. ), instCount ), instCount == 0." );
 	triCount = idxCount = primCount;
 	const uint64_t spaceNeeded = primCount * 2; // upper limit
 	if (allocatedNodes < spaceNeeded)
@@ -7192,7 +7194,7 @@ void BVH_Double::Build( void (*customGetAABB)(const uint64_t, bvhdbl3&, bvhdbl3&
 
 void BVH_Double::Build( BLASInstanceEx* bvhs, const uint64_t instCount, BVH_Double** blasses, const uint64_t bCount )
 {
-	FATAL_ERROR_IF( instCount == 0, "BVH_Double::Build( BLASInstanceEx*, instCount ), instCount == 0." );
+	BVH_FATAL_ERROR_IF( instCount == 0, "BVH_Double::Build( BLASInstanceEx*, instCount ), instCount == 0." );
 	triCount = idxCount = instCount;
 	const uint64_t spaceNeeded = instCount * 2; // upper limit
 	if (allocatedNodes < spaceNeeded)
@@ -7236,7 +7238,7 @@ void BVH_Double::Build( const bvhdbl3* vertices, const uint64_t primCount )
 
 void BVH_Double::PrepareBuild( const bvhdbl3* vertices, const uint64_t primCount )
 {
-	FATAL_ERROR_IF( primCount == 0, "BVH_Double::PrepareBuild( .. ), primCount == 0." );
+	BVH_FATAL_ERROR_IF( primCount == 0, "BVH_Double::PrepareBuild( .. ), primCount == 0." );
 	const uint64_t spaceNeeded = primCount * 2; // upper limit
 	// allocate memory on first build
 	if (allocatedNodes < spaceNeeded)
