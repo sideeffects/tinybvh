@@ -5649,7 +5649,7 @@ inline void IntersectCompactTri( Ray& r, __m128& t4, const float* T )
 #if INST_IDX_BITS == 32
 	if (hit) r.hit.inst = r.instIdx, r.hit.t = ta, r.hit.u = u, r.hit.v = v, r.hit.prim = *(uint32_t*)&T[15], t4 = _mm_set1_ps( ta );
 #else
-	if (hit) r.hit.t = ta, r.hit.u = u, r.hit.v = v, r.hit.prim =  *(uint32_t*)&T[15] + r.instIdx, t4 = _mm_set1_ps( ta );
+	if (hit) r.hit.t = ta, r.hit.u = u, r.hit.v = v, r.hit.prim = *(uint32_t*)&T[15] + r.instIdx, t4 = _mm_set1_ps( ta );
 #endif
 }
 int32_t BVH4_CPU::Intersect( Ray& ray ) const
