@@ -1374,7 +1374,7 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 
 // ray validation: throw an error if the input ray contains nans.
 #define VALIDATE_RAY(r) { float test = r.D.x + r.D.y + r.D.z + ray.hit.t + r.O.x \
-	+ r.O.y + r.O.z; BVH_FATAL_ERROR_IF( std::isnan( test ), "Input rayt contains NaNs." ); }
+	+ r.O.y + r.O.z; BVH_FATAL_ERROR_IF( std::isnan( test ), "Input ray contains NaNs." ); }
 
 #ifndef TINYBVH_USE_CUSTOM_VECTOR_TYPES
 
