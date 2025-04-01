@@ -607,19 +607,23 @@ struct Intersection
 #pragma pack(pop) // is there a good alternative for Clang / EMSCRIPTEN?
 #endif
 
+// 16 bits of mask to tell which BLASInstance to intersect or not. By default the mask will be initialized to intersect all blasses
+#define RAY_MASK_INTERSECT_ALL 0xFFFF
+
 struct ALIGNED( 64 ) Ray
 {
 	// Basic ray class. Note: For single blas traversal it is expected
 	// that Ray::rD is properly initialized. For tlas/blas traversal this
 	// field is typically updated for each blas.
 	Ray() = default;
-	Ray( bvhvec3 origin, bvhvec3 direction, float t = BVH_FAR )
+	Ray( bvhvec3 origin, bvhvec3 direction, float t = BVH_FAR, uint16_t rayMask = RAY_MASK_INTERSECT_ALL )
 	{
 		memset( this, 0, sizeof( Ray ) );
 		O = origin, D = tinybvh_normalize( direction ), rD = tinybvh_rcp( D );
 		hit.t = t;
+		mask = rayMask; // make sure the user did not set a mask higher than the maximum authorized value
 	}
-	ALIGNED( 16 ) bvhvec3 O; uint32_t dummy1;
+	ALIGNED( 16 ) bvhvec3 O; uint32_t mask = RAY_MASK_INTERSECT_ALL;
 	ALIGNED( 16 ) bvhvec3 D; uint32_t instIdx = 0;
 	ALIGNED( 16 ) bvhvec3 rD;
 #if INST_IDX_BITS != 32
@@ -641,7 +645,7 @@ struct RayEx
 {
 	// Double-precision ray definition.
 	RayEx() = default;
-	RayEx( bvhdbl3 origin, bvhdbl3 direction, double tmax = BVH_DBL_FAR )
+	RayEx( bvhdbl3 origin, bvhdbl3 direction, double tmax = BVH_DBL_FAR, uint16_t rayMask = RAY_MASK_INTERSECT_ALL )
 	{
 		memset( this, 0, sizeof( RayEx ) );
 		O = origin, D = direction;
@@ -649,10 +653,14 @@ struct RayEx
 		D.x *= rl, D.y *= rl, D.z *= rl;
 		rD.x = 1.0 / D.x, rD.y = 1.0 / D.y, rD.z = 1.0 / D.z;
 		hit.u = hit.v = 0, hit.t = tmax;
+
+		instIdx = 0;
+		mask = rayMask;
 	}
 	bvhdbl3 O, D, rD;
 	IntersectionEx hit;
-	uint64_t instIdx = 0;
+	uint64_t instIdx : 48;
+	uint64_t mask : 16;
 };
 
 #endif
@@ -1269,7 +1277,8 @@ public:
 	bvhvec3 aabbMin = bvhvec3( BVH_FAR );
 	uint32_t blasIdx = 0;
 	bvhvec3 aabbMax = bvhvec3( -BVH_FAR );
-	uint32_t dummy[9]; // pad struct to 64 byte
+	uint32_t mask = (uint32_t)RAY_MASK_INTERSECT_ALL; // set to intersect with all rays by default
+	uint32_t dummy[8]; // pad struct to 64 byte
 	void Update( BVHBase * blas );
 	void InvertTransform();
 };
@@ -1287,7 +1296,7 @@ public:
 	bvhdbl3 aabbMin = bvhdbl3( BVH_DBL_FAR );
 	uint64_t blasIdx = 0;
 	bvhdbl3 aabbMax = bvhdbl3( -BVH_DBL_FAR );
-	uint64_t dummy = 0;
+	uint64_t mask = (uint64_t)RAY_MASK_INTERSECT_ALL; // set to intersect with all rays by default
 	void Update( BVH_Double* blas );
 	void InvertTransform();
 };
@@ -2552,6 +2561,10 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 				// BLAS traversal
 				const uint32_t instIdx = primIdx[node->leftFirst + i];
 				const BLASInstance& inst = instList[instIdx];
+
+				// Check if the ray should intersect this BLAS Instance, otherwise skip it
+				if(!(inst.mask & ray.mask)) continue;
+
 				const BVHBase* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
 				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
@@ -2663,6 +2676,10 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 				// BLAS traversal
 				BLASInstance& inst = instList[primIdx[node->leftFirst + i]];
 				const BVHBase* blas = blasList[inst.blasIdx];
+
+				// Check if the ray should intersect this BLAS Instance, otherwise skip it
+				if(!(inst.mask & ray.mask)) continue;
+
 				// 1. Transform ray with the inverse of the instance transform
 				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
 				tmp.D = tinybvh_transform_vector( ray.D, inst.invTransform );
@@ -7458,6 +7475,9 @@ int32_t BVH_Double::IntersectTLAS( RayEx& ray ) const
 				// BLAS traversal
 				const uint64_t instIdx = primIdx[node->leftFirst + i];
 				BLASInstanceEx& inst = instList[instIdx];
+
+				if(!(inst.mask & ray.mask)) continue;
+
 				BVH_Double* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
 				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
@@ -7552,6 +7572,9 @@ bool BVH_Double::IsOccludedTLAS( const RayEx& ray ) const
 			{
 				// BLAS traversal
 				BLASInstanceEx& inst = instList[primIdx[node->leftFirst + i]];
+
+				if(!(inst.mask & ray.mask)) continue;
+
 				BVH_Double* blas = blasList[inst.blasIdx];
 				// 1. Transform ray with the inverse of the instance transform
 				tmp.O = tinybvh_transform_point( ray.O, inst.invTransform );
