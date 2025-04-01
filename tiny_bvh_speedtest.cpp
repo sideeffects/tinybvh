@@ -26,6 +26,7 @@
 #define TRAVERSE_ALT2WAY_ST
 #define TRAVERSE_SOA2WAY_ST
 #define TRAVERSE_4WAY
+#define TRAVERSE_4WAY_ALT
 #define TRAVERSE_8WAY
 #define TRAVERSE_2WAY_DBL
 // #define TRAVERSE_CWBVH
@@ -45,9 +46,6 @@
 
 // debug run
 #define TRAVERSE_8WAY
-#define TRAVERSE_4WAY
-#define EMBREE_BUILD // win64-only for now.
-#define EMBREE_TRAVERSE // win64-only for now.
 
 #endif
 
@@ -100,10 +98,11 @@ BVH_GPU* bvh_gpu = 0;
 MBVH<4>* bvh4 = 0;
 MBVH<8>* bvh8 = 0;
 BVH4_CPU* bvh4_cpu = 0;
+BVH4_ALT* bvh4_alt = 0;
 BVH4_GPU* bvh4_gpu = 0;
 BVH8_CWBVH* cwbvh = 0;
 BVH8_CPU* bvh8_cpu = 0;
-enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _CPU4A, _CPU8, _GPU4, _BVH8, _CWBVH };
+enum { _DEFAULT = 1, _BVH, _VERBOSE, _DOUBLE, _SOA, _GPU2, _BVH4, _CPU4, _ALT4, _CPU4A, _CPU8, _GPU4, _BVH8, _CWBVH };
 
 #if defined _WIN32 || defined _WIN64
 #if defined EMBREE_BUILD || defined EMBREE_TRAVERSE
@@ -177,6 +176,7 @@ float TestPrimaryRays( uint32_t layout, unsigned N, unsigned passes, float* avgC
 		case _GPU4: for (unsigned i = 0; i < N; i++) travCost += bvh4_gpu->Intersect( batch[i] ); break;
 		#ifdef BVH_USEAVX
 		case _CPU4: for (unsigned i = 0; i < N; i++) travCost += bvh4_cpu->Intersect( batch[i] ); break;
+		case _ALT4: for (unsigned i = 0; i < N; i++) travCost += bvh4_alt->Intersect( batch[i] ); break;
 		case _CWBVH: for (unsigned i = 0; i < N; i++) travCost += cwbvh->Intersect( batch[i] ); break;
 		case _SOA: for (unsigned i = 0; i < N; i++) travCost += bvh_soa->Intersect( batch[i] ); break;
 		case _CPU8: for (unsigned i = 0; i < N; i++) travCost += bvh8_cpu->Intersect( batch[i] ); break;
@@ -212,6 +212,7 @@ float TestDiffuseRays( uint32_t layout, unsigned passes, float* avgCost = 0 )
 		case _GPU4: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh4_gpu->Intersect( batch[i] ); break;
 		#ifdef BVH_USEAVX
 		case _CPU4: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh4_cpu->Intersect( batch[i] ); break;
+		case _ALT4: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh4_alt->Intersect( batch[i] ); break;
 		case _CWBVH: for (unsigned i = 0; i < Nsmall; i++) travCost += cwbvh->Intersect( batch[i] ); break;
 		case _SOA: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh_soa->Intersect( batch[i] ); break;
 		case _CPU8: for (unsigned i = 0; i < Nsmall; i++) travCost += bvh8_cpu->Intersect( batch[i] );
@@ -281,6 +282,7 @@ float TestShadowRays( uint32_t layout, unsigned N, unsigned passes )
 		#ifdef BVH_USEAVX
 		case _SOA: for (unsigned i = 0; i < N; i++) occluded += bvh_soa->IsOccluded( batch[i] ); break;
 		case _CPU4: for (unsigned i = 0; i < N; i++) occluded += bvh4_cpu->IsOccluded( batch[i] ); break;
+		case _ALT4: for (unsigned i = 0; i < N; i++) occluded += bvh4_alt->IsOccluded( batch[i] ); break;
 		#endif
 		case _GPU2: for (unsigned i = 0; i < N; i++) occluded += bvh_gpu->IsOccluded( batch[i] ); break;
 		#ifdef BVH_USEAVX2
@@ -831,6 +833,28 @@ int main()
 	// printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
 	printf( "shadow: %7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
 	traceTime = TestDiffuseRays( _CPU4, 3 );
+	printf( "diffuse: %7.2fMRays/s\n", (float)Nsmall / traceTime * 1e-6f );
+
+#endif
+
+#if defined TRAVERSE_4WAY_ALT && defined BVH_USEAVX
+
+	// BVH4_ALT
+	if (!bvh4_alt)
+	{
+		bvh4_alt = new BVH4_ALT();
+		bvh4_alt->BuildHQ( triangles, verts / 3 );
+	}
+	printf( "- BVH4_ALT    - primary: " );
+	PrepareTest();
+	traceTime = TestPrimaryRays( _ALT4, Nsmall, 3 );
+	ValidateTraceResult( refDist, Nsmall, __LINE__ );
+	// printf( "%4.2fM rays in %5.1fms (%7.2fMRays/s), ", (float)Nsmall * 1e-6f, traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+	printf( "%7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
+	traceTime = TestShadowRays( _CPU4, Nsmall, 3 );
+	// printf( "shadow: %5.1fms (%7.2fMRays/s)\n", traceTime * 1000, (float)Nsmall / traceTime * 1e-6f );
+	printf( "shadow: %7.2fMRays/s,  ", (float)Nsmall / traceTime * 1e-6f );
+	traceTime = TestDiffuseRays( _ALT4, 3 );
 	printf( "diffuse: %7.2fMRays/s\n", (float)Nsmall / traceTime * 1e-6f );
 
 #endif
