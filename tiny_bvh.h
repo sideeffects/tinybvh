@@ -1525,11 +1525,13 @@ void BVH::BuildDefault( const bvhvec4* vertices, const uint32_t primCount )
 	// vertex buffers created for rasterization.
 	BuildDefault( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) } );
 }
+
 void BVH::BuildDefault( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount )
 {
 	// access point for builders over an indexed list of raw vertices.
 	BuildDefault( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) }, indices, primCount );
 }
+
 void BVH::BuildDefault( const bvhvec4slice& vertices )
 {
 	// default builder: used internally when constructing a BVH layout requires
@@ -1546,6 +1548,7 @@ void BVH::BuildDefault( const bvhvec4slice& vertices )
 	Build( vertices );
 #endif
 }
+
 void BVH::BuildDefault( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount )
 {
 	// default builder for indexed vertices. See notes above.
@@ -1659,6 +1662,7 @@ void BVH::BuildQuick( const bvhvec4* vertices, const uint32_t primCount )
 	// in this case, the stride for the slice is 16 bytes.
 	BuildQuick( bvhvec4slice{ vertices, primCount * 3, sizeof( bvhvec4 ) } );
 }
+
 void BVH::BuildQuick( const bvhvec4slice& vertices )
 {
 	BVH_FATAL_ERROR_IF( vertices.count == 0, "BVH::BuildQuick( .. ), primCount == 0." );
@@ -1752,17 +1756,20 @@ void BVH::Build( const bvhvec4* vertices, const uint32_t prims )
 	// in this case, the stride for the slice is 16 bytes.
 	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) } );
 }
+
 void BVH::Build( const bvhvec4slice& vertices )
 {
 	// build the BVH from vertices stored in a slice.
 	PrepareBuild( vertices, 0, 0 /* empty index list; primcount is derived from slice */ );
 	Build();
 }
+
 void BVH::Build( const bvhvec4* vertices, const uint32_t* indices, const uint32_t prims )
 {
 	// build the BVH with a continuous array of bvhvec4 vertices, indexed by 'indices'.
 	Build( bvhvec4slice{ vertices, prims * 3, sizeof( bvhvec4 ) }, indices, prims );
 }
+
 void BVH::Build( const bvhvec4slice& vertices, const uint32_t* indices, uint32_t prims )
 {
 	// build the BVH from vertices stored in a slice, indexed by 'indices'.
@@ -1910,6 +1917,7 @@ void BVH::PrepareBuild( const bvhvec4slice& vertices, const uint32_t* indices, c
 	bvh_over_indices = indices != nullptr;
 	// all set; actual build happens in BVH::Build.
 }
+
 void BVH::Build()
 {
 	// subdivide root node recursively
@@ -2096,6 +2104,7 @@ void BVH::PrepareHQBuild( const bvhvec4slice& vertices, const uint32_t* indices,
 	bvh_over_indices = indices != nullptr;
 	// all set; actual build happens in BVH::Build.
 }
+
 void BVH::BuildHQ()
 {
 	const uint32_t slack = triCount >> 1; // for split prims
