@@ -575,6 +575,8 @@ typedef struct { float v0, v1, v2, v3, v4, v5, v6, v7; } SIMDVEC8;
 typedef struct { int v0, v1, v2, v3, v4, v5, v6, v7; } SIMDIVEC8;
 #endif
 
+template <typename T, size_t N> inline size_t tinybvh_array_size( const T (&x)[N] ) { return N; }
+
 // ============================================================================
 //
 //        T I N Y _ B V H   I N T E R F A C E
@@ -1725,7 +1727,7 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 			}
 			// create child nodes
 			const uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0) break; // split did not work out.
+			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // split did not work out.
 			const int32_t lci = newNodePtr++, rci = newNodePtr++;
 			bvhNode[lci].aabbMin = lbmin, bvhNode[lci].aabbMax = lbmax;
 			bvhNode[lci].leftFirst = node.leftFirst, bvhNode[lci].triCount = leftCount;
@@ -1992,7 +1994,7 @@ void BVH::Build()
 			}
 			// create child nodes
 			uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0) break; // should not happen.
+			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // should not happen.
 			const int32_t lci = newNodePtr++, rci = newNodePtr++;
 			bvhNode[lci].aabbMin = bestLMin, bvhNode[lci].aabbMax = bestLMax;
 			bvhNode[lci].leftFirst = node.leftFirst, bvhNode[lci].triCount = leftCount;
@@ -2349,7 +2351,7 @@ void BVH::BuildHQ()
 			memcpy( triIdxA + sliceStart, triIdxB + sliceStart, (sliceEnd - sliceStart) * 4 );
 			// create child nodes
 			uint32_t leftCount = A - sliceStart, rightCount = sliceEnd - B;
-			if (leftCount == 0 || rightCount == 0)
+			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task ))
 			{
 				// spatial split failed. We shouldn't get here, but we do sometimes..
 				for (uint32_t i = 0; i < node.triCount; i++)
@@ -5453,7 +5455,7 @@ void BVH::BuildAVX()
 			}
 			// create child nodes and recurse
 			const uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0) break; // should not happen.
+			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // should not happen.
 			*(__m256*)& bvhNode[n] = _mm256_xor_ps( bestLBox, signFlip8 );
 			bvhNode[n].leftFirst = node.leftFirst, bvhNode[n].triCount = leftCount;
 			node.leftFirst = n++, node.triCount = 0, newNodePtr += 2;
@@ -6631,7 +6633,7 @@ void BVH::BuildNEON()
 			}
 			// create child nodes and recurse
 			const uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0) break; // should not happen.
+			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // should not happen.
 			*(float32x4x2_t*)&bvhNode[n] = _mm256_xor_ps( bestLBox, signFlip8 );
 			bvhNode[n].leftFirst = node.leftFirst, bvhNode[n].triCount = leftCount;
 			node.leftFirst = n++, node.triCount = 0, newNodePtr += 2;
@@ -6990,7 +6992,7 @@ void BVH_Double::Build()
 			}
 			// create child nodes
 			uint64_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0) break; // should not happen.
+			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // should not happen.
 			const uint64_t lci = newNodePtr++, rci = newNodePtr++;
 			bvhNode[lci].aabbMin = bestLMin, bvhNode[lci].aabbMax = bestLMax;
 			bvhNode[lci].leftFirst = node.leftFirst, bvhNode[lci].triCount = leftCount;
