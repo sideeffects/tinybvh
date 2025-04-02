@@ -251,9 +251,9 @@ inline size_t make_multiple_of( size_t x, size_t alignment ) { return (x + (alig
 #define _ALIGNED_FREE(ptr) _mm_free( ptr );
 #else
 #if defined __APPLE__ || (defined __ANDROID_NDK__ && defined(__NDK_MAJOR__) && (__NDK_MAJOR__ >= 28))
-#define _ALIGNED_ALLOC(alignment,size) aligned_alloc( alignment, size );
+#define _ALIGNED_ALLOC(alignment,size) aligned_alloc( alignment, make_multiple_of( size, alignment ) );
 #elif defined __GNUC__
-#define _ALIGNED_ALLOC(alignment,size) _aligned_malloc( alignment, size );
+#define _ALIGNED_ALLOC(alignment,size) _aligned_malloc( alignment, make_multiple_of( size, alignment ) );
 #endif
 #define _ALIGNED_FREE(ptr) free( ptr );
 #endif
@@ -575,7 +575,7 @@ typedef struct { float v0, v1, v2, v3, v4, v5, v6, v7; } SIMDVEC8;
 typedef struct { int v0, v1, v2, v3, v4, v5, v6, v7; } SIMDIVEC8;
 #endif
 
-template <typename T, size_t N> inline size_t tinybvh_array_size( const T (&x)[N] ) { return N; }
+template <typename T, size_t N> inline size_t tinybvh_array_size( const T( &x )[N] ) { return N; }
 
 // ============================================================================
 //
