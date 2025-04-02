@@ -1,6 +1,3 @@
-# dev
-This is the **development branch** for TinyBVH. New code appears here first.
-
 # tinybvh
 Single-header BVH construction and traversal library written as "Sane C++" (or "C with classes"). Some C++11 is used, e.g. for threading. The library has no dependencies. 
 
@@ -68,7 +65,9 @@ The **performance measurement tool** can be compiled with:
 
 ````g++ -mavx2 -mfma -Ofast tiny_bvh_speedtest.cpp -o tiny_bvh_speedtest````
 
-# Version 1.4.9
+# Version 1.5.0
+
+Version 1.5.0 introduces a new fast layout for x86/x64 systems that do not (or cannot be presumed to) support AVX2. For those, please use BVH4_CPU form optimal performance (about 80% of the fastest AVX2 code).
 
 Version 1.4.0 introduces a new BVH layout for fast single-ray traversal on CPU: BVH8_CPU. This supersedes the previous fastest scheme, BVH4_CPU. 
 
@@ -113,6 +112,7 @@ This version of the library includes the following functionality:
 * Fast binned SAH BVH builder using NEON intrinsices, by [wuyakuma](https://github.com/wuyakuma)
 * Customizable SAH parameters
 * TLAS builder with instancing and fast TLAS/BLAS traversal, even for 'mixed trees'
+* TLAS masking (similar to [OptiX](https://raytracing-docs.nvidia.com/optix7/guide/optix_guide.230712.A4.pdf)), by [Romain Augier](https://github.com/romainaugier).
 * Double-precision binned SAH BVH builder
 * Support for custom geometry and mixed scenes
 * Example code for GPU TLAS/BLAS traversal (dragon invasion demo, tiny_bvh_gpu2.cpp)
@@ -126,6 +126,7 @@ This version of the library includes the following functionality:
 * Sphere/BVH collision detection via BVH::IntersectSphere(..)
 * BVH (de)serialization for most layouts
 * Fast AVX2 ray tracing: Implements the 2017 paper by [Fuetterling et al.](https://web.cs.ucdavis.edu/~hamann/FuetterlingLojewskiPfreundtHamannEbertHPG2017PaperFinal06222017.pdf)
+* Fast SSE4.2 ray tracing: A modified version of the AVX2 implementation using just SSE4.2 achieves 80% of AVX2 performance.
 * Fast triangle intersection: Implements the 2016 paper by [Baldwin & Weber](https://jcgt.org/published/0005/03/03/paper.pdf)
 * OpenCL traversal example code: Aila & Laine, 4-way quantized, CWBVH
 * OpenCL support for MacOS, by [wuyakuma](https://github.com/wuyakuma)
