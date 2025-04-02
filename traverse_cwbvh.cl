@@ -307,7 +307,7 @@ float4 traverse_cwbvh( global const float4* cwbvhNodes, global const float4* cwb
 		#else
 			// Möller-Trumbore intersection; triangles are stored as 3x16 bytes,
 			// with the original primitive index in the (otherwise unused) w 
-			// component of vertex 0.
+			// component of vertex 0. iquilezles.org version.
 			const int triangleIndex = __bfind( tgroup.y ), triAddr = tgroup.x + triangleIndex * 3;
 			const float3 e1 = cwbvhTris[triAddr].xyz;
 			const float3 e2 = cwbvhTris[triAddr + 1].xyz;
@@ -315,7 +315,6 @@ float4 traverse_cwbvh( global const float4* cwbvhNodes, global const float4* cwb
 			tgroup.y -= 1 << triangleIndex;
 			const float3 r = cross( D.xyz, e1 );
 			const float a = dot( e2, r );
-			if (fabs( a ) < 0.0000001f) continue;
 			const float f = 1 / a;
 			const float3 s = O.xyz - v0.xyz;
 			const float u = f * dot( s, r );
