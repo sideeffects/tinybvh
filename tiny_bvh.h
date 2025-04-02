@@ -196,7 +196,7 @@ __FILE__ "(" EMIT_COMPILER_WARNING_STRINGIFY1(__LINE__) "): " type ": "
 // AVX1 availability: Since Sandy Bridge (2011)
 // AVX2 availability: Since Haswell (2013)
 #ifndef TINYBVH_NO_SIMD
-#if defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__)
+#if defined __x86_64__ || defined _M_X64 || defined __wasm_simd128__ || defined __wasm_relaxed_simd__
 #if !defined __SSE4_2__  && !defined _MSC_VER
 WARNING( "SSE4.2 supported by platform but not enabled in compilation." )
 #else
@@ -210,15 +210,18 @@ WARNING( "AVX supported by platform but not enabled in compilation." )
 #define TINYBVH_NO_SIMD
 #else
 #define BVH_USEAVX		// required for BuildAVX, BVH_SoA and others
+#define BVH_USESSE
 #endif
 #if !defined __AVX2__
 WARNING( "AVX2 supported by platform but not enabled in compilation." )
 #define TINYBVH_NO_SIMD
 #else
 #define BVH_USEAVX2		// required for BVH8_CPU
+#define BVH_USEAVX
+#define BVH_USESSE
 #endif
 #include "immintrin.h"	// for __m128 and __m256
-#elif defined(__aarch64__) || defined(_M_ARM64)
+#elif defined __aarch64__ || defined _M_ARM64
 #if !defined __NEON__
 WARNING( "NEON supported by platform but not enabled in compilation." )
 #define TINYBVH_NO_SIMD
@@ -242,12 +245,12 @@ inline size_t make_multiple_of( size_t x, size_t alignment ) { return (x + (alig
 #define _ALIGNED_FREE(ptr) _aligned_free( ptr );
 #else // EMSCRIPTEN / gcc / clang
 #define ALIGNED( x ) __attribute__( ( aligned( x ) ) )
-#if !defined(TINYBVH_NO_SIMD) && (defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__))
+#if !defined TINYBVH_NO_SIMD && (defined __x86_64__ || defined _M_X64 || defined __wasm_simd128__ || defined __wasm_relaxed_simd__)
 #include <xmmintrin.h>
 #define _ALIGNED_ALLOC(alignment,size) _mm_malloc( make_multiple_of( size, alignment ), alignment );
 #define _ALIGNED_FREE(ptr) _mm_free( ptr );
 #else
-#if defined __APPLE__ || (defined(__ANDROID_NDK__) && defined(__NDK_MAJOR__) && (__NDK_MAJOR__ >= 28))
+#if defined __APPLE__ || (defined __ANDROID_NDK__ && defined(__NDK_MAJOR__) && (__NDK_MAJOR__ >= 28))
 #define _ALIGNED_ALLOC(alignment,size) aligned_alloc( alignment, size );
 #elif defined __GNUC__
 #define _ALIGNED_ALLOC(alignment,size) _aligned_malloc( alignment, size );
@@ -533,14 +536,21 @@ inline double tinybvh_half_area( const bvhdbl3& v ) { return v.x < -BVH_FAR ? 0 
 #endif // DOUBLE_PRECISION_SUPPORT
 
 // SIMD typedef, helps keeping the interface generic
-#ifdef BVH_USEAVX
+#ifdef BVH_USESSE
 typedef __m128 SIMDVEC4;
 typedef __m128i SIMDIVEC4;
-typedef __m256 SIMDVEC8;
-typedef __m256i SIMDIVEC8;
 #define SIMD_SETVEC(a,b,c,d) _mm_set_ps( a, b, c, d )
 #define SIMD_SETRVEC(a,b,c,d) _mm_set_ps( d, c, b, a )
-#elif defined(BVH_USENEON)
+#else
+typedef bvhvec4 SIMDVEC4;
+typedef struct { int x, y, z, w; } SIMDIVEC4;
+#define SIMD_SETVEC(a,b,c,d) bvhvec4( d, c, b, a )
+#define SIMD_SETRVEC(a,b,c,d) bvhvec4( a, b, c, d )
+#endif
+#ifdef BVH_USEAVX
+typedef __m256 SIMDVEC8;
+typedef __m256i SIMDIVEC8;
+#elif defined BVH_USENEON
 typedef float32x4_t SIMDVEC4;
 typedef int32x4_t SIMDIVEC4;
 typedef float32x4x2_t SIMDVEC8;
@@ -561,12 +571,8 @@ inline uint32x4_t SIMD_SETRVECU( uint32_t x, uint32_t y, uint32_t z, uint32_t w 
 	return vld1q_u32( data );
 }
 #else
-typedef bvhvec4 SIMDVEC4;
-typedef struct { int x, y, z, w; } SIMDIVEC4;
 typedef struct { float v0, v1, v2, v3, v4, v5, v6, v7; } SIMDVEC8;
 typedef struct { int v0, v1, v2, v3, v4, v5, v6, v7; } SIMDIVEC8;
-#define SIMD_SETVEC(a,b,c,d) bvhvec4( d, c, b, a )
-#define SIMD_SETRVEC(a,b,c,d) bvhvec4( a, b, c, d )
 #endif
 
 // ============================================================================
@@ -575,7 +581,7 @@ typedef struct { int v0, v1, v2, v3, v4, v5, v6, v7; } SIMDIVEC8;
 //
 // ============================================================================
 
-#if defined(_MSC_VER) || defined(__GNUC__)
+#if defined _MSC_VER || defined __GNUC__
 #pragma pack(push, 4) // is there a good alternative for Clang / EMSCRIPTEN?
 #endif
 struct Intersection
@@ -603,7 +609,7 @@ struct Intersection
 		uint64_t userInt64[7];
 	};
 };
-#if defined(_MSC_VER) || defined(__GNUC__)
+#if defined _MSC_VER || defined __GNUC__
 #pragma pack(pop) // is there a good alternative for Clang / EMSCRIPTEN?
 #endif
 
@@ -797,7 +803,7 @@ public:
 	void BuildAVX( const bvhvec4slice& vertices );
 	void BuildAVX( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildAVX( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-#elif defined(BVH_USENEON)
+#elif defined BVH_USENEON
 	void BuildNEON( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildNEON( const bvhvec4slice& vertices );
 	void BuildNEON( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
@@ -1347,15 +1353,15 @@ static constexpr bool customEnabled = false;
 #endif
 
 namespace tinybvh {
-#if defined BVH_USEAVX || defined BVH_USENEON
+#if defined BVH_USESSE || defined BVH_USENEON
 inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
 {
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined _MSC_VER && !defined __clang__
 	return 31 - __lzcnt( x );
-#elif defined(__EMSCRIPTEN__)
+#elif defined __EMSCRIPTEN__
 	return 31 - __builtin_clz( x );
-#elif defined(__GNUC__) || defined(__clang__)
-#if defined(__APPLE__) || __has_builtin(__builtin_clz)
+#elif defined __GNUC__ || defined __clang__
+#if defined __APPLE__ || __has_builtin(__builtin_clz)
 	return 31 - __builtin_clz( x );
 #else
 	uint32_t r;
@@ -1528,11 +1534,11 @@ void BVH::BuildDefault( const bvhvec4slice& vertices )
 {
 	// default builder: used internally when constructing a BVH layout requires
 	// a regular BVH. Currently, this is the case for all of them.
-#if defined(BVH_USEAVX)
+#if defined BVH_USEAVX
 	// if AVX is supported, BuildAVX is the optimal option. Tree quality is
 	// identical to the reference builder, but speed is much better.
 	BuildAVX( vertices );
-#elif defined(BVH_USENEON)
+#elif defined BVH_USENEON
 	BuildNEON( vertices );
 #else
 	// fallback option, in case neither AVX or NEON is not supported: the reference
@@ -1543,9 +1549,9 @@ void BVH::BuildDefault( const bvhvec4slice& vertices )
 void BVH::BuildDefault( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount )
 {
 	// default builder for indexed vertices. See notes above.
-#if defined(BVH_USEAVX)
+#if defined BVH_USEAVX
 	BuildAVX( vertices, indices, primCount );
-#elif defined(BVH_USENEON)
+#elif defined BVH_USENEON
 	BuildNEON( vertices, indices, primCount );
 #else
 	Build( vertices, indices, primCount );
@@ -4929,9 +4935,9 @@ inline __m128 fastrcp4( const __m128 a )
 
 static uint32_t __popc( uint32_t x )
 {
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined _MSC_VER && !defined __clang__
 	return __popcnt( x );
-#elif defined(__GNUC__) || defined(__clang__)
+#elif defined __GNUC__ || defined __clang__
 	return __builtin_popcount( x );
 #endif
 }
@@ -5202,7 +5208,7 @@ template <bool posX, bool posY, bool posZ> bool BVH4_CPU::IsOccluded( const Ray&
 // This code produces BVHs nearly identical to reference, but much faster.
 // On a 12th gen laptop i7 CPU, Sponza Crytek (~260k tris) is processed in 51ms.
 // The code relies on the availability of AVX instructions. AVX2 is not needed.
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined _MSC_VER && !defined __clang__
 #define LANE(a,b) a.m128_f32[b]
 #define LANE8(a,b) a.m256_f32[b]
 // Not using clang/g++ method under MSCC; compiler may benefit from .m128_i32.
@@ -5240,10 +5246,10 @@ inline float halfArea( const __m256& a /* a contains aabb itself, with min.xyz n
 	ANLR = halfArea( lb ) * (float)lN + halfArea( rb ) * (float)rN; \
 	const float C = c_trav + c_int * rSAV * ANLR; if (C < splitCost) \
 	splitCost = C, bestAxis = a, bestPos = pos, bestLBox = lb, bestRBox = rb; }
-#if defined(_MSC_VER)
+#if defined _MSC_VER
 #pragma warning ( push )
 #pragma warning( disable:4701 ) // "potentially uninitialized local variable 'bestLBox' used"
-#elif defined(__GNUC__) && !defined(__clang__)
+#elif defined __GNUC__ && !defined __clang__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
@@ -5455,9 +5461,9 @@ void BVH::BuildAVX()
 	may_have_holes = false; // the AVX builder produces a continuous list of nodes
 	usedNodes = newNodePtr;
 }
-#if defined(_MSC_VER)
+#if defined _MSC_VER
 #pragma warning ( pop ) // restore 4701
-#elif defined(__GNUC__) && !defined(__clang__)
+#elif defined __GNUC__ && !defined __clang__
 #pragma GCC diagnostic pop // restore -Wmaybe-uninitialized
 #endif
 
