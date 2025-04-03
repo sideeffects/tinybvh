@@ -33,8 +33,8 @@
 #define TRAVERSE_2WAY_MT_PACKET
 #define TRAVERSE_OPTIMIZED_ST
 #define TRAVERSE_8WAY_OPTIMIZED
-#define EMBREE_BUILD // win64-only for now.
-#define EMBREE_TRAVERSE // win64-only for now.
+// #define EMBREE_BUILD // win64-only for now.
+// #define EMBREE_TRAVERSE // win64-only for now.
 #define MADMAN_BUILD_FAST
 #define MADMAN_BUILD_HQ
 #define MADMAN_TRAVERSE
@@ -660,6 +660,70 @@ int main()
 
 #endif
 
+#if defined MADMAN_BUILD_FAST
+
+	printf( "- Madman91 quick:    " );
+	std::vector<_Tri> tris;
+	for (int i = 0; i < verts; i += 3) tris.emplace_back(
+		_Vec3( triangles[i].x, triangles[i].y, triangles[i].z ),
+		_Vec3( triangles[i + 1].x, triangles[i + 1].y, triangles[i + 1].z ),
+		_Vec3( triangles[i + 2].x, triangles[i + 2].y, triangles[i + 2].z )
+	);
+	bvh::v2::ThreadPool thread_pool;
+	bvh::v2::ParallelExecutor executor( thread_pool );
+	// Get triangle centers and bounding boxes (required for BVH builder)
+	std::vector<_BBox> bboxes( tris.size() );
+	std::vector<_Vec3> centers( tris.size() );
+	t.reset();
+	executor.for_each( 0, tris.size(), [&]( size_t begin, size_t end )
+		{
+			for (size_t i = begin; i < end; ++i)
+			{
+				bboxes[i] = tris[i].get_bbox();
+				centers[i] = tris[i].get_center();
+			}
+		} );
+	typename bvh::v2::DefaultBuilder<_Node>::Config config;
+	config.quality = bvh::v2::DefaultBuilder<_Node>::Quality::Low;
+	auto madmanbvh = bvh::v2::DefaultBuilder<_Node>::build( thread_pool, bboxes, centers, config );
+	buildTime = t.elapsed();
+	printf( "%7.2fms for %7i triangles\n", buildTime * 1000.0f, verts / 3 );
+
+#endif
+
+#if defined MADMAN_BUILD_HQ
+
+	printf( "- Madman91 hq:       " );
+#ifndef MADMAN_BUILD_FAST
+	std::vector<_Tri> tris;
+	for (int i = 0; i < verts; i += 3) tris.emplace_back(
+		_Vec3( triangles[i].x, triangles[i].y, triangles[i].z ),
+		_Vec3( triangles[i + 1].x, triangles[i + 1].y, triangles[i + 1].z ),
+		_Vec3( triangles[i + 2].x, triangles[i + 2].y, triangles[i + 2].z )
+	);
+	bvh::v2::ThreadPool thread_pool;
+	bvh::v2::ParallelExecutor executor( thread_pool );
+	// Get triangle centers and bounding boxes (required for BVH builder)
+	std::vector<_BBox> bboxes( tris.size() );
+	std::vector<_Vec3> centers( tris.size() );
+	t.reset();
+	executor.for_each( 0, tris.size(), [&]( size_t begin, size_t end )
+		{
+			for (size_t i = begin; i < end; ++i)
+			{
+				bboxes[i] = tris[i].get_bbox();
+				centers[i] = tris[i].get_center();
+			}
+		} );
+	typename bvh::v2::DefaultBuilder<_Node>::Config config;
+#endif
+	config.quality = bvh::v2::DefaultBuilder<_Node>::Quality::High;
+	madmanbvh = bvh::v2::DefaultBuilder<_Node>::build( thread_pool, bboxes, centers, config );
+	buildTime = t.elapsed();
+	printf( "%7.2fms for %7i triangles\n", buildTime * 1000.0f, verts / 3 );
+
+#endif
+
 	// measure single-core bvh construction time - warming caches
 	printf( "BVH refitting speed\n" );
 
@@ -741,37 +805,6 @@ int main()
 	// rtcSetSceneBuildQuality( embreeScene, RTC_BUILD_QUALITY_MEDIUM );
 	t.reset();
 	rtcCommitScene( embreeScene ); // assuming this is where (supposedly threaded) BVH build happens.
-	buildTime = t.elapsed();
-	printf( "%7.2fms for %7i triangles\n", buildTime * 1000.0f, verts / 3 );
-
-#endif
-
-#if defined MADMAN_BUILD_HQ
-
-	printf( "- Madman91 builder:  " );
-	std::vector<_Tri> tris;
-	for (int i = 0; i < verts; i += 3) tris.emplace_back(
-		_Vec3( triangles[i].x, triangles[i].y, triangles[i].z ),
-		_Vec3( triangles[i + 1].x, triangles[i + 1].y, triangles[i + 1].z ),
-		_Vec3( triangles[i + 2].x, triangles[i + 2].y, triangles[i + 2].z )
-	);
-	bvh::v2::ThreadPool thread_pool;
-	bvh::v2::ParallelExecutor executor( thread_pool );
-	// Get triangle centers and bounding boxes (required for BVH builder)
-	std::vector<_BBox> bboxes( tris.size() );
-	std::vector<_Vec3> centers( tris.size() );
-	t.reset();
-	executor.for_each( 0, tris.size(), [&]( size_t begin, size_t end )
-		{
-			for (size_t i = begin; i < end; ++i)
-			{
-				bboxes[i] = tris[i].get_bbox();
-				centers[i] = tris[i].get_center();
-			}
-		} );
-	typename bvh::v2::DefaultBuilder<_Node>::Config config;
-	config.quality = bvh::v2::DefaultBuilder<_Node>::Quality::High;
-	auto bvh = bvh::v2::DefaultBuilder<_Node>::build( thread_pool, bboxes, centers, config );
 	buildTime = t.elapsed();
 	printf( "%7.2fms for %7i triangles\n", buildTime * 1000.0f, verts / 3 );
 
