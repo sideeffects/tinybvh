@@ -56,15 +56,15 @@ inline size_t make_multiple_of( size_t x, size_t alignment ) { return (x + (alig
 #define _ALIGNED_FREE(ptr) _aligned_free( ptr );
 #else // EMSCRIPTEN / gcc / clang
 #define ALIGNED( x ) __attribute__( ( aligned( x ) ) )
-#if !defined(TINYBVH_NO_SIMD) && (defined(__x86_64__) || defined(_M_X64) || defined(__wasm_simd128__) || defined(__wasm_relaxed_simd__))
+#if !defined TINYBVH_NO_SIMD && (defined __x86_64__ || defined _M_X64 || defined __wasm_simd128__ || defined __wasm_relaxed_simd__)
 #include <xmmintrin.h>
 #define _ALIGNED_ALLOC(alignment,size) _mm_malloc( make_multiple_of( size, alignment ), alignment );
 #define _ALIGNED_FREE(ptr) _mm_free( ptr );
 #else
-#if defined __GNUC__ && !defined __APPLE__
-#define _ALIGNED_ALLOC(alignment,size) _aligned_malloc( alignment, size );
-#else
-#define _ALIGNED_ALLOC(alignment,size) aligned_alloc( alignment, size );
+#if defined __APPLE__ || (defined __ANDROID_NDK__ && defined(__NDK_MAJOR__) && (__NDK_MAJOR__ >= 28))
+#define _ALIGNED_ALLOC(alignment,size) aligned_alloc( alignment, make_multiple_of( size, alignment ) );
+#elif defined __GNUC__
+#define _ALIGNED_ALLOC(alignment,size) _aligned_malloc( alignment, make_multiple_of( size, alignment ) );
 #endif
 #define _ALIGNED_FREE(ptr) free( ptr );
 #endif

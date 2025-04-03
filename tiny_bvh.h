@@ -135,7 +135,7 @@ THE SOFTWARE.
 #define DOUBLE_PRECISION_SUPPORT
 #endif
 // #define TINYBVH_USE_CUSTOM_VECTOR_TYPES
-// #define TINYBVH_NO_SIMD
+#define TINYBVH_NO_SIMD
 #ifndef NO_INDEXED_GEOMETRY
 #define ENABLE_INDEXED_GEOMETRY
 #endif
@@ -198,7 +198,7 @@ __FILE__ "(" EMIT_COMPILER_WARNING_STRINGIFY1(__LINE__) "): " type ": "
 #ifndef TINYBVH_NO_SIMD
 #if defined __x86_64__ || defined _M_X64 || defined __wasm_simd128__ || defined __wasm_relaxed_simd__
 #if !defined __SSE4_2__  && !defined _MSC_VER
-WARNING( "SSE4.2 supported by platform but not enabled in compilation." )
+WARNING( "SSE4.2 not enabled in compilation." )
 #else
 #define BVH_USESSE
 #ifndef __SSE4_2__
@@ -206,14 +206,14 @@ WARNING( "SSE4.2 supported by platform but not enabled in compilation." )
 #endif
 #endif
 #if !defined __AVX__
-WARNING( "AVX supported by platform but not enabled in compilation." )
+WARNING( "AVX not enabled in compilation." )
 #define TINYBVH_NO_SIMD
 #else
 #define BVH_USEAVX		// required for BuildAVX, BVH_SoA and others
 #define BVH_USESSE
 #endif
-#if !defined __AVX2__
-WARNING( "AVX2 supported by platform but not enabled in compilation." )
+#if !defined __AVX2__ || (!defined __FMA__ && !defined _MSC_VER)
+WARNING( "AVX2 and FMA not enabled in compilation." )
 #define TINYBVH_NO_SIMD
 #else
 #define BVH_USEAVX2		// required for BVH8_CPU
@@ -574,8 +574,6 @@ inline uint32x4_t SIMD_SETRVECU( uint32_t x, uint32_t y, uint32_t z, uint32_t w 
 typedef struct { float v0, v1, v2, v3, v4, v5, v6, v7; } SIMDVEC8;
 typedef struct { int v0, v1, v2, v3, v4, v5, v6, v7; } SIMDIVEC8;
 #endif
-
-template <typename T, size_t N> inline size_t tinybvh_array_size( const T( &x )[N] ) { return N; }
 
 // ============================================================================
 //
@@ -1374,6 +1372,9 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 }
 #endif
 
+// array element counting; https://stackoverflow.com/questions/12784136
+#define BVH_NUM_ELEMS(a) (sizeof(a)/sizeof 0[a])
+
 // error handling
 #define BVH_FATAL_ERROR(s) FATAL_ERROR_IF(1,s)
 #ifdef _WINDOWS_ // windows.h has been included
@@ -1727,7 +1728,7 @@ void BVH::BuildQuick( const bvhvec4slice& vertices )
 			}
 			// create child nodes
 			const uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // split did not work out.
+			if (leftCount == 0 || rightCount == 0 || taskCount == BVH_NUM_ELEMS( task )) break; // split did not work out.
 			const int32_t lci = newNodePtr++, rci = newNodePtr++;
 			bvhNode[lci].aabbMin = lbmin, bvhNode[lci].aabbMax = lbmax;
 			bvhNode[lci].leftFirst = node.leftFirst, bvhNode[lci].triCount = leftCount;
@@ -1994,7 +1995,7 @@ void BVH::Build()
 			}
 			// create child nodes
 			uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // should not happen.
+			if (leftCount == 0 || rightCount == 0 || taskCount == BVH_NUM_ELEMS( task )) break; // should not happen.
 			const int32_t lci = newNodePtr++, rci = newNodePtr++;
 			bvhNode[lci].aabbMin = bestLMin, bvhNode[lci].aabbMax = bestLMax;
 			bvhNode[lci].leftFirst = node.leftFirst, bvhNode[lci].triCount = leftCount;
@@ -2351,7 +2352,7 @@ void BVH::BuildHQ()
 			memcpy( triIdxA + sliceStart, triIdxB + sliceStart, (sliceEnd - sliceStart) * 4 );
 			// create child nodes
 			uint32_t leftCount = A - sliceStart, rightCount = sliceEnd - B;
-			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task ))
+			if (leftCount == 0 || rightCount == 0 || taskCount == BVH_NUM_ELEMS( task ))
 			{
 				// spatial split failed. We shouldn't get here, but we do sometimes..
 				for (uint32_t i = 0; i < node.triCount; i++)
@@ -4304,7 +4305,7 @@ void BVH4_CPU::ConvertFrom( MBVH<4>& original )
 	}
 	CopyBasePropertiesFrom( bvh4 );
 	// start conversion
-	uint32_t newBlockPtr = 0, nodeIdx = 0, stack[256], stackPtr = 0, placed = 0;
+	uint32_t newBlockPtr = 0, nodeIdx = 0, stack[256], stackPtr = 0;
 	while (1)
 	{
 		const MBVH<4>::MBVHNode& orig = bvh4.mbvhNode[nodeIdx];
@@ -4513,7 +4514,7 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 	}
 	CopyBasePropertiesFrom( bvh8 );
 	// start conversion
-	uint32_t newBlockPtr = 0, nodeIdx = 0, stack[256], stackPtr = 0, placed = 0;
+	uint32_t newBlockPtr = 0, nodeIdx = 0, stack[256], stackPtr = 0;
 	while (1)
 	{
 		const MBVH<8>::MBVHNode& orig = bvh8.mbvhNode[nodeIdx];
@@ -4596,7 +4597,6 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 						GET_PRIM_INDICES_I0_I1_I2( bvh8.bvh, nearestTri );
 						const bvhvec4 v0 = bvh8.bvh.verts[i0], e1 = bvh8.bvh.verts[i1] - v0, e2 = bvh8.bvh.verts[i2] - v0;
 						leaf->SetData( v0, e1, e2, nearestTri, slot );
-						placed++;
 					}
 				}
 			#endif
@@ -4621,7 +4621,7 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 						uint32_t nearestTri = 0;
 						float bestDist = 1e30f;
 						bvhvec3 NC = (child.aabbMin + child.aabbMax) * 0.5f;
-						for (uint32_t j = 0; j < 8; j++) if (j != i && orig.child[j] != 0)
+						for (int32_t j = 0; j < 8; j++) if (j != i && orig.child[j] != 0)
 						{
 							const MBVH<8>::MBVHNode& sibling = bvh8.mbvhNode[orig.child[j]];
 							if (sibling.isLeaf())
@@ -4635,7 +4635,7 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 									if (sqdist < bestDist)
 									{
 										bool dupe = false;
-										for (int i = 0; i < 4; i++) if (leaf->primIdx[i] == primIdx) dupe = true;
+										for (int l = 0; l < 4; l++) if (leaf->primIdx[l] == primIdx) dupe = true;
 										if (!dupe) bestDist = sqdist, nearestTri = primIdx;
 									}
 								}
@@ -4646,7 +4646,6 @@ void BVH8_CPU::ConvertFrom( MBVH<8>& original )
 						GET_PRIM_INDICES_I0_I1_I2( bvh8.bvh, nearestTri );
 						const bvhvec4 v0 = bvh8.bvh.verts[i0], e1 = bvh8.bvh.verts[i1] - v0, e2 = bvh8.bvh.verts[i2] - v0;
 						leaf->SetData( v0, e1, e2, nearestTri, slot );
-						placed++;
 					}
 				}
 			#endif
@@ -5455,7 +5454,7 @@ void BVH::BuildAVX()
 			}
 			// create child nodes and recurse
 			const uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // should not happen.
+			if (leftCount == 0 || rightCount == 0 || taskCount == BVH_NUM_ELEMS( task )) break; // should not happen.
 			*(__m256*)& bvhNode[n] = _mm256_xor_ps( bestLBox, signFlip8 );
 			bvhNode[n].leftFirst = node.leftFirst, bvhNode[n].triCount = leftCount;
 			node.leftFirst = n++, node.triCount = 0, newNodePtr += 2;
@@ -6633,7 +6632,7 @@ void BVH::BuildNEON()
 			}
 			// create child nodes and recurse
 			const uint32_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // should not happen.
+			if (leftCount == 0 || rightCount == 0 || taskCount == BVH_NUM_ELEMS( task )) break; // should not happen.
 			*(float32x4x2_t*)&bvhNode[n] = _mm256_xor_ps( bestLBox, signFlip8 );
 			bvhNode[n].leftFirst = node.leftFirst, bvhNode[n].triCount = leftCount;
 			node.leftFirst = n++, node.triCount = 0, newNodePtr += 2;
@@ -6992,7 +6991,7 @@ void BVH_Double::Build()
 			}
 			// create child nodes
 			uint64_t leftCount = src - node.leftFirst, rightCount = node.triCount - leftCount;
-			if (leftCount == 0 || rightCount == 0 || taskCount == tinybvh_array_size( task )) break; // should not happen.
+			if (leftCount == 0 || rightCount == 0 || taskCount == BVH_NUM_ELEMS( task )) break; // should not happen.
 			const uint64_t lci = newNodePtr++, rci = newNodePtr++;
 			bvhNode[lci].aabbMin = bestLMin, bvhNode[lci].aabbMax = bestLMax;
 			bvhNode[lci].leftFirst = node.leftFirst, bvhNode[lci].triCount = leftCount;
