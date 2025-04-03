@@ -41,7 +41,7 @@ if (NOT EMSCRIPTEN) # EMSCRIPTEN doesn't render anything by default (you would n
 	add_executable(tiny_bvh_fenster tiny_bvh_fenster.cpp)
 endif()
 
-target_include_directories(tiny_bvh_speedtest PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/OpenCL/inc;external/madmann91)
+target_include_directories(tiny_bvh_speedtest PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/OpenCL/inc;external/madmann91;external/embree/include)
 
 if (NOT MSVC)
 	# Produce debug symbols and set optimization level
