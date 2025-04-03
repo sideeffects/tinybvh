@@ -1,9 +1,10 @@
+#define TINYBVH_IMPLEMENTATION
+#define _CRT_SECURE_NO_WARNINGS
+#include "tiny_bvh.h"
+
 #ifndef _MSC_VER // testing code for watertight below.
 
 // Minimal example for tiny_bvh.h
-
-#define TINYBVH_IMPLEMENTATION
-#include "tiny_bvh.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -59,9 +60,6 @@ int main()
 
 #else
 
-#define _CRT_SECURE_NO_WARNINGS
-#define TINYBVH_IMPLEMENTATION
-#include "tiny_bvh.h"
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
