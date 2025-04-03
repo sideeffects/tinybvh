@@ -35,9 +35,9 @@
 #define TRAVERSE_8WAY_OPTIMIZED
 // #define EMBREE_BUILD // win64-only for now.
 // #define EMBREE_TRAVERSE // win64-only for now.
-#define MADMAN_BUILD_FAST
-#define MADMAN_BUILD_HQ
-#define MADMAN_TRAVERSE
+// #define MADMAN_BUILD_FAST
+// #define MADMAN_BUILD_HQ
+// #define MADMAN_TRAVERSE
 // GPU rays: only if ENABLE_OPENCL is defined.
 #define GPU_2WAY
 #define GPU_4WAY
