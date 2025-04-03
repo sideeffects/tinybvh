@@ -337,12 +337,12 @@ void ValidateTraceResult( float* ref, unsigned N, unsigned line )
 	#endif
 	}
 	diff = fabs( refU - batchU );
-	if (diff / refU > 0.001f)
+	if (diff / refU > 0.05f) // watertight has a big effect here; we just want to catch disasters.
 	{
 		printf( "!! Validation for u failed on line %i: %.1f != %.1f\n", line, refU, batchU );
 	}
 	diff = fabs( refV - batchV );
-	if (diff / refV > 0.001f)
+	if (diff / refV > 0.05f) // watertight has a big effect here; we just want to catch disasters.
 	{
 		printf( "!! Validation for v failed on line %i: %.1f != %.1f\n", line, refV, batchV );
 	}
