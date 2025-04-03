@@ -223,7 +223,7 @@ WARNING( "AVX2 and FMA not enabled in compilation." )
 #include "immintrin.h"	// for __m128 and __m256
 #elif defined __aarch64__ || defined _M_ARM64
 #if !defined __NEON__
-WARNING( "NEON supported by platform but not enabled in compilation." )
+WARNING( "NEON not enabled in compilation." )
 #define TINYBVH_NO_SIMD
 #else
 #define BVH_USENEON
@@ -253,7 +253,11 @@ inline size_t make_multiple_of( size_t x, size_t alignment ) { return (x + (alig
 #if defined __APPLE__ || (defined __ANDROID_NDK__ && defined(__NDK_MAJOR__) && (__NDK_MAJOR__ >= 28))
 #define _ALIGNED_ALLOC(alignment,size) aligned_alloc( alignment, make_multiple_of( size, alignment ) );
 #elif defined __GNUC__
+#ifdef __linux__
+#define _ALIGNED_ALLOC(alignment,size) aligned_alloc( alignment, make_multiple_of( size, alignment ) );
+#else
 #define _ALIGNED_ALLOC(alignment,size) _aligned_malloc( alignment, make_multiple_of( size, alignment ) );
+#endif
 #endif
 #define _ALIGNED_FREE(ptr) free( ptr );
 #endif
