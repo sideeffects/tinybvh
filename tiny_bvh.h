@@ -406,7 +406,7 @@ inline float tinybvh_clamp( const float x, const float a, const float b ) { retu
 inline int32_t tinybvh_clamp( const int32_t x, const int32_t a, const int32_t b ) { return x > a ? (x < b ? x : b) : a; /* NaN safe */ }
 template <class T> inline static void tinybvh_swap( T& a, T& b ) { T t = a; a = b; b = t; }
 inline float tinybvh_half_area( const bvhvec3& v ) { return v.x < -BVH_FAR ? 0 : (v.x * v.y + v.y * v.z + v.z * v.x); } // for SAH calculations
-inline uint32_t tinybvh_maxdim( const bvhvec3& v ) { uint32_t r = fabs( v.x ) > fabs( v.y ) ? 0 : 1; if (fabs( v.z ) > fabs( v[r] )) r = 2; return r; }
+inline uint32_t tinybvh_maxdim( const bvhvec3& v ) { uint32_t r = fabs( v.x ) > fabs( v.y ) ? 0 : 1; return fabs( v.z ) > fabs( v[r] ) ? 2 : r; }
 
 // Operator overloads.
 // Only a minimal set is provided.
@@ -7406,8 +7406,7 @@ void BVHBase::IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& ve
 // TriOccludes
 bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const
 {
-#if 0 
-// #ifdef WATER_TIGHT_TRITEST
+#ifdef WATERTIGHT_TRITEST
 	// Woop et al.'s Watertight intersection algorithm.
 	// PART 1 - Precalculations
 	uint32_t kz = tinybvh_maxdim( ray.D ), kx = (1 << kz) & 3, ky = (1 << kx) & 3;
@@ -7427,7 +7426,7 @@ bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint
 	const float Az = Sz * A[kz], Bz = Sz * B[kz], Cz = Sz * C[kz];
 	const float T = U * Az + V * Bz + W * Cz;
 	const float invDet = 1.0f / det, t = T * invDet;
-	if (t > ray.hit.t) return false;
+	if (t < 0 || t > ray.hit.t) return false;
 #else
 	// Moeller-Trumbore ray/triangle intersection algorithm
 	const bvhvec4 v0_ = verts[i0];
