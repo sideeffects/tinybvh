@@ -69,6 +69,7 @@ using BVHT = tinybvh::BVH;
 int main()
 {
 	FILE* obj = fopen( "dragon.obj", "r" );
+	if (!obj) return;
 	std::vector<tinybvh::bvhvec4> bvhv;
 	std::vector<unsigned int> bvhi;
 	char line[1024];
