@@ -7369,10 +7369,9 @@ void BVHBase::IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& ve
 #ifdef WATERTIGHT_TRITEST
 	// Woop et al.'s Watertight intersection algorithm.
 	// PART 1 - Precalculations
-	uint32_t kz = tinybvh_maxdim( ray.D );
-	uint32_t kx = (1 << kz) & 3, ky = (1 << kx) & 3;
+	uint32_t kz = tinybvh_maxdim( ray.D ), kx = (1 << kz) & 3, ky = (1 << kx) & 3;
 	if (ray.D[kz] < 0) std::swap( kx, ky );
-	const float Sz = 1.0f / ray.D[kz], Sx = ray.D[kx] * Sz, Sy = ray.D[ky] * Sz;
+	const float Sz = ray.rD[kz], Sx = ray.D[kx] * Sz, Sy = ray.D[ky] * Sz;
 	// PART 2 - Intersection
 	const bvhvec3 A = bvhvec3( verts[i0] ) - ray.O;
 	const bvhvec3 B = bvhvec3( verts[i1] ) - ray.O;
@@ -7380,9 +7379,7 @@ void BVHBase::IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& ve
 	const float Ax = A[kx] - Sx * A[kz], Ay = A[ky] - Sy * A[kz];
 	const float Bx = B[kx] - Sx * B[kz], By = B[ky] - Sy * B[kz];
 	const float Cx = C[kx] - Sx * C[kz], Cy = C[ky] - Sy * C[kz];
-	const float U = Cx * By - Cy * Bx;
-	const float V = Ax * Cy - Ay * Cx;
-	const float W = Bx * Ay - By * Ax;
+	const float U = Cx * By - Cy * Bx, V = Ax * Cy - Ay * Cx, W = Bx * Ay - By * Ax;
 	if ((U < 0 || V < 0 || W < 0) && (U > 0 || V > 0 || W > 0)) return;
 	const float det = U + V + W;
 	if (det == 0) return;
@@ -7409,10 +7406,34 @@ void BVHBase::IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& ve
 // TriOccludes
 bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const
 {
+#if 0 
+// #ifdef WATER_TIGHT_TRITEST
+	// Woop et al.'s Watertight intersection algorithm.
+	// PART 1 - Precalculations
+	uint32_t kz = tinybvh_maxdim( ray.D ), kx = (1 << kz) & 3, ky = (1 << kx) & 3;
+	if (ray.D[kz] < 0) std::swap( kx, ky );
+	const float Sz = ray.rD[kz], Sx = ray.D[kx] * Sz, Sy = ray.D[ky] * Sz;
+	// PART 2 - Intersection
+	const bvhvec3 A = bvhvec3( verts[i0] ) - ray.O;
+	const bvhvec3 B = bvhvec3( verts[i1] ) - ray.O;
+	const bvhvec3 C = bvhvec3( verts[i2] ) - ray.O;
+	const float Ax = A[kx] - Sx * A[kz], Ay = A[ky] - Sy * A[kz];
+	const float Bx = B[kx] - Sx * B[kz], By = B[ky] - Sy * B[kz];
+	const float Cx = C[kx] - Sx * C[kz], Cy = C[ky] - Sy * C[kz];
+	const float U = Cx * By - Cy * Bx, V = Ax * Cy - Ay * Cx, W = Bx * Ay - By * Ax;
+	if ((U < 0 || V < 0 || W < 0) && (U > 0 || V > 0 || W > 0)) return false;
+	const float det = U + V + W;
+	if (det == 0) return false;
+	const float Az = Sz * A[kz], Bz = Sz * B[kz], Cz = Sz * C[kz];
+	const float T = U * Az + V * Bz + W * Cz;
+	const float invDet = 1.0f / det, t = T * invDet;
+	if (t > ray.hit.t) return false;
+#else
 	// Moeller-Trumbore ray/triangle intersection algorithm
 	const bvhvec4 v0_ = verts[i0];
 	const bvhvec3 v0 = v0_, e1 = verts[i1] - v0_, e2 = verts[i2] - v0_;
 	MOLLER_TRUMBORE_TEST( ray.hit.t, return false );
+#endif
 	return true;
 }
 
