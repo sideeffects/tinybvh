@@ -69,7 +69,7 @@ using BVHT = tinybvh::BVH;
 int main()
 {
 	FILE* obj = fopen( "dragon.obj", "r" );
-	if (!obj) return;
+	if (!obj) return 0;
 	std::vector<tinybvh::bvhvec4> bvhv;
 	std::vector<unsigned int> bvhi;
 	char line[1024];
@@ -120,6 +120,7 @@ int main()
 		fputc( 0, ppm );
 	}
 	fclose( ppm );
+	return 0;
 }
 
 #endif
