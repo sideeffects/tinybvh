@@ -95,7 +95,7 @@ if (NOT MSVC)
 	if (NOT APPLE AND NOT EMSCRIPTEN)
 		set(tiny_bvh_speedtest_cxx_flags ${tiny_bvh_speedtest_cxx_flags})
 		set(tiny_bvh_speedtest_link_flags ${tiny_bvh_speedtest_link_flags})
-		target_link_libraries(tiny_bvh_speedtest ${CMAKE_CURRENT_LIST_DIR}/external/OpenCL/lib/OpenCL.lib;/external/embree/lib/embree4.lib;/external/embree/lib/tbb12.lib)
+		target_link_libraries(tiny_bvh_speedtest ${CMAKE_CURRENT_LIST_DIR}/external/OpenCL/lib/OpenCL.lib;external/embree/lib/embree4.lib;external/embree/lib/tbb12.lib)
 	elseif (EMSCRIPTEN)
 		# Embed Sponza into the wasm to load it (in theory there are other methods, but this is the simplest)
 		# See https://emscripten.org/docs/porting/files/packaging_files.html#modifying-file-locations-in-the-virtual-file-system
