@@ -838,6 +838,8 @@ public:
 	bool ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim, const uint32_t splitAxis );
 	void SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, const bvhvec3& minDim, const uint32_t splitAxis, const float splitPos, bool& leftOK, bool& rightOK );
 protected:
+	template <bool posX, bool posY, bool posZ> int32_t Intersect( Ray& ray ) const;
+	template <bool posX, bool posY, bool posZ> bool IsOccluded( const Ray& ray ) const;
 	void BuildDefault( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildDefault( const bvhvec4slice& vertices );
 	void BuildDefault( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
@@ -2533,9 +2535,23 @@ int32_t BVH::Intersect( Ray& ray ) const
 {
 	VALIDATE_RAY( ray );
 	if (isTLAS()) return IntersectTLAS( ray );
+	const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
+	if (!posX) goto negx;
+	if (posY) { if (posZ) return Intersect<true, true, true>( ray ); else return Intersect<true, true, false>( ray ); }
+	if (posZ) return Intersect<true, false, true>( ray ); else return Intersect<true, false, false>( ray );
+negx:
+	if (posY) { if (posZ) return Intersect<false, true, true>( ray ); else return Intersect<false, true, false>( ray ); }
+	if (posZ) return Intersect<false, false, true>( ray ); else return Intersect<false, false, false>( ray );
+}
+
+template <bool posX, bool posY, bool posZ> int32_t BVH::Intersect( Ray& ray ) const
+{
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
 	float cost = 0;
+	const float rox = ray.O.x * ray.rD.x;
+	const float roy = ray.O.y * ray.rD.y;
+	const float roz = ray.O.z * ray.rD.z;
 	while (1)
 	{
 		cost += c_trav;
@@ -2570,9 +2586,26 @@ int32_t BVH::Intersect( Ray& ray ) const
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
-		BVHNode* child1 = &bvhNode[node->leftFirst];
-		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
-		float dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		BVHNode* child1 = &bvhNode[node->leftFirst], * child2 = &bvhNode[node->leftFirst + 1];
+		float dist1 = BVH_FAR, dist2 = BVH_FAR;
+		float tx1a = (posX ? child1->aabbMin.x : child1->aabbMax.x) * ray.rD.x - rox; // expect fma.
+		float tx2a = (posX ? child1->aabbMax.x : child1->aabbMin.x) * ray.rD.x - rox;
+		float ty1a = (posY ? child1->aabbMin.y : child1->aabbMax.y) * ray.rD.y - roy;
+		float ty2a = (posY ? child1->aabbMax.y : child1->aabbMin.y) * ray.rD.y - roy;
+		float tz1a = (posZ ? child1->aabbMin.z : child1->aabbMax.z) * ray.rD.z - roz;
+		float tz2a = (posZ ? child1->aabbMax.z : child1->aabbMin.z) * ray.rD.z - roz;
+		float tx1b = (posX ? child2->aabbMin.x : child2->aabbMax.x) * ray.rD.x - rox;
+		float tx2b = (posX ? child2->aabbMax.x : child2->aabbMin.x) * ray.rD.x - rox;
+		float ty1b = (posY ? child2->aabbMin.y : child2->aabbMax.y) * ray.rD.y - roy;
+		float ty2b = (posY ? child2->aabbMax.y : child2->aabbMin.y) * ray.rD.y - roy;
+		float tz1b = (posZ ? child2->aabbMin.z : child2->aabbMax.z) * ray.rD.z - roz;
+		float tz2b = (posZ ? child2->aabbMax.z : child2->aabbMin.z) * ray.rD.z - roz;
+		float tmina = tinybvh_max( tinybvh_max( tx1a, ty1a ), tinybvh_max( tz1a, 0.0f ) );
+		float tmaxa = tinybvh_min( tinybvh_min( tx2a, ty2a ), tinybvh_min( tz2a, ray.hit.t ) );
+		float tminb = tinybvh_max( tinybvh_max( tx1b, ty1b ), tinybvh_max( tz1b, 0.0f ) );
+		float tmaxb = tinybvh_min( tinybvh_min( tx2b, ty2b ), tinybvh_min( tz2b, ray.hit.t ) );
+		if (tmaxa >= tmina) dist1 = tmina;
+		if (tmaxb >= tminb) dist2 = tminb;
 		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
 		if (dist1 == BVH_FAR /* missed both child nodes */)
 		{
@@ -2661,9 +2694,24 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 
 bool BVH::IsOccluded( const Ray& ray ) const
 {
+	VALIDATE_RAY( ray );
+	const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
+	if (!posX) goto negx;
+	if (posY) { if (posZ) return IsOccluded<true, true, true>( ray ); else return IsOccluded<true, true, false>( ray ); }
+	if (posZ) return IsOccluded<true, false, true>( ray ); else return IsOccluded<true, false, false>( ray );
+negx:
+	if (posY) { if (posZ) return IsOccluded<false, true, true>( ray ); else return IsOccluded<false, true, false>( ray ); }
+	if (posZ) return IsOccluded<false, false, true>( ray ); else return IsOccluded<false, false, false>( ray );
+}
+
+template <bool posX, bool posY, bool posZ> bool BVH::IsOccluded( const Ray& ray ) const
+{
 	if (isTLAS()) return IsOccludedTLAS( ray );
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
+	const float rox = ray.O.x * ray.rD.x;
+	const float roy = ray.O.y * ray.rD.y;
+	const float roz = ray.O.z * ray.rD.z;
 	while (1)
 	{
 		if (node->isLeaf())
@@ -2689,7 +2737,25 @@ bool BVH::IsOccluded( const Ray& ray ) const
 		}
 		BVHNode* child1 = &bvhNode[node->leftFirst];
 		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
-		float dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		float dist1 = BVH_FAR, dist2 = BVH_FAR;
+		float tx1a = (posX ? child1->aabbMin.x : child1->aabbMax.x) * ray.rD.x - rox; // expect fma.
+		float tx2a = (posX ? child1->aabbMax.x : child1->aabbMin.x) * ray.rD.x - rox;
+		float ty1a = (posY ? child1->aabbMin.y : child1->aabbMax.y) * ray.rD.y - roy;
+		float ty2a = (posY ? child1->aabbMax.y : child1->aabbMin.y) * ray.rD.y - roy;
+		float tz1a = (posZ ? child1->aabbMin.z : child1->aabbMax.z) * ray.rD.z - roz;
+		float tz2a = (posZ ? child1->aabbMax.z : child1->aabbMin.z) * ray.rD.z - roz;
+		float tx1b = (posX ? child2->aabbMin.x : child2->aabbMax.x) * ray.rD.x - rox;
+		float tx2b = (posX ? child2->aabbMax.x : child2->aabbMin.x) * ray.rD.x - rox;
+		float ty1b = (posY ? child2->aabbMin.y : child2->aabbMax.y) * ray.rD.y - roy;
+		float ty2b = (posY ? child2->aabbMax.y : child2->aabbMin.y) * ray.rD.y - roy;
+		float tz1b = (posZ ? child2->aabbMin.z : child2->aabbMax.z) * ray.rD.z - roz;
+		float tz2b = (posZ ? child2->aabbMax.z : child2->aabbMin.z) * ray.rD.z - roz;
+		float tmina = tinybvh_max( tinybvh_max( tx1a, ty1a ), tinybvh_max( tz1a, 0.0f ) );
+		float tmaxa = tinybvh_min( tinybvh_min( tx2a, ty2a ), tinybvh_min( tz2a, ray.hit.t ) );
+		float tminb = tinybvh_max( tinybvh_max( tx1b, ty1b ), tinybvh_max( tz1b, 0.0f ) );
+		float tmaxb = tinybvh_min( tinybvh_min( tx2b, ty2b ), tinybvh_min( tz2b, ray.hit.t ) );
+		if (tmaxa >= tmina) dist1 = tmina;
+		if (tmaxb >= tminb) dist2 = tminb;
 		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
 		if (dist1 == BVH_FAR /* missed both child nodes */)
 		{
