@@ -88,7 +88,7 @@ THE SOFTWARE.
 // Library version:
 #define TINY_BVH_VERSION_MAJOR	1
 #define TINY_BVH_VERSION_MINOR	5
-#define TINY_BVH_VERSION_SUB	0
+#define TINY_BVH_VERSION_SUB	1
 
 // Run-time checks; disabled by default.
 // #define PARANOID // checks out-of-bound access of slices
@@ -125,6 +125,9 @@ THE SOFTWARE.
 
 // SBVH: "Unsplitting"
 #define SBVH_UNSPLITTING
+
+// Triangle intersection: "Watertight"
+#define WATERTIGHT_TRITEST
 
 // 'Infinity' values
 #define BVH_FAR	1e30f		// actual valid ieee range: 3.40282347E+38
@@ -403,7 +406,7 @@ inline float tinybvh_clamp( const float x, const float a, const float b ) { retu
 inline int32_t tinybvh_clamp( const int32_t x, const int32_t a, const int32_t b ) { return x > a ? (x < b ? x : b) : a; /* NaN safe */ }
 template <class T> inline static void tinybvh_swap( T& a, T& b ) { T t = a; a = b; b = t; }
 inline float tinybvh_half_area( const bvhvec3& v ) { return v.x < -BVH_FAR ? 0 : (v.x * v.y + v.y * v.z + v.z * v.x); } // for SAH calculations
-inline uint32_t tinybvh_maxdim( const bvhvec3& v ) { uint32_t r = fabs( v.x ) > fabs( v.y ) ? 0 : 1; if (fabs( v.z ) > fabs( v[r] )) r = 2; return r; }
+inline uint32_t tinybvh_maxdim( const bvhvec3& v ) { uint32_t r = fabs( v.x ) > fabs( v.y ) ? 0 : 1; return fabs( v.z ) > fabs( v[r] ) ? 2 : r; }
 
 // Operator overloads.
 // Only a minimal set is provided.
@@ -742,7 +745,6 @@ protected:
 	~BVHBase() {}
 	__FORCEINLINE void IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const;
 	__FORCEINLINE bool TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const;
-	static float IntersectAABB( const Ray& ray, const bvhvec3& aabbMin, const bvhvec3& aabbMax );
 	static void PrecomputeTriangle( const bvhvec4slice& vert, const uint32_t ti0, const uint32_t ti1, const uint32_t ti2, float* T );
 	static float SA( const bvhvec3& aabbMin, const bvhvec3& aabbMax );
 };
@@ -770,7 +772,6 @@ public:
 		bvhvec3 aabbMin; uint32_t leftFirst; // 16 bytes
 		bvhvec3 aabbMax; uint32_t triCount;	// 16 bytes, total: 32 bytes
 		bool isLeaf() const { return triCount > 0; /* empty BVH leaves do not exist */ }
-		float Intersect( const Ray& ray ) const { return BVH::IntersectAABB( ray, aabbMin, aabbMax ); }
 		bool Intersect( const bvhvec3& bmin, const bvhvec3& bmax ) const;
 		float SurfaceArea() const { return BVH::SA( aabbMin, aabbMax ); }
 	};
@@ -802,12 +803,11 @@ public:
 	void BuildHQ( const bvhvec4slice& vertices );
 	void BuildHQ( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildHQ( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-#ifdef BVH_USEAVX
 	void BuildAVX( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildAVX( const bvhvec4slice& vertices );
 	void BuildAVX( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
 	void BuildAVX( const bvhvec4slice& vertices, const uint32_t* indices, const uint32_t primCount );
-#elif defined BVH_USENEON
+#ifdef BVH_USENEON
 	void BuildNEON( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildNEON( const bvhvec4slice& vertices );
 	void BuildNEON( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
@@ -835,6 +835,10 @@ public:
 	bool ClipFrag( const Fragment& orig, Fragment& newFrag, bvhvec3 bmin, bvhvec3 bmax, bvhvec3 minDim, const uint32_t splitAxis );
 	void SplitFrag( const Fragment& orig, Fragment& left, Fragment& right, const bvhvec3& minDim, const uint32_t splitAxis, const float splitPos, bool& leftOK, bool& rightOK );
 protected:
+	template <bool posX, bool posY, bool posZ> int32_t Intersect( Ray& ray ) const;
+	template <bool posX, bool posY, bool posZ> int32_t IntersectTLAS( Ray& ray ) const;
+	template <bool posX, bool posY, bool posZ> bool IsOccluded( const Ray& ray ) const;
+	template <bool posX, bool posY, bool posZ> bool IsOccludedTLAS( const Ray& ray ) const;
 	void BuildDefault( const bvhvec4* vertices, const uint32_t primCount );
 	void BuildDefault( const bvhvec4slice& vertices );
 	void BuildDefault( const bvhvec4* vertices, const uint32_t* indices, const uint32_t primCount );
@@ -1357,6 +1361,7 @@ static constexpr bool customEnabled = false;
 #endif
 
 namespace tinybvh {
+
 #if defined BVH_USESSE || defined BVH_USENEON
 inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob/master/lzcnt.c
 {
@@ -1380,7 +1385,6 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 #define BVH_NUM_ELEMS(a) (sizeof(a)/sizeof 0[a])
 
 // error handling
-#define BVH_FATAL_ERROR(s) FATAL_ERROR_IF(1,s)
 #ifdef _WINDOWS_ // windows.h has been included
 #define BVH_FATAL_ERROR_IF(c,s) if (c) { char t[512]; sprintf( t, \
 	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); \
@@ -1389,6 +1393,28 @@ inline uint32_t __bfind( uint32_t x ) // https://github.com/mackron/refcode/blob
 #define BVH_FATAL_ERROR_IF(c,s) if (c) { fprintf( stderr, \
 	"Fatal error in tiny_bvh.h, line %i:\n%s\n", __LINE__, s ); exit( 1 ); }
 #endif
+#define BVH_FATAL_ERROR(s) BVH_FATAL_ERROR_IF(1,s)
+
+// Fallbacks to be used in the absence of HW SIMD support.
+#ifndef BVH_USESSE
+int32_t BVH4_CPU::Intersect( Ray& ray ) const { BVH_FATAL_ERROR( "BVH4_CPU::Intersect requires SSE. " ); }
+bool BVH4_CPU::IsOccluded( const Ray& ray ) const { BVH_FATAL_ERROR( "BVH4_CPU::IsOccluded requires SSE. " ); }
+#endif
+#if !defined BVH_USEAVX
+void BVH::BuildAVX( const bvhvec4*, const uint32_t ) { BVH_FATAL_ERROR( "BVH::BuildAVX requires AVX." ); }
+void BVH::BuildAVX( const bvhvec4slice& ) { BVH_FATAL_ERROR( "BVH::BuildAVX requires AVX." ); }
+void BVH::BuildAVX( const bvhvec4*, const uint32_t*, const uint32_t ) { BVH_FATAL_ERROR( "BVH::BuildAVX requires AVX." ); }
+void BVH::BuildAVX( const bvhvec4slice&, const uint32_t*, const uint32_t ) { BVH_FATAL_ERROR( "BVH::BuildAVX requires AVX." ); }
+int32_t BVH8_CWBVH::Intersect( Ray& ) const { BVH_FATAL_ERROR( "BVH8_CWBVH::Intersect requires AVX." ); }
+#endif // BVH_USEAVX
+#if !defined BVH_USEAVX2
+int32_t BVH8_CPU::Intersect( Ray& ) const { BVH_FATAL_ERROR( "BVH8_CPU::Intersect requires AVX2 and FMA." ); }
+bool BVH8_CPU::IsOccluded( const Ray& ) const { BVH_FATAL_ERROR( "BVH8_CPU::IsOccluded requires AVX2 and FMA." ); }
+#endif // BVH_USEAVX2
+#if !defined BVH_USEAVX && !defined BVH_USENEON
+int32_t BVH_SoA::Intersect( Ray& ) const { BVH_FATAL_ERROR( "BVH_SoA::Intersect requires AVX or NEON." ); }
+bool BVH_SoA::IsOccluded( const Ray& ) const { BVH_FATAL_ERROR( "BVH_SoA::IsOccluded requires AVX or NEON." ); }
+#endif // !(BVH_USEAVX && BVH_USENEON)
 
 // code compaction: Moeller-Trumbore ray/tri test.
 #define MOLLER_TRUMBORE_TEST( tmax, exit ) \
@@ -2529,10 +2555,56 @@ bool BVH::IntersectSphere( const bvhvec3& pos, const float r ) const
 int32_t BVH::Intersect( Ray& ray ) const
 {
 	VALIDATE_RAY( ray );
-	if (isTLAS()) return IntersectTLAS( ray );
+	if (!isTLAS())
+	{
+		const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
+		if (!posX) goto negx1;
+		if (posY) { if (posZ) return Intersect<true, true, true>( ray ); else return Intersect<true, true, false>( ray ); }
+		if (posZ) return Intersect<true, false, true>( ray ); else return Intersect<true, false, false>( ray );
+	negx1:
+		if (posY) { if (posZ) return Intersect<false, true, true>( ray ); else return Intersect<false, true, false>( ray ); }
+		if (posZ) return Intersect<false, false, true>( ray ); else return Intersect<false, false, false>( ray );
+	}
+	else
+	{
+		const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
+		if (!posX) goto negx2;
+		if (posY) { if (posZ) return IntersectTLAS<true, true, true>( ray ); else return IntersectTLAS<true, true, false>( ray ); }
+		if (posZ) return IntersectTLAS<true, false, true>( ray ); else return IntersectTLAS<true, false, false>( ray );
+	negx2:
+		if (posY) { if (posZ) return IntersectTLAS<false, true, true>( ray ); else return IntersectTLAS<false, true, false>( ray ); }
+		if (posZ) return IntersectTLAS<false, false, true>( ray ); else return IntersectTLAS<false, false, false>( ray );
+	}
+}
+
+#define SLAB_TEST_TWO_NODES \
+	float tx1a = (posX ? child1->aabbMin.x : child1->aabbMax.x) * ray.rD.x - rox; /* expect fma. */ \
+	float ty1a = (posY ? child1->aabbMin.y : child1->aabbMax.y) * ray.rD.y - roy; \
+	float tz1a = (posZ ? child1->aabbMin.z : child1->aabbMax.z) * ray.rD.z - roz; \
+	float tx1b = (posX ? child2->aabbMin.x : child2->aabbMax.x) * ray.rD.x - rox; \
+	float ty1b = (posY ? child2->aabbMin.y : child2->aabbMax.y) * ray.rD.y - roy; \
+	float tz1b = (posZ ? child2->aabbMin.z : child2->aabbMax.z) * ray.rD.z - roz; \
+	float tx2a = (posX ? child1->aabbMax.x : child1->aabbMin.x) * ray.rD.x - rox; \
+	float ty2a = (posY ? child1->aabbMax.y : child1->aabbMin.y) * ray.rD.y - roy; \
+	float tz2a = (posZ ? child1->aabbMax.z : child1->aabbMin.z) * ray.rD.z - roz; \
+	float tx2b = (posX ? child2->aabbMax.x : child2->aabbMin.x) * ray.rD.x - rox; \
+	float ty2b = (posY ? child2->aabbMax.y : child2->aabbMin.y) * ray.rD.y - roy; \
+	float tz2b = (posZ ? child2->aabbMax.z : child2->aabbMin.z) * ray.rD.z - roz; \
+	float tmina = tinybvh_max( tinybvh_max( tx1a, ty1a ), tinybvh_max( tz1a, 0.0f ) ); \
+	float tminb = tinybvh_max( tinybvh_max( tx1b, ty1b ), tinybvh_max( tz1b, 0.0f ) ); \
+	float tmaxa = tinybvh_min( tinybvh_min( tx2a, ty2a ), tinybvh_min( tz2a, ray.hit.t ) ); \
+	float tmaxb = tinybvh_min( tinybvh_min( tx2b, ty2b ), tinybvh_min( tz2b, ray.hit.t ) ); \
+	if (tmaxa >= tmina) dist1 = tmina; \
+	if (tmaxb >= tminb) dist2 = tminb;
+
+template <bool posX, bool posY, bool posZ> int32_t BVH::Intersect( Ray& ray ) const
+{
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
 	float cost = 0;
+	const float rox = ray.O.x * ray.rD.x;
+	const float roy = ray.O.y * ray.rD.y;
+	const float roz = ray.O.z * ray.rD.z;
 	while (1)
 	{
 		cost += c_trav;
@@ -2567,9 +2639,9 @@ int32_t BVH::Intersect( Ray& ray ) const
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
-		BVHNode* child1 = &bvhNode[node->leftFirst];
-		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
-		float dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		BVHNode* child1 = &bvhNode[node->leftFirst], * child2 = &bvhNode[node->leftFirst + 1];
+		float dist1 = BVH_FAR, dist2 = BVH_FAR;
+		SLAB_TEST_TWO_NODES;
 		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
 		if (dist1 == BVH_FAR /* missed both child nodes */)
 		{
@@ -2584,11 +2656,14 @@ int32_t BVH::Intersect( Ray& ray ) const
 	return (int32_t)cost; // cast to not break interface.
 }
 
-int32_t BVH::IntersectTLAS( Ray& ray ) const
+template <bool posX, bool posY, bool posZ> int32_t BVH::IntersectTLAS( Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
 	float cost = 0;
+	const float rox = ray.O.x * ray.rD.x;
+	const float roy = ray.O.y * ray.rD.y;
+	const float roz = ray.O.z * ray.rD.z;
 	while (1)
 	{
 		cost += c_trav;
@@ -2639,9 +2714,9 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
-		BVHNode* child1 = &bvhNode[node->leftFirst];
-		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
-		float dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		BVHNode* child1 = &bvhNode[node->leftFirst], * child2 = &bvhNode[node->leftFirst + 1];
+		float dist1 = BVH_FAR, dist2 = BVH_FAR;
+		SLAB_TEST_TWO_NODES;
 		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
 		if (dist1 == BVH_FAR /* missed both child nodes */)
 		{
@@ -2658,9 +2733,36 @@ int32_t BVH::IntersectTLAS( Ray& ray ) const
 
 bool BVH::IsOccluded( const Ray& ray ) const
 {
-	if (isTLAS()) return IsOccludedTLAS( ray );
+	VALIDATE_RAY( ray );
+	if (!isTLAS())
+	{
+		const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
+		if (!posX) goto negx1;
+		if (posY) { if (posZ) return IsOccluded<true, true, true>( ray ); else return IsOccluded<true, true, false>( ray ); }
+		if (posZ) return IsOccluded<true, false, true>( ray ); else return IsOccluded<true, false, false>( ray );
+	negx1:
+		if (posY) { if (posZ) return IsOccluded<false, true, true>( ray ); else return IsOccluded<false, true, false>( ray ); }
+		if (posZ) return IsOccluded<false, false, true>( ray ); else return IsOccluded<false, false, false>( ray );
+	}
+	else
+	{
+		const bool posX = ray.D.x >= 0, posY = ray.D.y >= 0, posZ = ray.D.z >= 0;
+		if (!posX) goto negx2;
+		if (posY) { if (posZ) return IsOccludedTLAS<true, true, true>( ray ); else return IsOccludedTLAS<true, true, false>( ray ); }
+		if (posZ) return IsOccludedTLAS<true, false, true>( ray ); else return IsOccludedTLAS<true, false, false>( ray );
+	negx2:
+		if (posY) { if (posZ) return IsOccludedTLAS<false, true, true>( ray ); else return IsOccludedTLAS<false, true, false>( ray ); }
+		if (posZ) return IsOccludedTLAS<false, false, true>( ray ); else return IsOccludedTLAS<false, false, false>( ray );
+	}
+}
+
+template <bool posX, bool posY, bool posZ> bool BVH::IsOccluded( const Ray& ray ) const
+{
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
+	const float rox = ray.O.x * ray.rD.x;
+	const float roy = ray.O.y * ray.rD.y;
+	const float roz = ray.O.z * ray.rD.z;
 	while (1)
 	{
 		if (node->isLeaf())
@@ -2686,7 +2788,8 @@ bool BVH::IsOccluded( const Ray& ray ) const
 		}
 		BVHNode* child1 = &bvhNode[node->leftFirst];
 		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
-		float dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		float dist1 = BVH_FAR, dist2 = BVH_FAR;
+		SLAB_TEST_TWO_NODES;
 		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
 		if (dist1 == BVH_FAR /* missed both child nodes */)
 		{
@@ -2701,11 +2804,14 @@ bool BVH::IsOccluded( const Ray& ray ) const
 	return false;
 }
 
-bool BVH::IsOccludedTLAS( const Ray& ray ) const
+template <bool posX, bool posY, bool posZ> bool BVH::IsOccludedTLAS( const Ray& ray ) const
 {
 	BVHNode* node = &bvhNode[0], * stack[64];
 	uint32_t stackPtr = 0;
 	Ray tmp;
+	const float rox = ray.O.x * ray.rD.x;
+	const float roy = ray.O.y * ray.rD.y;
+	const float roz = ray.O.z * ray.rD.z;
 	while (1)
 	{
 		if (node->isLeaf())
@@ -2746,9 +2852,9 @@ bool BVH::IsOccludedTLAS( const Ray& ray ) const
 			if (stackPtr == 0) break; else node = stack[--stackPtr];
 			continue;
 		}
-		BVHNode* child1 = &bvhNode[node->leftFirst];
-		BVHNode* child2 = &bvhNode[node->leftFirst + 1];
-		float dist1 = child1->Intersect( ray ), dist2 = child2->Intersect( ray );
+		BVHNode* child1 = &bvhNode[node->leftFirst], * child2 = &bvhNode[node->leftFirst + 1];
+		float dist1 = BVH_FAR, dist2 = BVH_FAR;
+		SLAB_TEST_TWO_NODES;
 		if (dist1 > dist2) { tinybvh_swap( dist1, dist2 ); tinybvh_swap( child1, child2 ); }
 		if (dist1 == BVH_FAR /* missed both child nodes */)
 		{
@@ -5214,7 +5320,7 @@ template <bool posX, bool posY, bool posZ> bool BVH4_CPU::IsOccluded( const Ray&
 	}
 }
 
-#endif
+#endif // BVH_USESSE
 
 #ifdef BVH_USEAVX
 
@@ -7363,10 +7469,34 @@ float BVHBase::SA( const bvhvec3& aabbMin, const bvhvec3& aabbMax )
 // IntersectTri
 void BVHBase::IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const
 {
-	// Moeller-Trumbore ray/triangle intersection algorithm
+#ifdef WATERTIGHT_TRITEST
+	// Woop et al.'s Watertight intersection algorithm.
+	// PART 1 - Precalculations
+	uint32_t kz = tinybvh_maxdim( ray.D ), kx = (1 << kz) & 3, ky = (1 << kx) & 3;
+	if (ray.D[kz] < 0) std::swap( kx, ky );
+	const float Sz = ray.rD[kz], Sx = ray.D[kx] * Sz, Sy = ray.D[ky] * Sz;
+	// PART 2 - Intersection
+	const bvhvec3 A = bvhvec3( verts[i0] ) - ray.O;
+	const bvhvec3 B = bvhvec3( verts[i1] ) - ray.O;
+	const bvhvec3 C = bvhvec3( verts[i2] ) - ray.O;
+	const float Ax = A[kx] - Sx * A[kz], Ay = A[ky] - Sy * A[kz];
+	const float Bx = B[kx] - Sx * B[kz], By = B[ky] - Sy * B[kz];
+	const float Cx = C[kx] - Sx * C[kz], Cy = C[ky] - Sy * C[kz];
+	const float U = Cx * By - Cy * Bx, V = Ax * Cy - Ay * Cx, W = Bx * Ay - By * Ax;
+	if ((U < 0 || V < 0 || W < 0) && (U > 0 || V > 0 || W > 0)) return;
+	const float det = U + V + W;
+	if (det == 0) return;
+	const float Az = Sz * A[kz], Bz = Sz * B[kz], Cz = Sz * C[kz];
+	const float T = U * Az + V * Bz + W * Cz;
+	const float invDet = 1.0f / det, t = T * invDet;
+	if (t >= ray.hit.t) return;
+	const float u = U * invDet, v = V * invDet;
+#else
+	// Moeller-Trumbore ray/triangle intersection algorithm.
 	const bvhvec4 v0_ = verts[i0];
 	const bvhvec3 v0 = v0_, e1 = verts[i1] - v0_, e2 = verts[i2] - v0_;
 	MOLLER_TRUMBORE_TEST( ray.hit.t, return );
+#endif
 	// register a hit: ray is shortened to t
 	ray.hit.t = t, ray.hit.u = u, ray.hit.v = v;
 #if INST_IDX_BITS == 32
@@ -7379,26 +7509,34 @@ void BVHBase::IntersectTri( Ray& ray, const uint32_t idx, const bvhvec4slice& ve
 // TriOccludes
 bool BVHBase::TriOccludes( const Ray& ray, const bvhvec4slice& verts, const uint32_t i0, const uint32_t i1, const uint32_t i2 ) const
 {
+#ifdef WATERTIGHT_TRITEST
+	// Woop et al.'s Watertight intersection algorithm.
+	// PART 1 - Precalculations
+	uint32_t kz = tinybvh_maxdim( ray.D ), kx = (1 << kz) & 3, ky = (1 << kx) & 3;
+	if (ray.D[kz] < 0) std::swap( kx, ky );
+	const float Sz = ray.rD[kz], Sx = ray.D[kx] * Sz, Sy = ray.D[ky] * Sz;
+	// PART 2 - Intersection
+	const bvhvec3 A = bvhvec3( verts[i0] ) - ray.O;
+	const bvhvec3 B = bvhvec3( verts[i1] ) - ray.O;
+	const bvhvec3 C = bvhvec3( verts[i2] ) - ray.O;
+	const float Ax = A[kx] - Sx * A[kz], Ay = A[ky] - Sy * A[kz];
+	const float Bx = B[kx] - Sx * B[kz], By = B[ky] - Sy * B[kz];
+	const float Cx = C[kx] - Sx * C[kz], Cy = C[ky] - Sy * C[kz];
+	const float U = Cx * By - Cy * Bx, V = Ax * Cy - Ay * Cx, W = Bx * Ay - By * Ax;
+	if ((U < 0 || V < 0 || W < 0) && (U > 0 || V > 0 || W > 0)) return false;
+	const float det = U + V + W;
+	if (det == 0) return false;
+	const float Az = Sz * A[kz], Bz = Sz * B[kz], Cz = Sz * C[kz];
+	const float T = U * Az + V * Bz + W * Cz;
+	const float invDet = 1.0f / det, t = T * invDet;
+	if (t < 0 || t > ray.hit.t) return false;
+#else
 	// Moeller-Trumbore ray/triangle intersection algorithm
 	const bvhvec4 v0_ = verts[i0];
 	const bvhvec3 v0 = v0_, e1 = verts[i1] - v0_, e2 = verts[i2] - v0_;
 	MOLLER_TRUMBORE_TEST( ray.hit.t, return false );
+#endif
 	return true;
-}
-
-// IntersectAABB
-float BVHBase::IntersectAABB( const Ray& ray, const bvhvec3& aabbMin, const bvhvec3& aabbMax )
-{
-	// "slab test" ray/AABB intersection
-	float tx1 = (aabbMin.x - ray.O.x) * ray.rD.x, tx2 = (aabbMax.x - ray.O.x) * ray.rD.x;
-	float tmin = tinybvh_min( tx1, tx2 ), tmax = tinybvh_max( tx1, tx2 );
-	float ty1 = (aabbMin.y - ray.O.y) * ray.rD.y, ty2 = (aabbMax.y - ray.O.y) * ray.rD.y;
-	tmin = tinybvh_max( tmin, tinybvh_min( ty1, ty2 ) );
-	tmax = tinybvh_min( tmax, tinybvh_max( ty1, ty2 ) );
-	float tz1 = (aabbMin.z - ray.O.z) * ray.rD.z, tz2 = (aabbMax.z - ray.O.z) * ray.rD.z;
-	tmin = tinybvh_max( tmin, tinybvh_min( tz1, tz2 ) );
-	tmax = tinybvh_min( tmax, tinybvh_max( tz1, tz2 ) );
-	if (tmax >= tmin && tmin < ray.hit.t && tmax >= 0) return tmin; else return BVH_FAR;
 }
 
 // PrecomputeTriangle (helper), transforms a triangle to the format used in:
