@@ -5206,7 +5206,6 @@ template <bool posX, bool posY, bool posZ> int32_t BVH4_CPU::Intersect( Ray& ray
 			ray.hit.prim = leaf->primIdx[lane] + ray.instIdx;
 		#endif
 			t4 = _mm_set1_ps( t );
-		#if 1
 			// compress stack
 			uint32_t outStackPtr = 0;
 			for (int32_t i = 0; i < stackPtr; i += 4)
@@ -5223,7 +5222,6 @@ template <bool posX, bool posY, bool posZ> int32_t BVH4_CPU::Intersect( Ray& ray
 				outStackPtr += __popc( mask & validMask );
 			}
 			stackPtr = outStackPtr;
-		#endif
 		}
 		if (!stackPtr) break;
 		nodeIdx = nodeStack[--stackPtr];

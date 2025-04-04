@@ -2,8 +2,6 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "tiny_bvh.h"
 
-#ifndef _MSC_VER // testing code for watertight below.
-
 // Minimal example for tiny_bvh.h
 
 #include <cstdlib>
@@ -57,70 +55,3 @@ int main()
 	// all done.
 	return 0;
 }
-
-#else
-
-#include <float.h>
-#include <math.h>
-#include <stdio.h>
-#include <vector>
-using BVHT = tinybvh::BVH;
-
-int main()
-{
-	FILE* obj = fopen( "dragon.obj", "r" );
-	if (!obj) return 0;
-	std::vector<tinybvh::bvhvec4> bvhv;
-	std::vector<unsigned int> bvhi;
-	char line[1024];
-	while (fgets( line, sizeof( line ), obj ))
-	{
-		if (line[0] == 'v')
-		{
-			float x, y, z;
-			sscanf( line + 1, "%f %f %f", &x, &y, &z );
-			bvhv.push_back( { x, y, z, 0.f } );
-		}
-		else if (line[0] == 'f')
-		{
-			int a, b, c;
-			sscanf( line + 1, "%d %d %d", &a, &b, &c );
-			bvhi.push_back( a - 1 );
-			bvhi.push_back( b - 1 );
-			bvhi.push_back( c - 1 );
-		}
-	}
-	printf( "Loaded obj: %d vertices, %d triangles\n", int( bvhv.size() ), int( bvhi.size() / 3 ) );
-	BVHT bvh;
-	bvh.Build( bvhv.data(), bvhi.data(), (uint32_t)bvhi.size() / 3 );
-	float min[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
-	float max[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
-	for (size_t i = 0; i < bvhv.size(); ++i)
-		min[0] = fminf( min[0], bvhv[i].x ), min[1] = fminf( min[1], bvhv[i].y ),
-		min[2] = fminf( min[2], bvhv[i].z ), max[0] = fmaxf( max[0], bvhv[i].x ),
-		max[1] = fmaxf( max[1], bvhv[i].y ), max[2] = fmaxf( max[2], bvhv[i].z );
-	const int N = 1024;
-	const float bias = (max[1] - min[1]) * 1e-5f;
-	FILE* ppm = fopen( "_test.ppm", "wb" );
-	fprintf( ppm, "P6\n%d %d\n255\n", N, N );
-	for (int y = 0; y < N; ++y)	for (int x = 0; x < N; ++x)
-	{
-		tinybvh::bvhvec3 origin = 
-		{
-			min[0] + (float( x ) / float( N )) * (max[0] - min[0]), max[1] + bias,
-			min[2] + (float( y ) / float( N )) * (max[2] - min[2]),
-		};
-		tinybvh::bvhvec3 direction = { 0, -1, 0 };
-		tinybvh::Ray ray( origin, direction );
-		bvh.Intersect( ray );
-		float hit = ray.hit.t;
-		float dt = hit < BVH_FAR ? hit / (max[1] - min[0] + bias * 2) : 0.f;
-		fputc( (int)(dt * 255), ppm );
-		fputc( (hit < BVH_FAR) * 255, ppm );
-		fputc( 0, ppm );
-	}
-	fclose( ppm );
-	return 0;
-}
-
-#endif
