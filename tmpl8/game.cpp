@@ -15,15 +15,15 @@ using namespace tinyocl;
 void Game::Init()
 {
 	// create OpenCL kernels
-	init = new Kernel( "wavefront2.cl", "SetRenderData" );
-	clear = new Kernel( "wavefront2.cl", "Clear" );
-	rayGen = new Kernel( "wavefront2.cl", "Generate" );
-	extend = new Kernel( "wavefront2.cl", "Extend" );
-	shade = new Kernel( "wavefront2.cl", "Shade" );
-	updateCounters1 = new Kernel( "wavefront2.cl", "UpdateCounters1" );
-	updateCounters2 = new Kernel( "wavefront2.cl", "UpdateCounters2" );
-	traceShadows = new Kernel( "wavefront2.cl", "Connect" );
-	finalize = new Kernel( "wavefront2.cl", "FinalizeGL" );
+	init = new Kernel( "../kernels/wavefront2.cl", "SetRenderData" );
+	clear = new Kernel( "../kernels/wavefront2.cl", "Clear" );
+	rayGen = new Kernel( "../kernels/wavefront2.cl", "Generate" );
+	extend = new Kernel( "../kernels/wavefront2.cl", "Extend" );
+	shade = new Kernel( "../kernels/wavefront2.cl", "Shade" );
+	updateCounters1 = new Kernel( "../kernels/wavefront2.cl", "UpdateCounters1" );
+	updateCounters2 = new Kernel( "../kernels/wavefront2.cl", "UpdateCounters2" );
+	traceShadows = new Kernel( "../kernels/wavefront2.cl", "Connect" );
+	finalize = new Kernel( "../kernels/wavefront2.cl", "FinalizeGL" );
 	screen = 0; // this tells the template to not overwrite the render target.
 
 	// we need the 'compute unit' or 'SM' count for wavefront rendering; ask OpenCL for it.
@@ -41,7 +41,7 @@ void Game::Init()
 	noise->CopyToDevice();
 
 	// load dragon mesh
-	AddMesh( "./testdata/dragon.bin", 1, float3( 0 ) );
+	AddMesh( "../testdata/dragon.bin", 1, float3( 0 ) );
 	swap( verts, dragonVerts );
 	swap( triCount, dragonTriCount );
 	if (!dragon.Load( "dragon.bvh", dragonTriCount ))
@@ -71,8 +71,8 @@ void Game::Init()
 	}
 	// load vertex data for static scenery
 	AddQuad( float3( -22, 12, 2 ), 9, 5, 0x1ffffff ); // hard-coded light source
-	AddMesh( "./testdata/bistro_ext_part1.bin", 1, float3( 0 ) );
-	AddMesh( "./testdata/bistro_ext_part2.bin", 1, float3( 0 ) );
+	AddMesh( "../testdata/bistro_ext_part1.bin", 1, float3( 0 ) );
+	AddMesh( "../testdata/bistro_ext_part2.bin", 1, float3( 0 ) );
 
 	// build bvh (here: 'compressed wide bvh', for efficient GPU rendering)
 	if (!bistro.Load( "bistro.bvh", triCount ))
